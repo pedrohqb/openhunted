@@ -3,13 +3,12 @@
 
 use crate::bytes::u16_at;
 use crate::lists::asciiz;
-use crate::{FormatError, Result, find_chunk};
+use crate::{Cell, FormatError, LevelObject, Result, find_chunk, parse_body};
 
 const WHAT: &str = "fase LEV";
 const MAX_VERSION: u16 = 1006;
 
-/// Fase: cabeçalho do bloco `LEV:` (lido como em `0x0043124b`) e o corpo binário, ainda
-/// não decifrado (objetos e células da grade; ver `docs/formats/lev.md`).
+/// Fase: cabeçalho do bloco `LEV:` (lido como em `0x0043124b`), objetos e células.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Level {
@@ -31,9 +30,10 @@ pub struct Level {
     pub player: u16,
     /// Segundo valor extra das versões ≥ 1006; coincide com o segundo número do `p=`.
     pub extra: u16,
-    /// Corpo binário depois do bloco `LEV:`.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pub body: Vec<u8>,
+    /// Lista global de objetos.
+    pub objects: Vec<LevelObject>,
+    /// Células da grade, na ordem z, y, x (x varia mais rápido); `None` = célula vazia.
+    pub cells: Vec<Option<Cell>>,
 }
 
 impl Level {
@@ -84,7 +84,9 @@ impl Level {
         if version >= 1006 {
             (player, extra) = (r(pos)?, r(pos + 2)?);
         }
-        let body_start = 8 + d.len();
+        let body = data.get(8 + d.len()..).unwrap_or_default();
+        let ncells = grid_x as usize * grid_y as usize * grid_z as usize;
+        let (objects, cells) = parse_body(body, ncells)?;
         Ok(Level {
             name,
             palette,
@@ -98,7 +100,8 @@ impl Level {
             grid_z,
             player,
             extra,
-            body: data.get(body_start..).unwrap_or_default().to_vec(),
+            objects,
+            cells,
         })
     }
 }
@@ -160,7 +163,7 @@ mod tests {
 
     #[test]
     fn level_header_parses() {
-        let l = Level::parse(&mklev(b"\xf5\x03corpo")).unwrap();
+        let l = Level::parse(&mklev()).unwrap();
         assert_eq!(l.name, "T_J_001.LEV");
         assert_eq!(l.palette, "WORLD.PAL");
         assert_eq!(l.version, 1006);
@@ -168,12 +171,13 @@ mod tests {
         assert_eq!(l.notes, "notas");
         assert_eq!((l.grid_x, l.grid_y, l.grid_z), (2, 1, 1));
         assert_eq!((l.player, l.extra), (1, 36));
-        assert_eq!(l.body, b"\xf5\x03corpo");
+        assert!(l.objects.is_empty());
+        assert_eq!(l.cells, vec![None, None]);
     }
 
     #[test]
     fn newer_level_version_is_unsupported() {
-        let mut v = mklev(b"");
+        let mut v = mklev();
         let pos = 8 + "T_J_001.LEV\0WORLD.PAL\0".len();
         v[pos..pos + 2].copy_from_slice(&1007u16.to_le_bytes());
         assert!(matches!(
@@ -184,7 +188,7 @@ mod tests {
 
     #[test]
     fn truncated_level_never_panics() {
-        let v = mklev(b"");
+        let v = mklev();
         for n in 0..v.len() {
             assert!(Level::parse(&v[..n]).is_err());
         }

@@ -264,6 +264,15 @@ fn real_levels() {
     let t = Level::parse(&la.get("T_J_001.LEV").unwrap()).unwrap();
     assert_eq!((t.grid_x, t.grid_y, t.grid_z), (14, 1, 1));
     assert_eq!(t.palette, "WORLD.PAL");
+    assert_eq!(t.objects.len(), 13);
+    assert_eq!(t.objects.iter().filter(|o| o.kind == 102).count(), 7);
+    assert_eq!(t.cells.len(), 14);
+    assert!(t.cells.iter().all(Option::is_some));
+    let c0 = t.cells[0].as_ref().unwrap();
+    assert_eq!(
+        (c0.animation.as_str(), c0.border.as_str()),
+        ("WORLD1.ANM", "C1_07.BRD")
+    );
 }
 
 #[test]

@@ -344,8 +344,9 @@ pub fn mkhls(files: &[SynthFile<'_>]) -> Vec<u8> {
     map
 }
 
-/// Monta uma fase `.LEV` versão 1006 com grade 2×1×1 e o corpo dado.
-pub fn mklev(body: &[u8]) -> Vec<u8> {
+/// Monta uma fase `.LEV` versão 1006 com grade 2×1×1, sem objetos e com as duas células vazias.
+pub fn mklev() -> Vec<u8> {
+    let body = le16(&[1013, 0, 0, 0]);
     let mut lev = Vec::new();
     for s in ["T_J_001.LEV", "WORLD.PAL"] {
         lev.extend_from_slice(s.as_bytes());
@@ -358,6 +359,6 @@ pub fn mklev(body: &[u8]) -> Vec<u8> {
     }
     lev.extend(le16(&[0, 2, 1, 1, 1, 36]));
     let mut v = tagged(b"LEV:", &lev);
-    v.extend_from_slice(body);
+    v.extend_from_slice(&body);
     v
 }

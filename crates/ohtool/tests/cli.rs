@@ -292,7 +292,7 @@ fn levels_lists_missions_and_exports_json() {
     let cd = tempfile::tempdir().unwrap();
     synthetic_cd(cd.path());
     let eng = b"T_J_001.lev\r\np=1,36\r\nt=TUTORIAL: Teste\r\nd=Saia.\r\n".as_slice();
-    let lev = mklev(b"corpo");
+    let lev = mklev();
     std::fs::write(
         cd.path().join("Hunter/hunter.hls"),
         mkhls(&[("ENGLEVEL.TXT", eng), ("T_J_001.LEV", lev.as_slice())]),
