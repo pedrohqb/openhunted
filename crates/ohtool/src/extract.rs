@@ -3,7 +3,9 @@
 
 use std::path::Path;
 
-use openhunted_formats::{Animation, Bitmap, Border, Interface, Palette, ResourceArchive};
+use openhunted_formats::{
+    Animation, Bitmap, Border, Font, Frame, Interface, Palette, ResourceArchive,
+};
 
 /// Nome de arquivo seguro para um recurso: troca todo caractere fora de
 /// `[A-Za-z0-9._-]` e os pontos iniciais por `_`; nome vazio ou só com pontos vira `_`.
@@ -43,13 +45,19 @@ pub fn extract(
         }
         let data = ar.get(&e.name)?;
         let base = safe_file_name(&e.name);
-        if extension(&e.name) == "BMP" {
-            if palette.is_none() {
-                let raw = ar
-                    .get(palette_name)
-                    .map_err(|err| format!("paleta {palette_name}: {err}"))?;
-                palette = Some(Palette::parse(raw)?);
-            }
+        let ext = extension(&e.name);
+        if (ext == "BMP" || ext == "PFT") && palette.is_none() {
+            let raw = ar
+                .get(palette_name)
+                .map_err(|err| format!("paleta {palette_name}: {err}"))?;
+            palette = Some(Palette::parse(raw)?);
+        }
+        if ext == "PFT" {
+            let pal = palette.as_ref().ok_or("paleta indisponível")?;
+            let font = Font::parse(data).map_err(|err| err.in_resource(&e.name))?;
+            write_png(&out.join(format!("{base}.png")), &glyph_sheet(&font), pal)?;
+            written += 1;
+        } else if ext == "BMP" {
             let pal = palette.as_ref().ok_or("paleta indisponível")?;
             let bmp = Bitmap::parse(data).map_err(|err| err.in_resource(&e.name))?;
             for (i, f) in bmp.frames.iter().enumerate() {
@@ -86,6 +94,38 @@ pub fn structured_json(
     }
 }
 
+/// Folha de glifos: grade de 16 × 16 células (largura do maior glifo × altura da fonte),
+/// com o caractere `c` na linha `c / 16`, coluna `c % 16`.
+pub fn glyph_sheet(font: &Font) -> Frame {
+    let cw = font
+        .glyphs
+        .iter()
+        .flatten()
+        .map(|g| g.width)
+        .max()
+        .unwrap_or(1)
+        .max(1) as usize;
+    let ch = font.height.max(1) as usize;
+    let (w, h) = (16 * cw, 16 * ch);
+    let mut pixels = vec![0u8; w * h];
+    for (c, g) in font.glyphs.iter().enumerate() {
+        let Some(g) = g else { continue };
+        let (ox, oy) = ((c % 16) * cw, (c / 16) * ch);
+        let gw = g.width as usize;
+        for (i, &p) in g.pixels.iter().enumerate() {
+            let (x, y) = (i % gw.max(1), i / gw.max(1));
+            if y < ch {
+                pixels[(oy + y) * w + ox + x] = p;
+            }
+        }
+    }
+    Frame {
+        width: w as u16,
+        height: h as u16,
+        pixels,
+    }
+}
+
 /// Extensão em maiúsculas.
 pub fn extension(name: &str) -> String {
     name.rsplit_once('.')
@@ -98,11 +138,7 @@ pub fn matches_type(name: &str, filter: Option<&str>) -> bool {
     filter.is_none_or(|t| extension(name) == t.trim_start_matches('.').to_uppercase())
 }
 
-fn write_png(
-    path: &Path,
-    frame: &openhunted_formats::Frame,
-    pal: &Palette,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn write_png(path: &Path, frame: &Frame, pal: &Palette) -> Result<(), Box<dyn std::error::Error>> {
     let file = std::io::BufWriter::new(std::fs::File::create(path)?);
     let mut enc = png::Encoder::new(file, u32::from(frame.width), u32::from(frame.height));
     enc.set_color(png::ColorType::Indexed);

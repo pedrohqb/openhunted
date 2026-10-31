@@ -282,3 +282,56 @@ pub fn mkitf() -> Vec<u8> {
     v.extend(tagged(b"TAG:", &tag));
     v
 }
+
+/// Monta uma fonte `.PFT` com altura 2 e os glifos dados `(largura, pixels sem
+/// preenchimento)`, começando no caractere `first_char`.
+pub fn mkpft(first_char: u32, glyphs: &[(u32, Vec<u8>)]) -> Vec<u8> {
+    fn ch(tag: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut v = tag.to_vec();
+        v.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        v.extend_from_slice(data);
+        v
+    }
+    let u32s = |ws: &[u32]| -> Vec<u8> { ws.iter().flat_map(|w| w.to_le_bytes()).collect() };
+    let height = 2u32;
+    let n = glyphs.len() as u32;
+    let mut arr = ch(b"head", &u32s(&[n + 1, n]));
+    arr.extend(ch(b"user", &vec![0u8; 12 * glyphs.len()]));
+    let codes: Vec<u32> = (0..n).map(|i| first_char + i).collect();
+    arr.extend(ch(b"rmap", &u32s(&codes)));
+    for (w, px) in glyphs {
+        let stride = (w + 3) & !3;
+        let mut data = Vec::new();
+        for row in 0..height {
+            let start = (row * w) as usize;
+            data.extend_from_slice(&px[start..start + *w as usize]);
+            data.extend(std::iter::repeat_n(0u8, (stride - w) as usize));
+        }
+        let mut bmp = ch(b"head", &u32s(&[1, *w, height, 8, 1]));
+        bmp.extend(ch(b"data", &data));
+        // Como nos dados originais, o tamanho declarado do PBMP é 4 a menos que o real.
+        let mut p = b"PBMP".to_vec();
+        p.extend_from_slice(&(bmp.len() as u32 - 4).to_le_bytes());
+        p.extend(bmp);
+        arr.extend(p);
+    }
+    let mut body = ch(
+        b"head",
+        &u32s(&[
+            1,
+            69,
+            0,
+            n,
+            height,
+            height + 1,
+            255,
+            0,
+            height,
+            65536,
+            65536,
+            0,
+        ]),
+    );
+    body.extend(ch(b"PBMA", &arr));
+    ch(b"PFNT", &body)
+}

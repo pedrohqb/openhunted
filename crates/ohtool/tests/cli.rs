@@ -257,3 +257,31 @@ fn brd_and_itf_export_json() {
     let itf_json = std::fs::read_to_string(out.path().join("B.ITF.json")).unwrap();
     assert!(itf_json.contains("T_NOME"), "{itf_json}");
 }
+
+#[test]
+fn pft_exports_glyph_sheet() {
+    use openhunted_formats::test_support::mkpft;
+    let pft = mkpft(65, &[(1, vec![1, 2]), (2, vec![1, 2, 3, 4])]);
+    let pal = mkpal();
+    let (map, vols) = mkarchive(&[(
+        "RESOURCE.001",
+        &[("F.PFT", pft.as_slice()), ("WORLD.PAL", pal.as_slice())],
+    )]);
+    let cd = tempfile::tempdir().unwrap();
+    std::fs::write(cd.path().join("RESOURCE.MAP"), map).unwrap();
+    std::fs::write(cd.path().join("RESOURCE.001"), &vols[0].1).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    ohtool()
+        .arg("--data")
+        .arg(cd.path())
+        .args(["extract", "--type", "PFT", "--out"])
+        .arg(out.path())
+        .assert()
+        .success();
+    let png = std::fs::File::open(out.path().join("F.PFT.png")).unwrap();
+    let reader = png::Decoder::new(std::io::BufReader::new(png))
+        .read_info()
+        .unwrap();
+    // 16 colunas de células com a largura do maior glifo (2) e 16 linhas da altura (2).
+    assert_eq!((reader.info().width, reader.info().height), (32, 32));
+}

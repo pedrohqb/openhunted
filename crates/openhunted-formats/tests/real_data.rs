@@ -196,3 +196,29 @@ fn real_borders_and_interfaces() {
     assert_eq!(about.controls[1].name.as_deref(), Some("AB_DONE"));
     assert_eq!(about.controls[1].label, Some(2));
 }
+
+#[test]
+fn real_fonts() {
+    use openhunted_formats::Font;
+    let path = data_or_skip!();
+    let ar = open_real_archive(&path);
+    let mut n = 0;
+    for e in ar
+        .entries()
+        .iter()
+        .filter(|e| e.name.to_uppercase().ends_with(".PFT"))
+    {
+        let f =
+            Font::parse(ar.get(&e.name).unwrap()).unwrap_or_else(|err| panic!("{}: {err}", e.name));
+        let a = f.glyphs[b'A' as usize]
+            .as_ref()
+            .unwrap_or_else(|| panic!("{}: sem 'A'", e.name));
+        assert!(a.width > 0, "{}", e.name);
+        n += 1;
+    }
+    assert_eq!(n, 5);
+    assert_eq!(
+        Font::parse(ar.get("GARAM12.PFT").unwrap()).unwrap().height,
+        18
+    );
+}
