@@ -9,3 +9,10 @@ repository.workspace = true
 
 [dependencies]
 thiserror.workspace = true
+
+[features]
+test-support = []
+
+[dev-dependencies]
+openhunted-formats = { path = ".", features = ["test-support"] }
+tempfile = "3.27"
