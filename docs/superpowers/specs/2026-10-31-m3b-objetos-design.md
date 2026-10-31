@@ -43,7 +43,7 @@ px da fase (o `OPL.BRD` tem uma caixa 18 × 5 no topo de uma peça de 17 px de l
 ## O que a M3b faz
 
 - `LevelObject` ganha `modes` (máscara de modos, com o padrão e o ajuste de versão acima).
-- `Scene::build` recebe o modo solo (0x2) e:
+- `Scene::build` usa o modo solo (constante `SOLO = 0x2`) e:
   - **descarta** (não desenha, não colide) objetos ausentes no modo e vagas de jogador que não
     sejam a do jogador;
   - escolhe como Jake o objeto de tipo 1 com modos & 3 = 3; os demais objetos de tipo 1
