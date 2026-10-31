@@ -49,6 +49,30 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Renderiza um quadro 640×480 de uma fase em PNG (sem janela).
+    Render {
+        /// Arquivo da fase (ex.: T_J_001.LEV).
+        level: String,
+        #[arg(long)]
+        out: PathBuf,
+        /// Câmera "X,Y" em pixels da fase (limitada à cena).
+        #[arg(long, default_value = "0,0", value_parser = parse_xy)]
+        camera: (i32, i32),
+        /// Desenha caixas de colisão e marcadores de objetos de lógica.
+        #[arg(long)]
+        overlay: bool,
+        /// Avança N ticks de animação antes de renderizar.
+        #[arg(long, default_value_t = 0)]
+        ticks: u32,
+    },
+}
+
+fn parse_xy(s: &str) -> Result<(i32, i32), String> {
+    let (a, b) = s.split_once(',').ok_or("use X,Y")?;
+    Ok((
+        a.trim().parse().map_err(|e| format!("{e}"))?,
+        b.trim().parse().map_err(|e| format!("{e}"))?,
+    ))
 }
 
 fn main() -> ExitCode {
@@ -126,6 +150,39 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     std::fs::write(dir.join(name), serde_json::to_string_pretty(&level)?)?;
                 }
             }
+        }
+        Cmd::Render {
+            level,
+            out: path,
+            camera,
+            overlay,
+            ticks,
+        } => {
+            use openhunted_engine::{
+                Assets, Framebuffer, SCREEN_H, SCREEN_W, Scene, background_index, clamp_camera,
+            };
+            let lv = Level::parse(&gd.levels()?.get(&level)?).map_err(|e| e.in_resource(&level))?;
+            let palette = openhunted_formats::Palette::parse(ar.get(&lv.palette)?)?;
+            let mut assets = Assets::new(gd.resources()?);
+            let mut scene = Scene::build(&lv, &mut assets)?;
+            for w in &scene.warnings {
+                eprintln!("aviso: {w}");
+            }
+            for _ in 0..ticks {
+                scene.tick();
+            }
+            let view = (SCREEN_W as i32, SCREEN_H as i32);
+            let cam = clamp_camera((scene.width, scene.height), view, camera);
+            let mut fb = Framebuffer::new(SCREEN_W, SCREEN_H);
+            fb.clear(background_index(&palette));
+            scene.draw(&mut assets, &mut fb, cam, overlay);
+            extract::write_indexed_png(
+                &path,
+                fb.width as u32,
+                fb.height as u32,
+                &fb.pixels,
+                &palette,
+            )?;
         }
         Cmd::Extract {
             out: dir,

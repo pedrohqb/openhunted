@@ -46,3 +46,27 @@ fn tutorial_scene_has_all_cells_and_objects() {
         .collect();
     assert_eq!(decos, vec![41, 187, 185]);
 }
+
+fn fnv1a(data: &[u8]) -> u64 {
+    data.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)
+    })
+}
+
+/// Render de referência da T_J_001 na câmera (0, 0), conferido visualmente em 2026-10-31.
+#[test]
+fn tutorial_render_matches_reference() {
+    use openhunted_engine::{Framebuffer, SCREEN_H, SCREEN_W, background_index};
+    let Some((s, mut a)) = load("T_J_001.LEV") else {
+        return;
+    };
+    let pal = openhunted_formats::Palette::parse(a.archive().get("WORLD.PAL").unwrap()).unwrap();
+    let mut fb = Framebuffer::new(SCREEN_W, SCREEN_H);
+    fb.clear(background_index(&pal));
+    s.draw(&mut a, &mut fb, (0, 0), false);
+    let h = fnv1a(&fb.pixels);
+    eprintln!("hash do render: {h:#018x}");
+    assert_eq!(h, REFERENCE);
+}
+
+const REFERENCE: u64 = 0x319f_3c56_50cc_fc02;

@@ -3,12 +3,15 @@
 
 use std::rc::Rc;
 
-use openhunted_formats::{Animation, Level, LevelObject, Result};
+use openhunted_formats::{Animation, Border, BorderBox, Level, LevelObject, Result};
 
-use crate::{AnimPlayer, Assets};
+use crate::{AnimPlayer, Assets, Framebuffer, draw_ops};
 
 /// Duração de um tick de animação, em milissegundos (provisório: `docs/re/cenario.md`).
 pub const TICK_MS: u32 = 50;
+/// Cores do overlay (índices da paleta).
+const OVERLAY_BORDER: u8 = 255;
+const OVERLAY_MARKER: u8 = 254;
 /// Lado de uma célula da grade, em pixels.
 pub const CELL: i32 = 128;
 
@@ -47,6 +50,8 @@ pub struct Scene {
     /// Em ordem de desenho (camada, depois ordem do arquivo).
     pub sprites: Vec<Sprite>,
     pub markers: Vec<Marker>,
+    /// Caixas de colisão das células: origem da célula e caixa.
+    pub borders: Vec<(i32, i32, BorderBox)>,
     /// Problemas encontrados ao montar a cena (recursos ausentes), um por linha.
     pub warnings: Vec<String>,
 }
@@ -64,6 +69,7 @@ impl Scene {
             height: gy * CELL,
             sprites: Vec::new(),
             markers: Vec::new(),
+            borders: Vec::new(),
             warnings: Vec::new(),
         };
         let mut objects: Vec<&LevelObject> = level.objects.iter().collect();
@@ -90,6 +96,12 @@ impl Scene {
                         )),
                     },
                     Err(e) => s.warnings.push(format!("{}: {e}", cell.animation)),
+                }
+            }
+            if !cell.border.is_empty() {
+                match assets.archive().get(&cell.border).and_then(Border::parse) {
+                    Ok(b) => s.borders.extend(b.boxes.into_iter().map(|bx| (cx, cy, bx))),
+                    Err(e) => s.warnings.push(format!("{}: {e}", cell.border)),
                 }
             }
             for d in &cell.decorations {
@@ -145,6 +157,47 @@ impl Scene {
         }
         s.sprites.sort_by_key(|p| p.layer);
         Ok(s)
+    }
+
+    /// Desenha a cena com a câmera em `camera` (canto superior esquerdo, em pixels da fase).
+    /// Cenário é opaco; decorações e objetos usam o índice 0 como transparente. Com
+    /// `overlay`, desenha as caixas de colisão das células e os marcadores.
+    pub fn draw(
+        &self,
+        assets: &mut Assets,
+        fb: &mut Framebuffer,
+        camera: (i32, i32),
+        overlay: bool,
+    ) {
+        for sp in &self.sprites {
+            for op in draw_ops(&sp.anim, sp.player.frame()) {
+                let Ok(bmp) = assets.bitmap(&op.bitmap) else {
+                    continue;
+                };
+                let Some(frame) = bmp.frames.get(op.frame as usize) else {
+                    continue;
+                };
+                let x = sp.x.saturating_add(op.x).saturating_sub(camera.0);
+                let y = sp.y.saturating_add(op.y).saturating_sub(camera.1);
+                fb.blit(frame, x, y, sp.layer != Layer::Scenery);
+            }
+        }
+        if overlay {
+            for (bx, by, b) in &self.borders {
+                let x = bx + i32::from(b.x) - camera.0;
+                let y = by + i32::from(b.y) - camera.1;
+                fb.rect(
+                    x,
+                    y,
+                    i32::from(b.width),
+                    i32::from(b.height),
+                    OVERLAY_BORDER,
+                );
+            }
+            for m in &self.markers {
+                fb.rect(m.x - 4 - camera.0, m.y - 4 - camera.1, 9, 9, OVERLAY_MARKER);
+            }
+        }
     }
 
     /// Avança todas as animações um quadro.
@@ -255,6 +308,19 @@ mod tests {
             y: 2
         }));
         assert_eq!(s.warnings.len(), 1);
+    }
+
+    #[test]
+    fn draw_paints_sprites_with_camera() {
+        let s = Scene::build(&level(), &mut assets()).unwrap();
+        let mut fb = crate::Framebuffer::new(64, 64);
+        let mut a = assets();
+        s.draw(&mut a, &mut fb, (190, 20), false);
+        // origem (200, 30) + quadro (-7, 1) + opcode (5, 6) = (198, 37)
+        assert_eq!(fb.pixels[(37 - 20) * 64 + (198 - 190)], 1);
+        assert_eq!(fb.pixels[(37 - 20) * 64 + (198 - 190) - 1], 0);
+        let mut empty = crate::Framebuffer::new(64, 64);
+        s.draw(&mut a, &mut empty, (10_000, 10_000), true);
     }
 
     #[test]

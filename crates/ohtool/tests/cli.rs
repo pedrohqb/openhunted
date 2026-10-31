@@ -341,3 +341,38 @@ fn bare_relative_resource_map_path_opens() {
     );
     assert_eq!(String::from_utf8(out.stdout).unwrap().lines().count(), 4);
 }
+
+#[test]
+fn render_writes_screen_sized_png() {
+    use openhunted_formats::test_support::{mkhls, mklev};
+    let cd = tempfile::tempdir().unwrap();
+    synthetic_cd(cd.path());
+    let lev = mklev();
+    std::fs::write(
+        cd.path().join("Hunter/hunter.hls"),
+        mkhls(&[("T_J_001.LEV", lev.as_slice())]),
+    )
+    .unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let png_path = out.path().join("r.png");
+    ohtool()
+        .arg("--data")
+        .arg(cd.path())
+        .args([
+            "render",
+            "T_J_001.LEV",
+            "--camera",
+            "5000,-3",
+            "--overlay",
+            "--out",
+        ])
+        .arg(&png_path)
+        .assert()
+        .success();
+    let reader = png::Decoder::new(std::io::BufReader::new(
+        std::fs::File::open(&png_path).unwrap(),
+    ))
+    .read_info()
+    .unwrap();
+    assert_eq!((reader.info().width, reader.info().height), (640, 480));
+}

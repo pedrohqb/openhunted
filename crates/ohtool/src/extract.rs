@@ -139,13 +139,30 @@ pub fn matches_type(name: &str, filter: Option<&str>) -> bool {
 }
 
 fn write_png(path: &Path, frame: &Frame, pal: &Palette) -> Result<(), Box<dyn std::error::Error>> {
+    write_indexed_png(
+        path,
+        u32::from(frame.width),
+        u32::from(frame.height),
+        &frame.pixels,
+        pal,
+    )
+}
+
+/// Grava pixels indexados como PNG com a paleta dada.
+pub fn write_indexed_png(
+    path: &Path,
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+    pal: &Palette,
+) -> Result<(), Box<dyn std::error::Error>> {
     let file = std::io::BufWriter::new(std::fs::File::create(path)?);
-    let mut enc = png::Encoder::new(file, u32::from(frame.width), u32::from(frame.height));
+    let mut enc = png::Encoder::new(file, width, height);
     enc.set_color(png::ColorType::Indexed);
     enc.set_depth(png::BitDepth::Eight);
     enc.set_palette(pal.0.concat());
     let mut w = enc.write_header()?;
-    w.write_image_data(&frame.pixels)?;
+    w.write_image_data(pixels)?;
     Ok(())
 }
 
