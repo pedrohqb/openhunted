@@ -26,4 +26,6 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`compressao.md`](compressao.md): compressão dos recursos.
 - [`anm.md`](anm.md): animações.
 - Fases: formato e endereços em `docs/formats/hls.md` e `lev.md`.
+- [`cenario.md`](cenario.md): cenário, transparência e ritmo (M2).
+- [`objetos.md`](objetos.md): objetos das fases e tabela de tipos (M2).
 - Cenários e interfaces: endereços em [`executavel.md`](executavel.md); formato em `docs/formats/brd.md` e `itf.md`.

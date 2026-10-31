@@ -18,7 +18,7 @@ tipo na versão 1.00 passam pelo leitor nos testes com os dados reais.
 | Fontes `.PFT` | arquivo de recursos | lido (5) | [`pft.md`](pft.md) |
 | Arquivo de fases | `hunter.hls` | lido (201 entradas) | [`hls.md`](hls.md) |
 | Lista de missões | `ENGLEVEL.TXT` | lido (100 missões) | [`lev.md`](lev.md) |
-| Fases `.LEV` | `hunter.hls` | cabeçalho lido (100); **corpo pendente (M2)** | [`lev.md`](lev.md) |
+| Fases `.LEV` | `hunter.hls` | lido (100): cabeçalho, objetos, células, listas PR e DC; significado de parte dos campos pendente | [`lev.md`](lev.md) |
 | Tabelas `.TBL` | `DAMAGE.TBL`, `DLS.TBL`, `SOUND.TBL` | **pendente** | — |
 | Esqueletos `.SKE` | `JAKE.SKE`, `MINOTAUR.SKE` | **pendente** | — |
 | `PLAY.VCR` | arquivo de recursos | **pendente** | — |
