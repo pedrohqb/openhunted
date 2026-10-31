@@ -15,11 +15,13 @@ original: `0x00430afb`. Blocos `HED:` e `BDR:`; inteiros little-endian.
 
 | Tamanho | Conteúdo |
 |---|---|
-| 2 | `u16` tipo (guardado num byte; 1 ou 2 nos dados vistos) |
+| 2 | `u16` tipo (guardado num byte): 2 = caixa (378 nos dados), 3 = aresta de polígono (12), 4 = vértice (12), 0 = vazio (3) |
 | 2 + 2 | `s16` x, `s16` y |
 | 2 + 2 | `u16` largura, `u16` altura |
 
-O significado dos tipos (sólido, plataforma, escada…) fica para a M3.
+Todas as formas são sólidas dos quatro lados (não há plataforma de mão única); ver
+[`docs/re/personagem.md`](../re/personagem.md). Os tipos 1, 2, 4, 32 e 64 que aparecem na
+lista PR das células são outra coisa (zonas: portas, passagens, escadas, saída).
 
 ## Versão 1.00
 
