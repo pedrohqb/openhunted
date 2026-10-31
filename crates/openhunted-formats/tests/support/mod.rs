@@ -17,22 +17,10 @@ macro_rules! data_or_skip {
 
 use std::path::Path;
 
-use openhunted_formats::{DataSource, DirSource, IsoSource, ResourceArchive};
+use openhunted_formats::{ResourceArchive, open_data};
 
-/// Abre o arquivo de recursos real a partir de um `.iso` ou de uma pasta
-/// (raiz do CD ou `Hunter/`).
+/// Abre o arquivo de recursos real a partir de `OPENHUNTED_DATA`.
 #[allow(dead_code)]
 pub fn open_real_archive(path: &Path) -> ResourceArchive {
-    let src: Box<dyn DataSource> = if path.is_file() {
-        Box::new(IsoSource::open(path).unwrap())
-    } else {
-        Box::new(DirSource::new(path))
-    };
-    let prefix = if src.exists("RESOURCE.MAP") {
-        ""
-    } else {
-        "Hunter/"
-    };
-    let map = src.read(&format!("{prefix}RESOURCE.MAP")).unwrap();
-    ResourceArchive::from_map(&map, |v| src.read(&format!("{prefix}{v}"))).unwrap()
+    open_data(path).unwrap().resources().unwrap()
 }
