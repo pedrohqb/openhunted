@@ -718,8 +718,8 @@ impl Scene {
             }
         }
         if let Some(j) = self.jake.as_mut() {
-            if let Some(h) = out.heal.last() {
-                j.health = *h;
+            if let Some(h) = out.heal {
+                j.health = h;
             }
             if !out.jake_damage.is_empty() {
                 j.hurt(out.jake_damage);

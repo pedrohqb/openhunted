@@ -53,11 +53,34 @@ pub enum State {
     EnteringExit(u32),
 }
 
-/// Rótulos das animações de morte (`docs/re/dano-vida.md`).
+/// Rótulos das animações de morte (`docs/re/dano-vida.md`). O estado 177 do original toca o
+/// rótulo `J077`: o rótulo 177 não existe no `JAKE.ANM`.
 pub const DIE_DEFAULT: u16 = 173;
-pub const DIE_KNOCKED_RIGHT: u16 = 177;
+pub const DIE_KNOCKED_RIGHT: u16 = 77;
 pub const DIE_KNOCKED_LEFT: u16 = 179;
 pub const DIE_POISON: u16 = 171;
+/// Todos os rótulos usados pelos estados (para conferir contra o `JAKE.ANM` real).
+pub const ALL_LABELS: [u16; 19] = [
+    1,
+    10,
+    100,
+    27,
+    31,
+    29,
+    28,
+    80,
+    25,
+    26,
+    35,
+    168,
+    81,
+    82,
+    15,
+    12,
+    DIE_DEFAULT,
+    DIE_KNOCKED_RIGHT,
+    DIE_KNOCKED_LEFT,
+];
 /// Tiques do choque elétrico.
 const SHOCK_TICKS: u32 = 10;
 /// Escala mínima ao entrar na porta (numerador sobre a altura do quadro de referência).
@@ -305,6 +328,9 @@ impl Jake {
     /// O centro da caixa saiu da fase (`0x00404716`): o original repõe o jogador na posição
     /// inicial, com velocidade zero (`0x00404760`).
     pub fn respawn_if_outside(&mut self, level: (i32, i32)) -> bool {
+        if self.is_dead() {
+            return false;
+        }
         let b = self.body.bounds();
         let (cx, cy) = (b.x.saturating_add(b.w / 2), b.y.saturating_add(b.h / 2));
         if cx < 0 || cy < 0 || cx > level.0 || cy > level.1 {
@@ -512,7 +538,7 @@ mod tests {
             (82, 10),
             (15, 4),
             (173, 16),
-            (177, 13),
+            (77, 13),
             (171, 16),
             (12, 20),
         ]
@@ -805,6 +831,27 @@ mod tests {
         });
         j.tick(0, &w);
         assert_eq!(j.state(), State::Dying(DIE_KNOCKED_LEFT));
+    }
+
+    #[test]
+    fn dead_jake_outside_the_level_stays_dead() {
+        let w = World::new(vec![]);
+        let mut j = jake_on(&w, 100).with_health(1, 0);
+        j.hurt(Pending {
+            amount: 5,
+            ..Default::default()
+        });
+        for _ in 0..40 {
+            j.tick(0, &w);
+        }
+        assert!(j.is_dead() && j.body.y > 300);
+        assert!(!j.respawn_if_outside((2000, 300)));
+        assert!(j.is_dead());
+        let x = j.body.x;
+        for _ in 0..20 {
+            j.tick(LEFT, &w);
+        }
+        assert_eq!(j.body.x, x);
     }
 
     #[test]

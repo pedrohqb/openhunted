@@ -56,9 +56,9 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         return;
     }
     let Some(jake) = ctx.jake else { return };
-    let mut h = jake.health;
+    let mut h = out.heal.unwrap_or(jake.health);
     if take(e.kind, &mut h) {
-        out.heal.push(h);
+        out.heal = Some(h);
         out.events.push(Event::Sound(SOUND_PICKUP));
         e.alive = false;
     }
@@ -94,14 +94,19 @@ mod tests {
         let mut out = Out::default();
         tick(&mut item, &ctx(&j, &w, &on), &mut out);
         assert!(!item.alive);
-        assert_eq!(out.heal, vec![Health { hp: 75, armor: 0 }]);
+        assert_eq!(out.heal, Some(Health { hp: 75, armor: 0 }));
         assert_eq!(out.events, vec![Event::Sound(SOUND_PICKUP)]);
+        // dois itens no mesmo tique: os dois contam
+        let mut armor = logic(ARMOR_ITEM, 100, 0, &[]);
+        armor.flags = 0x803a9;
+        tick(&mut armor, &ctx(&j, &w, &on), &mut out);
+        assert_eq!(out.heal, Some(Health { hp: 75, armor: 25 }));
         // longe: nada
         let mut item = logic(HEALTH_ITEM, 100, 0, &[]);
         item.flags = 0x803a9;
         let (j, w) = ctx_with_jake(400, 0);
         let mut out = Out::default();
         tick(&mut item, &ctx(&j, &w, &on), &mut out);
-        assert!(item.alive && out.heal.is_empty());
+        assert!(item.alive && out.heal.is_none());
     }
 }

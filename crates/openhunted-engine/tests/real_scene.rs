@@ -462,3 +462,18 @@ fn t_j_001_can_be_won() {
     assert_eq!(s.outcome, Some(openhunted_engine::Outcome::Victory));
     assert!(s.jake.as_ref().unwrap().health.hp > 0);
 }
+
+/// Todos os rótulos que a máquina de estados do Jake usa existem no `JAKE.ANM`.
+#[test]
+fn jake_state_labels_exist_in_the_real_animation() {
+    let Some((_, mut a)) = load("T_J_001.LEV") else {
+        return;
+    };
+    let anim = a.animation("JAKE.ANM").unwrap();
+    let missing: Vec<u16> = openhunted_engine::jake::ALL_LABELS
+        .iter()
+        .copied()
+        .filter(|id| !anim.labels.iter().any(|l| l.id == *id))
+        .collect();
+    assert!(missing.is_empty(), "rótulos ausentes: {missing:?}");
+}

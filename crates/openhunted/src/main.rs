@@ -121,7 +121,13 @@ fn run() -> Result<(), String> {
                     ..
                 } => match k {
                     Keycode::Tab => viewer.apply(Action::ToggleOverlay),
-                    Keycode::Space => viewer.tap(openhunted_engine::input::JUMP),
+                    // com a dica aberta, a tecla só a fecha (não vira pulo nem CIMA)
+                    Keycode::Space if viewer.modal().is_none() => {
+                        viewer.tap(openhunted_engine::input::JUMP)
+                    }
+                    Keycode::Up if viewer.modal().is_none() => {
+                        viewer.tap(openhunted_engine::input::UP)
+                    }
                     Keycode::PageUp => viewer.apply(Action::PageLeft),
                     Keycode::PageDown => viewer.apply(Action::PageRight),
                     Keycode::Home => viewer.apply(Action::Home),

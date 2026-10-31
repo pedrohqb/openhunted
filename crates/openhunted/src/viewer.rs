@@ -61,6 +61,8 @@ pub struct Viewer {
     /// Os 8 quadros de `SWIZARD.BMP`: cantos e bordas da moldura da dica.
     frame_tiles: Vec<Frame>,
     modal: Option<Modal>,
+    /// Dicas à espera (duas no mesmo tique: uma de cada vez).
+    queued: std::collections::VecDeque<Modal>,
 }
 
 impl Viewer {
@@ -111,6 +113,7 @@ impl Viewer {
             font: None,
             frame_tiles: Vec::new(),
             modal: None,
+            queued: std::collections::VecDeque::new(),
         }
     }
 
@@ -142,7 +145,7 @@ impl Viewer {
             .as_ref()
             .is_some_and(|m| m.open_ms >= MODAL_MIN_MS)
         {
-            self.modal = None;
+            self.modal = self.queued.pop_front();
         }
     }
 
@@ -194,7 +197,7 @@ impl Viewer {
         if let Some(m) = self.modal.as_mut() {
             m.open_ms = m.open_ms.saturating_add(ms);
             if m.open_ms > MODAL_MAX_MS {
-                self.modal = None;
+                self.modal = self.queued.pop_front();
             }
             return 0;
         }
@@ -214,12 +217,17 @@ impl Viewer {
             }
             let mut opened = false;
             for ev in self.scene.events.drain(..) {
-                if let (Event::Hint { text, left_of_jake }, false) = (&ev, opened) {
-                    self.modal = Some(Modal {
-                        text: text.clone(),
-                        left_of_jake: *left_of_jake,
+                if let Event::Hint { text, left_of_jake } = ev {
+                    let m = Modal {
+                        text,
+                        left_of_jake,
                         open_ms: 0,
-                    });
+                    };
+                    if self.modal.is_none() {
+                        self.modal = Some(m);
+                    } else {
+                        self.queued.push_back(m);
+                    }
                     opened = true;
                 }
                 // sons e veredito: nada a fazer aqui por enquanto
@@ -449,6 +457,27 @@ mod tests {
         v.advance(16_000);
         assert!(v.modal().is_none(), "fecha sozinha após 15 s");
         assert_eq!(v.advance(50), 1, "e o jogo volta a andar");
+    }
+
+    #[test]
+    fn two_hints_in_one_tick_open_one_after_the_other() {
+        let mut v = viewer(640, 480);
+        v.scene.events.push(Event::Hint {
+            text: "um".into(),
+            left_of_jake: true,
+        });
+        v.scene.events.push(Event::Hint {
+            text: "dois".into(),
+            left_of_jake: false,
+        });
+        v.advance(50);
+        assert_eq!(v.modal().map(|m| m.text.as_str()), Some("um"));
+        v.advance(600);
+        v.key_released();
+        assert_eq!(v.modal().map(|m| m.text.as_str()), Some("dois"));
+        v.advance(600);
+        v.key_released();
+        assert!(v.modal().is_none());
     }
 
     #[test]

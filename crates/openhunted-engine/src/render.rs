@@ -110,7 +110,8 @@ impl Framebuffer {
         if w <= 0 || h <= 0 {
             return;
         }
-        let (x0, y0) = (x.max(0) as usize, y.max(0) as usize);
+        let x0 = x.clamp(0, self.width as i32) as usize;
+        let y0 = y.clamp(0, self.height as i32) as usize;
         let x1 = (x.saturating_add(w)).clamp(0, self.width as i32) as usize;
         let y1 = (y.saturating_add(h)).clamp(0, self.height as i32) as usize;
         for row in y0..y1 {
@@ -247,6 +248,15 @@ pub fn clamp_camera(scene: (i32, i32), view: (i32, i32), cam: (i32, i32)) -> (i3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fill_rect_outside_the_screen_is_a_no_op() {
+        let mut fb = Framebuffer::new(10, 4);
+        fb.fill_rect(20, 1, 5, 2, 7);
+        fb.fill_rect(-5, -5, 3, 3, 7);
+        fb.fill_rect(8, 3, 50, 50, 7);
+        assert_eq!(fb.pixels.iter().filter(|&&p| p == 7).count(), 2);
+    }
 
     #[test]
     fn draw_text_blits_glyphs() {

@@ -162,6 +162,12 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             && line_of_sight(ctx, center, jc)
     });
     st.has_target = target.is_some();
+    let boxr = e.boxes.first().copied().unwrap_or(Rect {
+        x: 0,
+        y: 0,
+        w: 1,
+        h: 1,
+    });
     let mut vel = (0, 0);
     if let Some(j) = target {
         if !st.hovering && ctx.rng.below(100) < v.hover_start {
@@ -175,10 +181,18 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         } else {
             let above = bounds.y + bounds.h < j.y;
             let below = bounds.y > j.y + j.h;
-            vel.1 = if above {
-                v.speed
-            } else if below {
-                -v.speed
+            // mergulha/sobe só na vertical, e só se o passo é possível (`0x41f057`/`0x41f140`);
+            // senão oscila e avança na horizontal
+            let can_move = |dy: i32| {
+                let mut probe = Body::new(e.x, e.y, boxr);
+                probe.vy = dy;
+                step(&mut probe, ctx.cells, false);
+                probe.y != e.y
+            };
+            if above && can_move(v.speed) {
+                vel.1 = v.speed;
+            } else if below && can_move(-v.speed) {
+                vel.1 = -v.speed;
             } else {
                 let phase = i64::from((ctx.tick as i32).wrapping_add(e.x).rem_euclid(v.period))
                     * 65536
@@ -189,20 +203,14 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 if local + vy < 0 {
                     vy = 0;
                 }
-                vy as i32
-            };
-            let jc = j.x + j.w / 2;
-            vel.0 = if jc < center.0 { -v.speed } else { v.speed };
+                vel.1 = vy as i32;
+                let jc = j.x + j.w / 2;
+                vel.0 = if jc < center.0 { -v.speed } else { v.speed };
+            }
         }
     }
     st.velocity = vel;
     // física contra o cenário, sem gravidade
-    let boxr = e.boxes.first().copied().unwrap_or(Rect {
-        x: 0,
-        y: 0,
-        w: 1,
-        h: 1,
-    });
     let mut body = Body::new(e.x, e.y, boxr);
     body.vx = vel.0;
     body.vy = vel.1;
@@ -241,13 +249,13 @@ mod tests {
         let mut out = Out::default();
         let mut c = ctx(&j, &w, &on);
         tick(&mut m, &mut c, &mut out);
-        assert_eq!((m.x, m.y), (103, 103)); // 25/8 px por tique
+        assert_eq!((m.x, m.y), (100, 103)); // só desce, 25/8 px por tique
         // toda abaixo (sem chão no caminho da visão): sobe
         let empty = crate::World::new(vec![]);
         let mut ce = ctx(&j, &empty, &on);
         let mut m = mine(100, 300);
         tick(&mut m, &mut ce, &mut out);
-        assert_eq!((m.x, m.y), (103, 296)); // −25 >> 3 = −4 (como o sar do original)
+        assert_eq!((m.x, m.y), (100, 296)); // só sobe; −25 >> 3 = −4 (como o sar do original)
         // na altura do Jake: oscila em torno de y = 64 da célula, corrigindo 1/8 da diferença
         let mut m = mine(100, 210);
         tick(&mut m, &mut c, &mut out);
@@ -256,7 +264,7 @@ mod tests {
         // Jake à esquerda: vai para a esquerda
         let (j2, w2) = ctx_with_jake(0, 200);
         let mut c2 = ctx(&j2, &w2, &on);
-        let mut m = mine(100, 100);
+        let mut m = mine(100, 210); // na altura do Jake: oscila e avança
         tick(&mut m, &mut c2, &mut out);
         assert_eq!(m.x, 96); // −25 >> 3 = −4
         // fora do alcance (200 px): parada
@@ -266,6 +274,29 @@ mod tests {
         tick(&mut m, &mut c3, &mut out);
         assert_eq!((m.x, m.y), (100, 100));
         assert!(out.blasts.is_empty());
+    }
+
+    #[test]
+    fn mine_blocked_from_diving_falls_back_to_chasing() {
+        let on = |_: i32| None;
+        // teto logo abaixo da mina: não consegue mergulhar → oscila e avança
+        let (j, w) = ctx_with_jake(250, 200);
+        let w = crate::World::new(
+            w.solids()
+                .iter()
+                .copied()
+                .chain(std::iter::once(Rect {
+                    x: 0,
+                    y: 117,
+                    w: 400,
+                    h: 2,
+                }))
+                .collect(),
+        );
+        let mut c = ctx(&j, &w, &on);
+        let mut m = mine(100, 100);
+        tick(&mut m, &mut c, &mut Out::default());
+        assert_eq!(m.x, 103);
     }
 
     #[test]

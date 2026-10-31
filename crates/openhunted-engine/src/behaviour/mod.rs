@@ -75,8 +75,8 @@ pub struct Out {
     pub spawn: Vec<Entity>,
     pub jake_damage: Pending,
     pub blasts: Vec<Blast>,
-    /// Vida do Jake depois de apanhar itens (a última vale).
-    pub heal: Vec<crate::damage::Health>,
+    /// Vida do Jake depois de apanhar itens neste tique (acumulada item a item).
+    pub heal: Option<crate::damage::Health>,
 }
 
 #[cfg(test)]
