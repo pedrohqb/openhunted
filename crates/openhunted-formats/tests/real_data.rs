@@ -311,3 +311,28 @@ fn every_resource_parses_by_type() {
         .collect();
     assert_eq!(undecoded, expected);
 }
+
+#[test]
+fn real_cell_indices_resolve_to_animation_labels() {
+    use openhunted_formats::{Animation, Level, open_data, parse_mission_list};
+    let path = data_or_skip!();
+    let gd = open_data(&path).unwrap();
+    let (ar, la) = (gd.resources().unwrap(), gd.levels().unwrap());
+    let missions = parse_mission_list(&la.get("ENGLEVEL.TXT").unwrap()).unwrap();
+    let mut anims = std::collections::HashMap::new();
+    for m in &missions {
+        let l = Level::parse(&la.get(&m.file).unwrap()).unwrap();
+        for c in l.cells.iter().flatten() {
+            let a = anims
+                .entry(c.animation.to_uppercase())
+                .or_insert_with(|| Animation::parse(ar.get(&c.animation).unwrap()).unwrap());
+            assert!(
+                a.labels.iter().any(|lab| i32::from(lab.id) == c.index),
+                "{}: índice {} sem rótulo em {}",
+                m.file,
+                c.index,
+                c.animation
+            );
+        }
+    }
+}
