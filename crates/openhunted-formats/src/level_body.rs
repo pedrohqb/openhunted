@@ -57,6 +57,8 @@ pub struct Cell {
     pub border: String,
     /// Índice que escolhe o quadro do cenário (ver `docs/re/cenario.md`).
     pub index: i32,
+    /// Bloco e colisão espelhados na horizontal (campo `+0x40`; ver `docs/re/cenario.md`).
+    pub mirrored: bool,
     /// Demais campos inteiros na ordem do arquivo (significado a decifrar).
     pub fields: Vec<i32>,
     pub triggers: Vec<(i32, Option<i32>)>,
@@ -242,6 +244,7 @@ fn cell(c: &mut Cur) -> Result<Option<Cell>> {
         fields.push(c.i32()?); // 40
         s(c, &mut fields)?; // 38
     }
+    let mirrored = fields[fields.len() - 2] != 0;
     s(c, &mut fields)?; // 9c
     for _ in 0..c.count()? {
         s(c, &mut fields)?; // tabela em 44
@@ -260,6 +263,7 @@ fn cell(c: &mut Cur) -> Result<Option<Cell>> {
         animation,
         border,
         index,
+        mirrored,
         fields,
         triggers,
         objects,

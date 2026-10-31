@@ -5,12 +5,14 @@
 pub mod anim;
 pub mod assets;
 pub mod input;
+pub mod jake;
 pub mod physics;
 pub mod render;
 pub mod scene;
 
 pub use anim::{AnimPlayer, DrawOp, draw_ops};
 pub use assets::Assets;
+pub use jake::{Jake, JumpKind, State};
 pub use physics::{Body, Rect, SUB, World, step};
 pub use render::{Framebuffer, SCREEN_H, SCREEN_W, background_index, clamp_camera};
 pub use scene::{Layer, Marker, Scene, Sprite, TICK_MS};

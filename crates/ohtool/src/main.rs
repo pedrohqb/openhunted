@@ -169,7 +169,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("aviso: {w}");
             }
             for _ in 0..ticks {
-                scene.tick();
+                scene.tick(0);
             }
             let view = (SCREEN_W as i32, SCREEN_H as i32);
             let cam = clamp_camera((scene.width, scene.height), view, camera);

@@ -36,6 +36,7 @@ pub struct Viewer {
     lut: [[u8; 4]; 256],
     pending_ms: u32,
     fb: Framebuffer,
+    input: u32,
 }
 
 impl Viewer {
@@ -66,6 +67,7 @@ impl Viewer {
             lut,
             pending_ms: 0,
             fb: Framebuffer::new(SCREEN_W, SCREEN_H),
+            input: 0,
         }
     }
 
@@ -95,13 +97,29 @@ impl Viewer {
         self.camera = clamp_camera((self.scene.width, self.scene.height), view, (x, y));
     }
 
+    /// A fase tem o Jake controlável (as setas o controlam em vez de rolar a tela).
+    pub fn has_jake(&self) -> bool {
+        self.scene.jake.is_some()
+    }
+
+    /// Bits de entrada do jogador (`openhunted_engine::input`) usados nos próximos tiques.
+    pub fn set_input(&mut self, input: u32) {
+        self.input = input;
+    }
+
     /// Avança o relógio em `ms` milissegundos; devolve quantos ticks de animação rodaram.
     pub fn advance(&mut self, ms: u32) -> u32 {
         self.pending_ms = self.pending_ms.saturating_add(ms);
         let ticks = self.pending_ms / TICK_MS;
         self.pending_ms %= TICK_MS;
         for _ in 0..ticks {
-            self.scene.tick();
+            self.scene.tick(self.input);
+            if let Some((fx, fy)) = self.scene.focus() {
+                // A câmera segue o Jake, centrado na tela.
+                let view = (SCREEN_W as i32, SCREEN_H as i32);
+                let want = (fx - view.0 / 2, fy - view.1 / 2);
+                self.camera = clamp_camera((self.scene.width, self.scene.height), view, want);
+            }
         }
         ticks
     }
@@ -127,14 +145,7 @@ mod tests {
         let (map, vols) = mkarchive(&[("RESOURCE.001", &[])]);
         let assets =
             Assets::new(ResourceArchive::from_map(&map, |_| Ok(vols[0].1.clone())).unwrap());
-        let scene = Scene {
-            width: w,
-            height: h,
-            sprites: vec![],
-            markers: vec![],
-            borders: vec![],
-            warnings: vec![],
-        };
+        let scene = Scene::empty(w, h);
         let mut pal = [[100u8, 100, 100]; 256];
         pal[3] = [0, 0, 0];
         Viewer::new(scene, assets, &Palette(pal))
@@ -165,6 +176,14 @@ mod tests {
         assert!(v.overlay());
         assert_eq!(v.advance(120), 2); // 50 ms por tick: 2 ticks e 20 ms guardados
         assert_eq!(v.advance(30), 1);
+    }
+
+    #[test]
+    fn input_is_kept_for_next_ticks() {
+        let mut v = viewer(640, 480);
+        assert!(!v.has_jake());
+        v.set_input(openhunted_engine::input::LEFT);
+        assert_eq!(v.advance(50), 1);
     }
 
     #[test]

@@ -367,3 +367,15 @@ fn real_object_and_decoration_animations_exist() {
     // Um objeto de tipo 0 aponta para "EDITOR.INI" (resto do editor de fases).
     assert_eq!(missing, vec![(0, "EDITOR.INI".to_string())]);
 }
+
+/// O campo `+0x40` da célula espelha bloco e colisão: na T_J_001 a primeira célula (parede à
+/// esquerda) não é espelhada; a última (o mesmo bloco, parede à direita) é.
+#[test]
+fn real_cell_mirroring() {
+    use openhunted_formats::{Level, open_data};
+    let path = data_or_skip!();
+    let gd = open_data(&path).unwrap();
+    let l = Level::parse(&gd.levels().unwrap().get("T_J_001.LEV").unwrap()).unwrap();
+    assert!(!l.cells[0].as_ref().unwrap().mirrored);
+    assert!(l.cells[13].as_ref().unwrap().mirrored);
+}

@@ -33,8 +33,9 @@ fn tutorial_scene_has_all_cells_and_objects() {
             .iter()
             .filter(|p| p.layer == Layer::Object)
             .count(),
-        11
+        10 // 8 globais (o Jake fica à parte) + 2 de células
     );
+    assert!(s.jake.is_some() && s.jake_sprite.is_some());
     assert_eq!(s.markers.len(), 4);
     assert!(s.warnings.is_empty(), "{:?}", s.warnings);
     // Decorações: o primeiro campo é o quadro da animação (DECALW1.ANM, quadros 41, 187, 185).
@@ -69,7 +70,7 @@ fn tutorial_render_matches_reference() {
     assert_eq!(h, REFERENCE);
 }
 
-const REFERENCE: u64 = 0x7e77_5156_d3bd_e667;
+const REFERENCE: u64 = 0x88f1_d9d8_c9b1_e7f4;
 
 /// Camadas z ≥ 1 usam o índice 0 como transparência: nada de índice 0 pode chegar à tela.
 #[test]
@@ -101,7 +102,7 @@ fn generic_item_objects_do_not_cycle() {
     let before = frames(&s);
     assert!(!before.is_empty());
     for _ in 0..40 {
-        s.tick();
+        s.tick(0);
     }
     assert_eq!(frames(&s), before);
 }
@@ -112,10 +113,26 @@ fn jake_is_drawn_scaled() {
     let Some((s, _)) = load("T_J_001.LEV") else {
         return;
     };
-    let jake = s
-        .sprites
-        .iter()
-        .find(|p| p.anim.frames.len() == 918)
-        .unwrap();
+    let jake = s.jake_sprite.as_ref().unwrap();
     assert_eq!(jake.scale, (47, 88));
+}
+
+/// Na T_J_001 o Jake pousa no chão e corre para a esquerda sem atravessar o cenário.
+#[test]
+fn jake_lands_and_runs_left_in_tutorial() {
+    use openhunted_engine::input::LEFT;
+    let Some((mut s, _)) = load("T_J_001.LEV") else {
+        return;
+    };
+    let x0 = s.jake.as_ref().unwrap().body.x;
+    for _ in 0..20 {
+        s.tick(0);
+    }
+    assert!(s.jake.as_ref().unwrap().body.on_ground, "não pousou");
+    for _ in 0..150 {
+        s.tick(LEFT);
+        let b = s.jake.as_ref().unwrap().body.bounds();
+        assert!(b.y + b.h <= 128 && b.x >= 0, "saiu do cenário: {b:?}");
+    }
+    assert!(s.jake.as_ref().unwrap().body.x < x0 - 400);
 }

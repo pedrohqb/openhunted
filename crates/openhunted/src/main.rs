@@ -3,8 +3,9 @@
 //! com rolagem e animações.
 //!
 //! Uso: `openhunted --data <CD, pasta Hunter/ ou .iso> [--level T_J_001.LEV] [--frames N]`
-//! Teclas: setas rolam, PageUp/PageDown pulam uma tela, Home/End vão às pontas, Tab mostra a
-//! colisão e os objetos de lógica, Esc sai.
+//! Teclas: setas movem o Jake e espaço pula (sem Jake na fase, as setas rolam a tela);
+//! PageUp/PageDown pulam uma tela, Home/End vão às pontas, Tab mostra a colisão e os objetos
+//! de lógica, Esc sai.
 
 mod viewer;
 
@@ -128,14 +129,32 @@ fn run() -> Result<(), String> {
             }
         }
         let keys = events.keyboard_state();
-        for (sc, act) in [
-            (Scancode::Left, Action::ScrollLeft),
-            (Scancode::Right, Action::ScrollRight),
-            (Scancode::Up, Action::ScrollUp),
-            (Scancode::Down, Action::ScrollDown),
-        ] {
-            if keys.is_scancode_pressed(sc) {
-                viewer.apply(act);
+        if viewer.has_jake() {
+            // Setas e espaço controlam o Jake (bits como no original).
+            use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, UP};
+            let mut bits = 0;
+            for (sc, bit) in [
+                (Scancode::Left, LEFT),
+                (Scancode::Right, RIGHT),
+                (Scancode::Up, UP),
+                (Scancode::Down, DOWN),
+                (Scancode::Space, JUMP),
+            ] {
+                if keys.is_scancode_pressed(sc) {
+                    bits |= bit;
+                }
+            }
+            viewer.set_input(bits);
+        } else {
+            for (sc, act) in [
+                (Scancode::Left, Action::ScrollLeft),
+                (Scancode::Right, Action::ScrollRight),
+                (Scancode::Up, Action::ScrollUp),
+                (Scancode::Down, Action::ScrollDown),
+            ] {
+                if keys.is_scancode_pressed(sc) {
+                    viewer.apply(act);
+                }
             }
         }
         if (viewer.camera(), viewer.overlay()) != shown {
