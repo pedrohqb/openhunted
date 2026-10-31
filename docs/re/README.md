@@ -34,3 +34,7 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`minas.md`](minas.md): minas flutuantes (tipo 102) (M3).
 - [`itens.md`](itens.md): itens genéricos e coleta de vida/armadura (M3).
 - [`dano-vida.md`](dano-vida.md): vida, armadura, `DAMAGE.TBL`, explosões e morte do Jake (M3).
+- [`armas.md`](armas.md): inventário, armas, munição, coleta, arma inicial e troca (M4).
+- [`tiro-jake.md`](tiro-jake.md): controles, estados de tiro, mira, cadência e soco (M4).
+- [`projeteis.md`](projeteis.md): criação de projéteis, bala da pistola, cápsula, impacto (M4).
+- [`som.md`](som.md): ids e recursos de som, som posicional, canais, `SOUND.TBL` (M4).
