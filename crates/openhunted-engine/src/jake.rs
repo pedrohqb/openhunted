@@ -61,6 +61,8 @@ fn anim_of(s: State) -> (u16, u32) {
 #[derive(Debug, Clone)]
 pub struct Jake {
     pub body: Body,
+    /// Posição inicial (`+0x29c`), para onde volta ao sair da fase.
+    start: (i32, i32),
     state: State,
     facing_right: bool,
     ticks: u32,
@@ -75,6 +77,7 @@ impl Jake {
     pub fn new(x: i32, y: i32, boxr: Rect, lengths: HashMap<u16, usize>) -> Self {
         Self {
             body: Body::new(x, y, boxr),
+            start: (x, y),
             state: State::Idle,
             facing_right: false, // começa olhando para a esquerda (+0x288 = 4)
             ticks: 0,
@@ -168,6 +171,19 @@ impl Jake {
         self.body.vx = vx * SUB * self.dir();
         self.body.vy = vy * SUB;
         self.set(State::Jump(kind));
+    }
+
+    /// O centro da caixa saiu da fase (`0x00404716`): o original repõe o jogador na posição
+    /// inicial, com velocidade zero (`0x00404760`).
+    pub fn respawn_if_outside(&mut self, level: (i32, i32)) -> bool {
+        let b = self.body.bounds();
+        let (cx, cy) = (b.x.saturating_add(b.w / 2), b.y.saturating_add(b.h / 2));
+        if cx < 0 || cy < 0 || cx > level.0 || cy > level.1 {
+            self.body = Body::new(self.start.0, self.start.1, self.body.boxr);
+            self.set(State::Idle);
+            return true;
+        }
+        false
     }
 
     /// Um tique (50 ms) com a máscara de entrada `input`.
@@ -503,6 +519,20 @@ mod tests {
         assert!(j.body.vx > 0);
         j.tick(LEFT | RIGHT, &w);
         assert!(j.facing_right(), "segurar as duas mantém o lado");
+    }
+
+    #[test]
+    fn leaving_the_level_respawns_at_start() {
+        let w = World::new(vec![]);
+        let mut j = jake_on(&w, 100);
+        for _ in 0..30 {
+            j.tick(0, &w);
+        }
+        assert!(j.body.y > 300);
+        assert!(j.respawn_if_outside((2000, 300)));
+        assert_eq!((j.body.x, j.body.y, j.body.vy), (100, 53, 0));
+        assert_eq!(j.state(), State::Idle);
+        assert!(!j.respawn_if_outside((2000, 300)));
     }
 
     #[test]

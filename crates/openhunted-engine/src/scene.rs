@@ -484,6 +484,7 @@ impl Scene {
     pub fn tick(&mut self, input: u32) {
         if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
             j.tick(input, &self.world);
+            j.respawn_if_outside((self.width, self.height));
             sp.x = j.body.x;
             sp.y = j.body.y;
             // A arte do Jake olha para a esquerda: espelha quando ele olha para a direita.
@@ -575,7 +576,8 @@ mod tests {
         piece.fields = vec![0, 0, 0, flags, layer];
         piece.names[1] = "PL.BRD".into();
         let mut l = level();
-        l.cells = vec![None, None];
+        l.grid_y = 8; // fase alta: o Jake que cai não sai dela (voltaria ao início)
+        l.cells = vec![None; 16];
         l.objects = vec![jake, piece];
         let bmp = mkbmp(&[(20, 20, vec![1; 400])]);
         let anm = mkanm();
