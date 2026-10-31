@@ -379,3 +379,32 @@ fn real_cell_mirroring() {
     assert!(!l.cells[0].as_ref().unwrap().mirrored);
     assert!(l.cells[13].as_ref().unwrap().mirrored);
 }
+
+/// Rótulo inicial do objeto (campo `+0x1ec`, válido com o bit 0x80 de `+0x178`): nas
+/// plataformas do `OPO.ANM` é o próprio tipo ou uma variante (68, 70, 272); nas peças do
+/// `OPL.ANM`, um dos rótulos 1 a 12; o Jake e os itens de tipo 6 não têm.
+#[test]
+fn real_object_start_labels() {
+    use openhunted_formats::{Level, open_data, parse_mission_list};
+    let path = data_or_skip!();
+    let gd = open_data(&path).unwrap();
+    let la = gd.levels().unwrap();
+    let mut seen = std::collections::BTreeSet::new();
+    for m in parse_mission_list(&la.get("ENGLEVEL.TXT").unwrap()).unwrap() {
+        let l = Level::parse(&la.get(&m.file).unwrap()).unwrap();
+        let cells = l.cells.iter().flatten();
+        for o in l.objects.iter().chain(cells.flat_map(|c| c.objects.iter())) {
+            match (o.names[0].to_uppercase().as_str(), o.kind) {
+                ("OPO.ANM", k) => {
+                    seen.insert((k, o.start_label));
+                }
+                ("OPL.ANM", _) => assert!(matches!(o.start_label, Some(1..=12)), "{o:?}"),
+                (_, 1 | 6) => assert_eq!(o.start_label, None),
+                _ => {}
+            }
+        }
+    }
+    assert!(seen.contains(&(68, Some(68))), "{seen:?}");
+    assert!(seen.contains(&(70, Some(70))), "{seen:?}");
+    assert!(seen.contains(&(72, Some(272))), "{seen:?}");
+}

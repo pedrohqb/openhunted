@@ -18,6 +18,10 @@ pub struct LevelObject {
     pub y: i32,
     /// Demais campos inteiros na ordem do arquivo (significado a decifrar).
     pub fields: Vec<i32>,
+    /// Rótulo inicial da animação (campo `+0x1ec`, versão ≥ 1007), quando o bit 0x80 dos
+    /// sinalizadores (`+0x178`, `fields[3]`) está ligado. Escolhe o quadro mostrado e o de
+    /// referência da escala (`0x004358b3`); ver `docs/re/objetos.md`.
+    pub start_label: Option<i32>,
     /// Pares de pontos (versão ≥ 1006).
     pub points: Vec<(i32, i32)>,
     /// Tabela de valores (16 nas versões < 1004).
@@ -148,8 +152,13 @@ fn objects(c: &mut Cur) -> Result<Vec<LevelObject>> {
         for _ in 0..8 {
             fields.push(c.i32()?); // 15c, 160, 174, 178, 17c, 180, 184, 18c
         }
+        let mut start_label = None;
         if v >= 1007 {
-            fields.push(c.i32()?); // 1ec
+            let l = c.i32()?; // 1ec
+            fields.push(l);
+            if fields[3] & 0x80 != 0 {
+                start_label = Some(l);
+            }
         }
         for _ in 0..7 {
             fields.push(c.i32()?); // 194, 198, 19c, 1b8, 254, 258, 25c
@@ -189,6 +198,7 @@ fn objects(c: &mut Cur) -> Result<Vec<LevelObject>> {
             x,
             y,
             fields,
+            start_label,
             points,
             values,
             triggers,

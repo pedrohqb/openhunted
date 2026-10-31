@@ -61,6 +61,35 @@ pub fn object_scale(a: i32, b: i32, ref_w: i32, ref_h: i32) -> (i32, i32) {
     }
 }
 
+/// Quadro de referência da escala de um objeto e o jogador da animação que ele mostra
+/// (`0x004358b3`): com rótulo inicial (`start_label`), o primeiro quadro desse rótulo (o
+/// original devolve o quadro 0 se o rótulo não existe); sem ele, o quadro 0. Os itens de tipo
+/// 6 (`GENERIC_ITEM`) ficam parados no quadro `values[0]` (provisório, ver M2), mas a escala
+/// continua a do quadro 0.
+fn object_start(o: &LevelObject, a: &Animation) -> (usize, AnimPlayer, bool) {
+    let n = a.frames.len();
+    if let Some(id) = o.start_label.and_then(|l| u16::try_from(l).ok()) {
+        if let Some(p) = AnimPlayer::at_label(a, id) {
+            let f = a
+                .labels
+                .iter()
+                .find(|l| l.id == id)
+                .map_or(0, |l| l.frame as usize);
+            return (if f < n { f } else { 0 }, p, false);
+        }
+    }
+    if o.kind == GENERIC_ITEM {
+        let f = o
+            .values
+            .first()
+            .map(|&v| v.max(0) as usize)
+            .filter(|&f| f < n)
+            .unwrap_or(0);
+        return (0, AnimPlayer::from_frame(a, f), true);
+    }
+    (0, AnimPlayer::from_frame(a, 0), false)
+}
+
 /// Objeto sem animação (lógica) ou com animação ausente: mostrado só no overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Marker {
@@ -280,26 +309,16 @@ impl Scene {
             }
             match assets.animation(&o.names[0]) {
                 Ok(a) => {
-                    let frozen = o.kind == GENERIC_ITEM;
-                    let start = if frozen {
-                        o.values
-                            .first()
-                            .map(|&v| v.max(0) as usize)
-                            .filter(|&f| f < a.frames.len())
-                            .unwrap_or(0)
-                    } else {
-                        0
-                    };
-                    let player = AnimPlayer::from_frame(&a, start);
                     let n = o.fields.len();
                     let (ta, tb) = if n >= 2 {
                         (o.fields[n - 2], o.fields[n - 1])
                     } else {
                         (0, 0)
                     };
+                    let (ref_frame, player, frozen) = object_start(o, &a);
                     let (rw, rh) = a
                         .frames
-                        .first()
+                        .get(ref_frame)
                         .map_or((0, 0), |f| (i32::from(f.width), i32::from(f.height)));
                     let scale = object_scale(ta, tb, rw, rh);
                     if o.kind == JAKE && s.jake.is_none() {
@@ -444,6 +463,7 @@ mod tests {
             x,
             y,
             fields: vec![],
+            start_label: None,
             points: vec![],
             values: vec![],
             triggers: vec![],
@@ -545,6 +565,54 @@ mod tests {
         assert_eq!(fb.pixels[(37 - 20) * 64 + (198 - 190) - 1], 0);
         let mut empty = crate::Framebuffer::new(64, 64);
         s.draw(&mut a, &mut empty, (10_000, 10_000), true);
+    }
+
+    /// Animação com dois rótulos: 68 (quadro 0, 78×10) e 272 (quadro 1, 18×64).
+    fn two_label_anim() -> Animation {
+        let frame = |width, height| openhunted_formats::AnimFrame {
+            x: 0,
+            y: 0,
+            width,
+            height,
+            script_offset: 0,
+            extra: 0,
+        };
+        let label = |frame, id| openhunted_formats::AnimLabel {
+            frame,
+            id,
+            name: None,
+        };
+        Animation {
+            version: 1004,
+            width: 78,
+            height: 64,
+            extra: [0; 3],
+            table_a: vec![],
+            frames: vec![frame(78, 10), frame(18, 64)],
+            labels: vec![label(0, 68), label(1, 272)],
+            script: vec![],
+            bitmaps: vec![],
+            palette: None,
+        }
+    }
+
+    #[test]
+    fn start_label_picks_shown_and_reference_frame() {
+        let a = two_label_anim();
+        let mut o = object(72, 0, 0, "OPO.ANM");
+        o.start_label = Some(272);
+        let (ref_frame, player, frozen) = object_start(&o, &a);
+        assert_eq!((ref_frame, player.frame(), frozen), (1, 1, false));
+        // sem rótulo inicial (ou rótulo inexistente): quadro 0
+        o.start_label = None;
+        assert_eq!(object_start(&o, &a).0, 0);
+        o.start_label = Some(999);
+        assert_eq!(object_start(&o, &a).0, 0);
+        // item de tipo 6: mostra values[0], mas a escala é a do quadro 0
+        let mut item = object(GENERIC_ITEM, 0, 0, "OGF.ANM");
+        item.values = vec![1];
+        let (ref_frame, player, frozen) = object_start(&item, &a);
+        assert_eq!((ref_frame, player.frame(), frozen), (0, 1, true));
     }
 
     #[test]

@@ -136,3 +136,34 @@ fn jake_lands_and_runs_left_in_tutorial() {
     }
     assert!(s.jake.as_ref().unwrap().body.x < x0 - 400);
 }
+
+/// Nenhum objeto é ampliado mais de 2×: o quadro de referência da escala é o do rótulo do
+/// tipo do objeto (ou, numa folha, o de proporção igual ao alvo), não o quadro 0.
+#[test]
+fn object_scale_reference_matches_object_kind() {
+    let Some(p) = std::env::var_os("OPENHUNTED_DATA") else {
+        return;
+    };
+    let gd = open_data(std::path::Path::new(&p)).unwrap();
+    let la = gd.levels().unwrap();
+    let missions =
+        openhunted_formats::parse_mission_list(&la.get("ENGLEVEL.TXT").unwrap()).unwrap();
+    let mut a = Assets::new(gd.resources().unwrap());
+    let mut bad = Vec::new();
+    for m in &missions {
+        let l = Level::parse(&la.get(&m.file).unwrap()).unwrap();
+        let s = Scene::build(&l, &mut a).unwrap();
+        for sp in s.sprites.iter().filter(|p| p.layer == Layer::Object) {
+            let (num, den) = sp.scale;
+            if num > 2 * den {
+                bad.push(format!("{} {}x{} {:?}", m.file, sp.x, sp.y, sp.scale));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "{} objetos ampliados demais: {:?}",
+        bad.len(),
+        &bad[..bad.len().min(10)]
+    );
+}

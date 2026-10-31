@@ -15,6 +15,18 @@ Objetos sem animação (nome vazio) são objetos de lógica: tipos 73 (388 ocorr
 0 (32) e 27 (1). Um objeto de tipo 0 aponta para `EDITOR.INI` (resto do editor de fases).
 Todas as demais animações de objeto e de decoração existem nos dados.
 
+## Rótulo inicial e escala
+
+O leitor de objetos (`0x00434170`) zera a escala (1/1) e mede o quadro de referência com
+`0x0043585c` → `0x00447ff0` (`0x004358b3`). O quadro é o primeiro do rótulo cujo id está no
+campo `+0x1ec` (busca em `0x004470fa`) quando o bit 0x80 dos sinalizadores `+0x178`
+(`fields[3]`) está ligado; senão, o quadro 0. Só depois chama a inicialização do tipo.
+
+Nos dados, as plataformas do `OPO.ANM` usam o próprio tipo ou uma variante (68 → 68, 70 → 70,
+72 → 272), as peças do `OPL.ANM` (tipo 56) um dos rótulos 1 a 12 (uma peça por rótulo), e os
+inimigos `OH1`/`OH2` um estado (50…55, 300…). O Jake e os itens de tipo 6 não têm o bit: a
+referência é o quadro 0. Com o quadro 0 em todos (M3a), a plataforma 72 saía 6,4× maior.
+
 ## Tipo 6: itens genéricos
 
 `OGF.ANM` tem um rótulo só cobrindo os 256 quadros de `OGF00.BMP` (216 deles são marcadores de

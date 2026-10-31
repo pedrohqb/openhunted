@@ -58,7 +58,7 @@ seguida de 6 bytes vale versão 1), `s16` contagem `N`; com `N > 0` a versão te
 |---|---|
 | `u32` tipo, `i32` x, `i32` y | |
 | 8 × `i32` (campos `15c`, `160`, `174`, `178`, `17c`, `180`, `184`, `18c` do objeto) | |
-| `i32` (`1ec`) | versão ≥ 1007 |
+| `i32` (`1ec`): rótulo inicial da animação, válido se o bit 0x80 de `178` estiver ligado | versão ≥ 1007 |
 | 7 × `i32` (`194`, `198`, `19c`, `1b8`, `254`, `258`, `25c`) | |
 | `i32` descartado | versão < 1012 |
 | 2 × `i32` (`1ac`, `1a8`) | versão ≥ 1010 |
