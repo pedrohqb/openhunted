@@ -21,7 +21,7 @@ versão < 1011 e `+0x19c` ≠ 0).
 `modos & modo_do_jogo ≠ 0` ou o sinalizador 0x10 está ligado. O modo do jogo é uma máscara
 global (`0x4972f8`): 0x2 no solo (Jake ou Garathe), 0x8…0x80 nos modos de vários jogadores.
 O bit 0 dos modos marca **vaga de jogador**: o objeto só existe com um jogador atribuído
-(`+0x19c`). Nas 61 fases solo há exatamente um objeto de jogador com modos & 3 = 3: o Jake nas
+(`+0x19c`). Nas 65 fases solo há exatamente um objeto de jogador com modos & 3 = 3: o Jake nas
 fases J, o Garathe nas M.
 
 **Quem colide com quem** (`0x00436caf`, para o objeto que se move contra cada outro):

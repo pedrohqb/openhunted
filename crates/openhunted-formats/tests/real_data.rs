@@ -408,3 +408,34 @@ fn real_object_start_labels() {
     assert!(seen.contains(&(70, Some(70))), "{seen:?}");
     assert!(seen.contains(&(72, Some(272))), "{seen:?}");
 }
+
+/// Toda missão solo (jogador 1 = Jake, 2 = Garathe no `ENGLEVEL.TXT`) tem exatamente um objeto
+/// de início de jogador (modos & 3 = 3: vaga de jogador presente no modo solo, 0x2), do tipo
+/// do jogador.
+#[test]
+fn real_solo_levels_have_one_player() {
+    use openhunted_formats::{Level, open_data, parse_mission_list};
+    let path = data_or_skip!();
+    let gd = open_data(&path).unwrap();
+    let la = gd.levels().unwrap();
+    let mut solo = 0;
+    for m in parse_mission_list(&la.get("ENGLEVEL.TXT").unwrap()).unwrap() {
+        let kind = match m.player {
+            1 => 1,
+            2 => 2,
+            _ => continue,
+        };
+        solo += 1;
+        let l = Level::parse(&la.get(&m.file).unwrap()).unwrap();
+        let cells = l.cells.iter().flatten();
+        let starts: Vec<_> = l
+            .objects
+            .iter()
+            .chain(cells.flat_map(|c| c.objects.iter()))
+            .filter(|o| o.modes & 3 == 3)
+            .map(|o| o.kind)
+            .collect();
+        assert_eq!(starts, vec![kind], "{}", m.file);
+    }
+    assert_eq!(solo, 65);
+}

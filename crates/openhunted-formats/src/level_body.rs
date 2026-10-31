@@ -22,6 +22,10 @@ pub struct LevelObject {
     /// sinalizadores (`+0x178`, `fields[3]`) está ligado. Escolhe o quadro mostrado e o de
     /// referência da escala (`0x004358b3`); ver `docs/re/objetos.md`.
     pub start_label: Option<i32>,
+    /// Máscara de modos de jogo em que o objeto existe (`+0x1a8`): lida na versão ≥ 1010,
+    /// senão 0xfe; o bit 0 (vaga de jogador) é ligado nas versões < 1011 se `+0x19c` ≠ 0
+    /// (`0x00434305`…). Ver `docs/re/objetos.md`.
+    pub modes: i32,
     /// Pares de pontos (versão ≥ 1006).
     pub points: Vec<(i32, i32)>,
     /// Tabela de valores (16 nas versões < 1004).
@@ -160,15 +164,25 @@ fn objects(c: &mut Cur) -> Result<Vec<LevelObject>> {
                 start_label = Some(l);
             }
         }
-        for _ in 0..7 {
-            fields.push(c.i32()?); // 194, 198, 19c, 1b8, 254, 258, 25c
+        let mut f19c = 0;
+        for i in 0..7 {
+            let f = c.i32()?; // 194, 198, 19c, 1b8, 254, 258, 25c
+            if i == 2 {
+                f19c = f;
+            }
+            fields.push(f);
         }
         if v < 1012 {
             c.i32()?; // descartado pelo original
         }
+        let mut modes = 0xfe;
         if v >= 1010 {
             fields.push(c.i32()?); // 1ac
-            fields.push(c.i32()?); // 1a8
+            modes = c.i32()?; // 1a8
+            fields.push(modes);
+        }
+        if v < 1011 && f19c != 0 {
+            modes |= 1;
         }
         let mut points = Vec::new();
         if v >= 1006 {
@@ -199,6 +213,7 @@ fn objects(c: &mut Cur) -> Result<Vec<LevelObject>> {
             y,
             fields,
             start_label,
+            modes,
             points,
             values,
             triggers,
@@ -429,6 +444,54 @@ pub(crate) mod tests {
         assert_eq!(c.decorations[0].animation, "DECO.ANM");
         assert_eq!((c.decorations[0].x, c.decorations[0].y), (40, 50));
         assert!(cells[1].is_none());
+    }
+
+    /// Lista com um objeto da versão `v`: `19c` e `1a8` dados (campos ausentes na versão são
+    /// omitidos, como no arquivo).
+    fn object_list(v: i16, f19c: i32, f1a8: i32) -> Vec<u8> {
+        let mut w = W::default();
+        w.s16(v).s16(1).i32(1).i32(0).i32(0);
+        for _ in 0..8 {
+            w.i32(0);
+        }
+        if v >= 1007 {
+            w.i32(0); // 1ec
+        }
+        w.i32(0).i32(0).i32(f19c).i32(0).i32(0).i32(0).i32(0);
+        if v < 1012 {
+            w.i32(0);
+        }
+        if v >= 1010 {
+            w.i32(0).i32(f1a8);
+        }
+        if v >= 1006 {
+            w.s16(0);
+        }
+        if v >= 1004 {
+            w.s16(0).i32(0).s16(0);
+        } else {
+            for _ in 0..16 {
+                w.i32(0);
+            }
+        }
+        w.sz("").sz("").i32(0).i32(0);
+        w.0
+    }
+
+    #[test]
+    fn object_modes_default_and_version() {
+        let modes = |v, f19c, f1a8| {
+            let b = object_list(v, f19c, f1a8);
+            let mut c = Cur { d: &b, p: 0 };
+            let o = objects(&mut c).unwrap();
+            assert_eq!(c.p, b.len());
+            o[0].modes
+        };
+        assert_eq!(modes(1013, 0, 0x3), 0x3);
+        assert_eq!(modes(1009, 0, 0), 0xfe);
+        assert_eq!(modes(1009, 7, 0), 0xff);
+        assert_eq!(modes(1010, 7, 0x2), 0x3);
+        assert_eq!(modes(1011, 7, 0x2), 0x2);
     }
 
     #[test]

@@ -464,6 +464,7 @@ mod tests {
             y,
             fields: vec![],
             start_label: None,
+            modes: 0xfe,
             points: vec![],
             values: vec![],
             triggers: vec![],

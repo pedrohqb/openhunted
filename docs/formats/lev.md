@@ -61,7 +61,7 @@ seguida de 6 bytes vale versão 1), `s16` contagem `N`; com `N > 0` a versão te
 | `i32` (`1ec`): rótulo inicial da animação, válido se o bit 0x80 de `178` estiver ligado | versão ≥ 1007 |
 | 7 × `i32` (`194`, `198`, `19c`, `1b8`, `254`, `258`, `25c`) | |
 | `i32` descartado | versão < 1012 |
-| 2 × `i32` (`1ac`, `1a8`) | versão ≥ 1010 |
+| 2 × `i32` (`1ac`, `1a8`): `1a8` = máscara de modos de jogo (padrão 0xfe; bit 0 = vaga de jogador, ligado nas versões < 1011 se `19c` ≠ 0) | versão ≥ 1010 |
 | `s16` n + n × (`i32`, `i32`) pontos | versão ≥ 1006 |
 | `s16` n (16 nas versões < 1004) + n × `i32` valores | |
 | `i32` (`118`), `s16` n + n × (`i32` [+ `i32` se versão ≥ 1005]) gatilhos | versão ≥ 1004 |
