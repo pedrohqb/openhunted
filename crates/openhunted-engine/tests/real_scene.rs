@@ -197,28 +197,82 @@ fn jake_stands_on_objects_in_t_j_007() {
     assert!(j.body.on_ground);
 }
 
-/// Entradas aleatórias (LCG fixa) nunca deixam o Jake dentro de um sólido (célula ou objeto).
+/// Todas as fases do `ENGLEVEL.TXT`.
+fn mission_files() -> Vec<String> {
+    let p = std::env::var_os("OPENHUNTED_DATA").unwrap();
+    let gd = open_data(std::path::Path::new(&p)).unwrap();
+    let la = gd.levels().unwrap();
+    openhunted_formats::parse_mission_list(&la.get("ENGLEVEL.TXT").unwrap())
+        .unwrap()
+        .into_iter()
+        .map(|m| m.file)
+        .collect()
+}
+
+/// Índices dos sólidos que `r` intersecta.
+fn overlapped(s: &Scene, r: &openhunted_engine::Rect) -> Vec<usize> {
+    let solids = s.world.solids();
+    (0..solids.len())
+        .filter(|&i| solids[i].overlaps(r))
+        .collect()
+}
+
+/// Em toda fase com Jake, entradas aleatórias (LCG fixa) nunca o fazem entrar num sólido que
+/// ele ainda não intersectava (pode nascer sobreposto, como na I_J_107, e sair).
 #[test]
-fn random_input_never_ends_inside_solids() {
+fn random_input_never_enters_solids() {
     use openhunted_engine::input::{JUMP, LEFT, RIGHT};
-    for level in ["T_J_007.LEV", "D_J_009.LEV", "H_J_001.LEV", "I_J_101.LEV"] {
-        let Some((mut s, _)) = load(level) else {
-            return;
-        };
+    if std::env::var_os("OPENHUNTED_DATA").is_none() {
+        return;
+    }
+    for level in mission_files() {
+        let (mut s, _) = load(&level).unwrap();
+        if s.jake.is_none() {
+            continue;
+        }
         let mut seed: u32 = 0x1234_5678;
         let mut input = 0;
-        for t in 0..2000 {
+        let mut inside = overlapped(&s, &s.jake.as_ref().unwrap().body.bounds());
+        for t in 0..1000 {
             if t % 7 == 0 {
                 seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
                 input =
                     [0, LEFT, RIGHT, LEFT | JUMP, RIGHT | JUMP, JUMP][(seed >> 16) as usize % 6];
             }
             s.tick(input);
-            let b = s.jake.as_ref().unwrap().body.bounds();
+            let now = overlapped(&s, &s.jake.as_ref().unwrap().body.bounds());
             assert!(
-                !s.world.blocked(&b),
-                "{level}: dentro de sólido no tique {t}: {b:?}"
+                now.iter().all(|i| inside.contains(i)),
+                "{level}: entrou num sólido no tique {t}"
             );
+            inside = now;
         }
+    }
+}
+
+/// Em toda fase com Jake, ele responde: depois de assentar, anda para algum dos lados.
+#[test]
+fn jake_can_move_in_every_level() {
+    use openhunted_engine::input::{LEFT, RIGHT};
+    if std::env::var_os("OPENHUNTED_DATA").is_none() {
+        return;
+    }
+    for level in mission_files() {
+        let (s0, _) = load(&level).unwrap();
+        if s0.jake.is_none() {
+            continue;
+        }
+        let moved = [LEFT, RIGHT].iter().any(|&dir| {
+            let mut s = s0.clone();
+            for _ in 0..40 {
+                s.tick(0);
+            }
+            let x0 = s.jake.as_ref().unwrap().body.x;
+            for _ in 0..10 {
+                s.tick(dir);
+            }
+            s.jake.as_ref().unwrap().body.x != x0
+        });
+        assert!(moved, "{level}: o Jake não sai do lugar");
     }
 }

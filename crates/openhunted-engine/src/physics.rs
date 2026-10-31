@@ -23,7 +23,7 @@ pub struct Rect {
 }
 
 impl Rect {
-    fn overlaps(&self, o: &Rect) -> bool {
+    pub fn overlaps(&self, o: &Rect) -> bool {
         let (ax1, ay1) = (
             i64::from(self.x) + i64::from(self.w),
             i64::from(self.y) + i64::from(self.h),
@@ -65,6 +65,24 @@ impl World {
     /// Algum sólido intersecta `r`?
     pub fn blocked(&self, r: &Rect) -> bool {
         self.solids.iter().any(|s| s.overlaps(r))
+    }
+
+    /// Algum sólido que `start` ainda não intersecta intersecta `r`? (Um corpo que nasceu ou
+    /// ficou sobreposto a um sólido pode sair dele em vez de ficar preso.)
+    fn blocked_from(&self, start: &Rect, r: &Rect) -> bool {
+        self.solids
+            .iter()
+            .any(|s| s.overlaps(r) && !s.overlaps(start))
+    }
+
+    /// Há chão até `probe` pixels abaixo de `r`, ignorando os sólidos que `r` já intersecta?
+    pub fn standing_on(&self, r: &Rect, probe: i32) -> bool {
+        let below = Rect {
+            y: r.y.saturating_add(r.h),
+            h: probe.max(1),
+            ..*r
+        };
+        self.blocked_from(r, &below)
     }
 
     /// Há chão até `probe` pixels abaixo de `r` (e `r` está livre)?
@@ -134,7 +152,8 @@ fn friction(v: i32) -> i32 {
     }
 }
 
-/// Move até `d` pixels num eixo, parando antes do primeiro sólido; devolve o quanto andou.
+/// Move até `d` pixels num eixo, parando antes do primeiro sólido que `start` ainda não
+/// intersecta; devolve o quanto andou.
 fn sweep(world: &World, start: Rect, d: i32, horizontal: bool) -> i32 {
     let d = d.clamp(-MAX_STEP, MAX_STEP);
     let unit = d.signum();
@@ -146,7 +165,7 @@ fn sweep(world: &World, start: Rect, d: i32, horizontal: bool) -> i32 {
         } else {
             start.moved(0, next)
         };
-        if world.blocked(&r) {
+        if world.blocked_from(&start, &r) {
             break;
         }
         done = next;
@@ -181,7 +200,7 @@ pub fn step(b: &mut Body, world: &World, gravity: bool) {
         b.vy = bounce(b.vy);
         contact_y = true;
     }
-    b.on_ground = world.floor_at(&b.bounds(), 1);
+    b.on_ground = world.standing_on(&b.bounds(), 1);
     if contact_y || b.on_ground {
         b.vx = friction(b.vx);
     }
@@ -222,6 +241,26 @@ mod tests {
                 h: 100,
             },
         ])
+    }
+
+    #[test]
+    fn body_overlapping_a_solid_stands_and_walks_out() {
+        // nasce com a caixa (x 302..320) dentro da parede (x 300..320), de pé no chão
+        let w = floor();
+        let mut b = body(300, 53);
+        step(&mut b, &w, true);
+        assert!(b.on_ground, "o chão sustenta mesmo sobreposto à parede");
+        b.vx = -12 * SUB;
+        step(&mut b, &w, true);
+        assert_eq!(b.x, 288, "anda para a esquerda dentro da parede");
+        b.vx = -12 * SUB;
+        step(&mut b, &w, true);
+        assert_eq!(b.x, 276, "sai da parede");
+        // já fora, a parede volta a barrar
+        b.vx = 12 * SUB;
+        step(&mut b, &w, true);
+        assert_eq!(b.bounds().x + b.bounds().w, 300);
+        assert!(b.hit_wall);
     }
 
     #[test]
