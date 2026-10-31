@@ -1,0 +1,20 @@
+[package]
+name = "openhunted"
+description = "OpenHunted: reimplementação livre de Hunter Hunted (1996) — visualizador de fase"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Compila a SDL3 a partir do código (CI e sistemas sem SDL3 instalada).
+bundled-sdl = ["sdl3/build-from-source-static"]
+
+[dependencies]
+openhunted-formats = { path = "../openhunted-formats" }
+openhunted-engine = { path = "../openhunted-engine" }
+sdl3 = "0.20"
+
+[dev-dependencies]
+openhunted-formats = { path = "../openhunted-formats", features = ["test-support"] }

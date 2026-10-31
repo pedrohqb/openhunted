@@ -1,0 +1,170 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! OpenHunted: visualizador de fase (M2). Abre uma fase do Hunter Hunted numa janela SDL3,
+//! com rolagem e animações.
+//!
+//! Uso: `openhunted --data <CD, pasta Hunter/ ou .iso> [--level T_J_001.LEV] [--frames N]`
+//! Teclas: setas rolam, PageUp/PageDown pulam uma tela, Home/End vão às pontas, Tab mostra a
+//! colisão e os objetos de lógica, Esc sai.
+
+mod viewer;
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+use std::time::{Duration, Instant};
+
+use openhunted_engine::{SCREEN_H, SCREEN_W};
+use sdl3::event::Event;
+use sdl3::keyboard::{Keycode, Scancode};
+use sdl3::messagebox::{MessageBoxFlag, show_simple_message_box};
+use sdl3::pixels::PixelFormat;
+
+use viewer::{Action, Viewer};
+
+struct Args {
+    data: PathBuf,
+    level: String,
+    frames: Option<u64>,
+}
+
+fn parse_args() -> Result<Args, String> {
+    let mut data = std::env::var_os("OPENHUNTED_DATA").map(PathBuf::from);
+    let mut level = "T_J_001.LEV".to_string();
+    let mut frames = None;
+    let mut it = std::env::args().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--data" => data = it.next().map(PathBuf::from),
+            "--level" => level = it.next().ok_or("--level sem valor")?,
+            "--frames" => {
+                frames = Some(
+                    it.next()
+                        .and_then(|n| n.parse().ok())
+                        .ok_or("--frames precisa de um número")?,
+                )
+            }
+            "-h" | "--help" => {
+                return Err(
+                    "uso: openhunted --data <CD|Hunter/|.iso> [--level ARQ.LEV] [--frames N]"
+                        .into(),
+                );
+            }
+            other => return Err(format!("argumento desconhecido: {other}")),
+        }
+    }
+    let data = data.ok_or("informe --data (raiz do CD, pasta Hunter/ ou imagem .iso)")?;
+    Ok(Args {
+        data,
+        level,
+        frames,
+    })
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("erro: {e}");
+            let _ = show_simple_message_box(MessageBoxFlag::ERROR, "OpenHunted", &e, None);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<(), String> {
+    let args = parse_args()?;
+    let mut viewer = Viewer::load(&args.data, &args.level).map_err(|e| e.to_string())?;
+
+    let sdl = sdl3::init().map_err(|e| e.to_string())?;
+    let video = sdl.video().map_err(|e| e.to_string())?;
+    let window = video
+        .window(
+            &format!("OpenHunted — {}", args.level),
+            SCREEN_W as u32 * 2,
+            SCREEN_H as u32 * 2,
+        )
+        .resizable()
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut canvas = window.into_canvas();
+    canvas
+        .set_logical_size(
+            SCREEN_W as u32,
+            SCREEN_H as u32,
+            sdl3::sys::render::SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
+        )
+        .map_err(|e| e.to_string())?;
+    let creator = canvas.texture_creator();
+    let mut texture = creator
+        .create_texture_streaming(PixelFormat::RGBA32, SCREEN_W as u32, SCREEN_H as u32)
+        .map_err(|e| e.to_string())?;
+    texture.set_scale_mode(sdl3::render::ScaleMode::Nearest);
+    let mut events = sdl.event_pump().map_err(|e| e.to_string())?;
+    let mut rgba = vec![0u8; SCREEN_W * SCREEN_H * 4];
+    let mut last = Instant::now();
+    let mut frame: u64 = 0;
+    let mut shown = (viewer.camera(), viewer.overlay());
+
+    'main: loop {
+        for ev in events.poll_iter() {
+            match ev {
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => break 'main,
+                Event::KeyDown {
+                    keycode: Some(k),
+                    repeat: false,
+                    ..
+                } => match k {
+                    Keycode::Tab => viewer.apply(Action::ToggleOverlay),
+                    Keycode::PageUp => viewer.apply(Action::PageLeft),
+                    Keycode::PageDown => viewer.apply(Action::PageRight),
+                    Keycode::Home => viewer.apply(Action::Home),
+                    Keycode::End => viewer.apply(Action::End),
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        let keys = events.keyboard_state();
+        for (sc, act) in [
+            (Scancode::Left, Action::ScrollLeft),
+            (Scancode::Right, Action::ScrollRight),
+            (Scancode::Up, Action::ScrollUp),
+            (Scancode::Down, Action::ScrollDown),
+        ] {
+            if keys.is_scancode_pressed(sc) {
+                viewer.apply(act);
+            }
+        }
+        if (viewer.camera(), viewer.overlay()) != shown {
+            shown = (viewer.camera(), viewer.overlay());
+            let mode = if shown.1 { " — colisão" } else { "" };
+            let title = format!(
+                "OpenHunted — {} — x={} y={}{mode}",
+                args.level, shown.0.0, shown.0.1
+            );
+            let _ = canvas.window_mut().set_title(&title);
+        }
+        let now = Instant::now();
+        let ms = now.duration_since(last).as_millis().min(1000) as u32;
+        last = now;
+        viewer.advance(ms);
+        viewer.render_rgba(&mut rgba);
+        texture
+            .update(None, &rgba, SCREEN_W * 4)
+            .map_err(|e| e.to_string())?;
+        canvas.clear();
+        canvas
+            .copy(&texture, None, None)
+            .map_err(|e| e.to_string())?;
+        canvas.present();
+        frame += 1;
+        if args.frames.is_some_and(|n| frame >= n) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    Ok(())
+}

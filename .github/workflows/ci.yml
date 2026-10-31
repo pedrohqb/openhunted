@@ -13,6 +13,12 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Dependências para compilar a SDL3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libx11-dev libxext-dev libxcursor-dev libxrandr-dev \
+            libxi-dev libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev \
+            wayland-protocols libasound2-dev libpulse-dev libdrm-dev libgbm-dev libegl-dev libgl-dev
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets --features openhunted/bundled-sdl -- -D warnings
+      - run: cargo test --workspace --features openhunted/bundled-sdl
