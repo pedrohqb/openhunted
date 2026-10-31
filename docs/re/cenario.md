@@ -15,6 +15,14 @@
   têm de 2 a 7 camadas (a `T_J_001`, com uma só, é exceção). Desenha-se z = 0 primeiro.
 - As posições dos objetos estão em pixels da fase (na `T_J_001`, x de 51 a 1696 para 14 células).
 
+## Espelhamento das células
+
+O campo `+0x40` da célula (versão ≥ 1006: o `s16` depois do terceiro dos três `s16` que
+seguem o retângulo; versão 1005: o `i32` correspondente) **espelha na horizontal** o bloco de
+cenário e as caixas de colisão. Evidência: em todas as fases, as 1.657 células de borda direita
+cujo BRD tem parede à esquerda têm o campo em 1, e as 1.656 de borda esquerda com parede à
+esquerda têm o campo em 0. A caixa espelhada vai para `x' = 128 − x − largura`.
+
 ## Transparência
 
 - Os bitmaps de sprite (Jake `J001.BMP`, mina `OHM00.BMP`) têm o fundo no índice 0, nos quatro
