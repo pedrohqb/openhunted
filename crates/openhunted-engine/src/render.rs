@@ -105,6 +105,19 @@ impl Framebuffer {
     }
 
     /// Contorno de retângulo (w × h), recortado.
+    /// Preenche o retângulo (recortado nas bordas).
+    pub fn fill_rect(&mut self, x: i32, y: i32, w: i32, h: i32, color: u8) {
+        if w <= 0 || h <= 0 {
+            return;
+        }
+        let (x0, y0) = (x.max(0) as usize, y.max(0) as usize);
+        let x1 = (x.saturating_add(w)).clamp(0, self.width as i32) as usize;
+        let y1 = (y.saturating_add(h)).clamp(0, self.height as i32) as usize;
+        for row in y0..y1 {
+            self.pixels[row * self.width + x0..row * self.width + x1].fill(color);
+        }
+    }
+
     pub fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, color: u8) {
         if w <= 0 || h <= 0 {
             return;

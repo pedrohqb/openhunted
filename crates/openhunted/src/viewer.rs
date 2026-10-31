@@ -5,10 +5,27 @@
 use std::path::Path;
 
 use openhunted_engine::{
-    Assets, Framebuffer, SCREEN_H, SCREEN_W, Scene, TICK_MS, background_index, clamp_camera,
-    display_palette,
+    Assets, Event, Framebuffer, Outcome, SCREEN_H, SCREEN_W, Scene, TICK_MS, background_index,
+    clamp_camera, display_palette, draw_text, measure_text,
 };
-use openhunted_formats::{Level, Palette, open_data};
+use openhunted_formats::{Bitmap, Font, Frame, Level, Palette, open_data};
+
+/// Dica do tutorial aberta (modal: o jogo para).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Modal {
+    pub text: String,
+    pub left_of_jake: bool,
+    /// Milissegundos desde a abertura.
+    pub open_ms: u32,
+}
+
+/// Fecha ao soltar uma tecla depois de 500 ms, ou após 15 s (`docs/re/dicas.md`).
+const MODAL_MIN_MS: u32 = 500;
+const MODAL_MAX_MS: u32 = 15_000;
+/// Cor de fundo da caixa da dica (`0x45ca44`).
+const MODAL_FILL: u8 = 211;
+/// Cor do HUD e das mensagens de fim (branco da paleta do Windows).
+const TEXT_COLOR: u8 = 255;
 
 /// Pixels de rolagem por quadro com uma seta pressionada.
 pub const SCROLL_STEP: i32 = 8;
@@ -40,6 +57,10 @@ pub struct Viewer {
     input: u32,
     /// Teclas apertadas desde o último tique (um toque curto entre dois tiques não se perde).
     taps: u32,
+    font: Option<Font>,
+    /// Os 8 quadros de `SWIZARD.BMP`: cantos e bordas da moldura da dica.
+    frame_tiles: Vec<Frame>,
+    modal: Option<Modal>,
 }
 
 impl Viewer {
@@ -53,7 +74,22 @@ impl Viewer {
         for w in &scene.warnings {
             eprintln!("aviso: {w}");
         }
-        Ok(Self::new(scene, assets, &palette))
+        let mut v = Self::new(scene, assets, &palette);
+        v.font = v
+            .assets
+            .archive()
+            .get("SLEVD.PFT")
+            .ok()
+            .and_then(|d| Font::parse(d).ok());
+        v.frame_tiles = v
+            .assets
+            .archive()
+            .get("SWIZARD.BMP")
+            .ok()
+            .and_then(|d| Bitmap::parse(d).ok())
+            .map(|b| b.frames)
+            .unwrap_or_default();
+        Ok(v)
     }
 
     pub fn new(scene: Scene, assets: Assets, palette: &Palette) -> Self {
@@ -72,6 +108,41 @@ impl Viewer {
             fb: Framebuffer::new(SCREEN_W, SCREEN_H),
             input: 0,
             taps: 0,
+            font: None,
+            frame_tiles: Vec::new(),
+            modal: None,
+        }
+    }
+
+    pub fn modal(&self) -> Option<&Modal> {
+        self.modal.as_ref()
+    }
+
+    pub fn outcome(&self) -> Option<Outcome> {
+        self.scene.outcome
+    }
+
+    /// Centro do Jake em px da fase, se houver.
+    pub fn focus(&self) -> Option<(i32, i32)> {
+        self.scene.focus()
+    }
+
+    /// Texto do HUD.
+    pub fn hud_text(&self) -> Option<String> {
+        self.scene
+            .jake
+            .as_ref()
+            .map(|j| format!("VIDA {}  ARMADURA {}", j.health.hp, j.health.armor))
+    }
+
+    /// Uma tecla foi solta: fecha a dica se ela já está aberta há 500 ms.
+    pub fn key_released(&mut self) {
+        if self
+            .modal
+            .as_ref()
+            .is_some_and(|m| m.open_ms >= MODAL_MIN_MS)
+        {
+            self.modal = None;
         }
     }
 
@@ -118,21 +189,113 @@ impl Viewer {
     }
 
     /// Avança o relógio em `ms` milissegundos; devolve quantos ticks de animação rodaram.
+    /// Com uma dica aberta, o jogo não anda (só o relógio da dica).
     pub fn advance(&mut self, ms: u32) -> u32 {
+        if let Some(m) = self.modal.as_mut() {
+            m.open_ms = m.open_ms.saturating_add(ms);
+            if m.open_ms > MODAL_MAX_MS {
+                self.modal = None;
+            }
+            return 0;
+        }
         self.pending_ms = self.pending_ms.saturating_add(ms);
         let ticks = self.pending_ms / TICK_MS;
         self.pending_ms %= TICK_MS;
+        let mut done = 0;
         for _ in 0..ticks {
             self.scene.tick(self.input | self.taps);
             self.taps = 0;
+            done += 1;
             if let Some((fx, fy)) = self.scene.focus() {
                 // A câmera segue o Jake, centrado na tela.
                 let view = (SCREEN_W as i32, SCREEN_H as i32);
                 let want = (fx - view.0 / 2, fy - view.1 / 2);
                 self.camera = clamp_camera((self.scene.width, self.scene.height), view, want);
             }
+            let mut opened = false;
+            for ev in self.scene.events.drain(..) {
+                if let (Event::Hint { text, left_of_jake }, false) = (&ev, opened) {
+                    self.modal = Some(Modal {
+                        text: text.clone(),
+                        left_of_jake: *left_of_jake,
+                        open_ms: 0,
+                    });
+                    opened = true;
+                }
+                // sons e veredito: nada a fazer aqui por enquanto
+            }
+            if opened {
+                self.pending_ms = 0;
+                break;
+            }
         }
-        ticks
+        done
+    }
+
+    /// Geometria da caixa da dica (`docs/re/dicas.md`): área do texto × 8/5 × 1,25 / 4,
+    /// lado `h = isqrt`, caixa `4h × h`, centrada na vertical e ao lado do Jake.
+    fn modal_box(&self, font: &Font, text: &str) -> (i32, i32, i32, i32, Vec<String>) {
+        let (tw, th) = measure_text(font, text);
+        let area = i64::from(tw.max(1)) * i64::from(th.max(1));
+        let s = (area * 8 / 5) * 125 / 100 / 4;
+        let mut h = (s as f64).sqrt() as i32;
+        h = h.max(th + 8);
+        let mut lines;
+        loop {
+            lines = wrap(font, text, 4 * h - 16);
+            if (lines.len() as i32) * (th + 2) <= h - 8 || h >= SCREEN_H as i32 - 40 {
+                break;
+            }
+            h += th;
+        }
+        let w = 4 * h;
+        let y = (SCREEN_H as i32 - h) / 2;
+        let x = match (self.scene.jake.as_ref(), self.modal.as_ref()) {
+            (Some(j), Some(m)) => {
+                let jb = j.body.bounds();
+                let (jl, jr) = (jb.x - self.camera.0, jb.x + jb.w - self.camera.0);
+                if m.left_of_jake {
+                    (jl - w - 20).max(16)
+                } else {
+                    (jr + 20).min(SCREEN_W as i32 - w - 16)
+                }
+            }
+            _ => (SCREEN_W as i32 - w) / 2,
+        };
+        (x, y, w, h, lines)
+    }
+
+    /// Moldura de `SWIZARD.BMP` (3 × 3 peças) em volta de (x, y, w, h) com margem de 8 px.
+    fn draw_frame(&mut self, x: i32, y: i32, w: i32, h: i32) {
+        let (x, y, w, h) = (x - 8, y - 8, w + 16, h + 16);
+        self.fb.fill_rect(x, y, w, h, MODAL_FILL);
+        let t = &self.frame_tiles;
+        if t.len() < 8 {
+            self.fb.rect(x, y, w, h, TEXT_COLOR);
+            return;
+        }
+        let (tl, top, tr, left, right, bl, bottom, br) =
+            (&t[0], &t[1], &t[2], &t[3], &t[4], &t[5], &t[6], &t[7]);
+        let (cw, ch) = (i32::from(tl.width), i32::from(tl.height));
+        let (bw, bh) = (i32::from(br.width), i32::from(br.height));
+        let mut cx = x + cw;
+        while cx < x + w - i32::from(tr.width) {
+            self.fb.blit(top, cx, y, true);
+            self.fb
+                .blit(bottom, cx, y + h - i32::from(bottom.height), true);
+            cx += i32::from(top.width);
+        }
+        let mut cy = y + ch;
+        while cy < y + h - bh {
+            self.fb.blit(left, x, cy, true);
+            self.fb
+                .blit(right, x + w - i32::from(right.width), cy, true);
+            cy += i32::from(left.height);
+        }
+        self.fb.blit(tl, x, y, true);
+        self.fb.blit(tr, x + w - i32::from(tr.width), y, true);
+        self.fb.blit(bl, x, y + h - i32::from(bl.height), true);
+        self.fb.blit(br, x + w - bw, y + h - bh, true);
     }
 
     /// Desenha a cena e converte para RGBA (640 × 480 × 4 bytes).
@@ -140,10 +303,63 @@ impl Viewer {
         self.fb.clear(self.background);
         self.scene
             .draw(&mut self.assets, &mut self.fb, self.camera, self.overlay);
+        if let Some(font) = self.font.clone() {
+            if let Some(hud) = self.hud_text() {
+                draw_text(&mut self.fb, &font, 8, 8, &hud, Some(TEXT_COLOR));
+            }
+            if let Some(m) = self.modal.clone() {
+                let (x, y, w, h, lines) = self.modal_box(&font, &m.text);
+                self.draw_frame(x, y, w, h);
+                let th = i32::from(font.height) + 2;
+                for (i, line) in lines.iter().enumerate() {
+                    draw_text(
+                        &mut self.fb,
+                        &font,
+                        x + 8,
+                        y + 4 + th * i as i32,
+                        line,
+                        None,
+                    );
+                }
+            }
+            if let Some(o) = self.scene.outcome {
+                let msg = match o {
+                    Outcome::Victory => "MISSAO CUMPRIDA",
+                    Outcome::Defeat => "JAKE MORREU",
+                };
+                let (tw, th) = measure_text(&font, msg);
+                let (x, y) = ((SCREEN_W as i32 - tw) / 2, (SCREEN_H as i32 - th) / 2);
+                self.fb
+                    .fill_rect(x - 12, y - 8, tw + 24, th + 16, MODAL_FILL);
+                draw_text(&mut self.fb, &font, x, y, msg, Some(TEXT_COLOR));
+            }
+        }
         for (o, &p) in out.chunks_exact_mut(4).zip(&self.fb.pixels) {
             o.copy_from_slice(&self.lut[p as usize]);
         }
     }
+}
+
+/// Quebra `text` em linhas de até `width` px, por palavras.
+fn wrap(font: &Font, text: &str, width: i32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let candidate = if line.is_empty() {
+            word.to_string()
+        } else {
+            format!("{line} {word}")
+        };
+        if measure_text(font, &candidate).0 <= width || line.is_empty() {
+            line = candidate;
+        } else {
+            lines.push(std::mem::replace(&mut line, word.to_string()));
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -209,6 +425,42 @@ mod tests {
         );
         assert_eq!(v.advance(30), 1);
         assert_eq!(v.taps, 0);
+    }
+
+    #[test]
+    fn hint_pauses_clock_and_closes_on_release() {
+        let mut v = viewer(640, 480);
+        v.modal = Some(Modal {
+            text: "Oi".into(),
+            left_of_jake: true,
+            open_ms: 0,
+        });
+        assert_eq!(v.advance(200), 0, "com a dica aberta o jogo não anda");
+        v.key_released();
+        assert!(v.modal().is_some(), "antes de 500 ms não fecha");
+        v.advance(400);
+        v.key_released();
+        assert!(v.modal().is_none());
+        v.modal = Some(Modal {
+            text: "Oi".into(),
+            left_of_jake: true,
+            open_ms: 0,
+        });
+        v.advance(16_000);
+        assert!(v.modal().is_none(), "fecha sozinha após 15 s");
+        assert_eq!(v.advance(50), 1, "e o jogo volta a andar");
+    }
+
+    #[test]
+    fn wrap_breaks_by_words() {
+        use openhunted_formats::test_support::mkpft;
+        // glifos de 2 px para 'a'..'c'; sem glifo de espaço, ele vale 4 px
+        let glyphs: Vec<(u32, Vec<u8>)> = (0..3).map(|_| (2, vec![1; 4])).collect();
+        let font = Font::parse(&mkpft('a' as u32, &glyphs)).unwrap();
+        // "aa" = 5 px; "aa bb" = 5 + 1 + 4 + 1 + 5 = 16
+        let lines = wrap(&font, "aa bb cc", 16);
+        assert_eq!(lines, vec!["aa bb", "cc"]);
+        assert_eq!(wrap(&font, "aa bb cc", 10), vec!["aa", "bb", "cc"]);
     }
 
     #[test]

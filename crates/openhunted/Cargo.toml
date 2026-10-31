@@ -18,3 +18,4 @@ sdl3 = "0.20"
 
 [dev-dependencies]
 openhunted-formats = { path = "../openhunted-formats", features = ["test-support"] }
+png = "0.18"

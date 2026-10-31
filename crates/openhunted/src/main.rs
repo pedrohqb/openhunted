@@ -3,7 +3,8 @@
 //! controlável (M3a).
 //!
 //! Uso: `openhunted --data <CD, pasta Hunter/ ou .iso> [--level T_J_001.LEV] [--frames N]`
-//! Teclas: setas movem o Jake e espaço pula (a câmera o acompanha). Sem Jake na fase, as setas
+//! Teclas: setas movem o Jake, espaço pula e CIMA usa a saída (a câmera o acompanha);
+//! qualquer tecla solta fecha a dica do tutorial. Sem Jake na fase, as setas
 //! rolam a tela, PageUp/PageDown pulam uma tela e Home/End vão às pontas. Tab mostra a colisão e
 //! os objetos de lógica, Esc sai.
 
@@ -103,7 +104,7 @@ fn run() -> Result<(), String> {
     let mut rgba = vec![0u8; SCREEN_W * SCREEN_H * 4];
     let mut last = Instant::now();
     let mut frame: u64 = 0;
-    let mut shown = (viewer.camera(), viewer.overlay());
+    let mut shown = (viewer.camera(), viewer.overlay(), String::new());
 
     'main: loop {
         for ev in events.poll_iter() {
@@ -113,6 +114,7 @@ fn run() -> Result<(), String> {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'main,
+                Event::KeyUp { .. } => viewer.key_released(),
                 Event::KeyDown {
                     keycode: Some(k),
                     repeat: false,
@@ -158,12 +160,21 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        if (viewer.camera(), viewer.overlay()) != shown {
-            shown = (viewer.camera(), viewer.overlay());
+        let status = match (viewer.outcome(), viewer.modal()) {
+            (Some(openhunted_engine::Outcome::Victory), _) => " — missão cumprida".to_string(),
+            (Some(openhunted_engine::Outcome::Defeat), _) => " — Jake morreu".to_string(),
+            (None, Some(_)) => " — dica (solte uma tecla)".to_string(),
+            (None, None) => String::new(),
+        };
+        if (viewer.camera(), viewer.overlay(), status.clone()) != shown {
+            shown = (viewer.camera(), viewer.overlay(), status);
             let mode = if shown.1 { " — colisão" } else { "" };
+            let jake = viewer
+                .focus()
+                .map_or(String::new(), |(x, y)| format!(" — Jake {x},{y}"));
             let title = format!(
-                "OpenHunted — {} — x={} y={}{mode}",
-                args.level, shown.0.0, shown.0.1
+                "OpenHunted — {} — x={} y={}{mode}{jake}{}",
+                args.level, shown.0.0, shown.0.1, shown.2
             );
             let _ = canvas.window_mut().set_title(&title);
         }
