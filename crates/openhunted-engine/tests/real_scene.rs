@@ -335,3 +335,35 @@ fn tutorial_hints_fire_in_order() {
     assert_eq!(hints[1].0, "To exit press UP.");
     assert!(hints[1].2 < 200);
 }
+
+/// Na T_J_001, correndo para a esquerda o Jake apanha a vida (50 → 75) e a armadura
+/// (0 → 25) do caminho; os itens somem.
+#[test]
+fn tutorial_items_are_picked_up() {
+    use openhunted_engine::input::{JUMP, LEFT};
+    let Some((mut s, _)) = load("T_J_001.LEV") else {
+        return;
+    };
+    s.entities.retain(|e| e.kind != 102);
+    s.rebuild_world();
+    for t in 0..600 {
+        let j = s.jake.as_ref().unwrap();
+        let input = if j.body.hit_wall && t % 10 == 0 {
+            LEFT | JUMP
+        } else {
+            LEFT
+        };
+        s.tick(input);
+        if s.jake.as_ref().unwrap().body.x < 1300 {
+            break;
+        }
+    }
+    let h = s.jake.as_ref().unwrap().health;
+    assert_eq!((h.hp, h.armor), (75, 25));
+    assert!(
+        s.entities
+            .iter()
+            .filter(|e| matches!(e.kind, 32 | 79))
+            .all(|e| !e.alive)
+    );
+}

@@ -546,12 +546,16 @@ impl Scene {
                 match e.behaviour {
                     Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, &mut out),
                     Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, &mut out),
+                    Behaviour::Pickup => behaviour::pickup::tick(e, &ctx, &mut out),
                     _ => {}
                 }
             }
         }
         self.rng = rng;
         if let Some(j) = self.jake.as_mut() {
+            if let Some(h) = out.heal.last() {
+                j.health = *h;
+            }
             if !out.jake_damage.is_empty() {
                 j.hurt(out.jake_damage);
             }

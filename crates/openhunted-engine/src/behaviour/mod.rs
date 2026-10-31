@@ -73,6 +73,8 @@ pub struct Out {
     pub spawn: Vec<Entity>,
     pub jake_damage: Pending,
     pub blasts: Vec<Blast>,
+    /// Vida do Jake depois de apanhar itens (a última vale).
+    pub heal: Vec<crate::damage::Health>,
 }
 
 #[cfg(test)]
@@ -140,7 +142,8 @@ pub(crate) mod test_support {
                 h: 44,
             },
             std::collections::HashMap::new(),
-        );
+        )
+        .with_health(50, 0);
         j.tick(0, &w);
         (j, w)
     }
