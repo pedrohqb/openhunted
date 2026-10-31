@@ -3,7 +3,8 @@
 //! controlável (M3a).
 //!
 //! Uso: `openhunted --data <CD, pasta Hunter/ ou .iso> [--level T_J_001.LEV] [--frames N]`
-//! Teclas: setas movem o Jake, espaço pula e CIMA usa a saída (a câmera o acompanha);
+//! Teclas: setas movem o Jake, espaço pula, Ctrl atira (segurando, rajadas; com as setas,
+//! mira para cima e nas diagonais) e CIMA usa a saída (a câmera o acompanha);
 //! qualquer tecla solta fecha a dica do tutorial. Sem Jake na fase, as setas
 //! rolam a tela, PageUp/PageDown pulam uma tela e Home/End vão às pontas. Tab mostra a colisão e
 //! os objetos de lógica, Esc sai.
@@ -140,7 +141,7 @@ fn run() -> Result<(), String> {
         let keys = events.keyboard_state();
         if viewer.has_jake() {
             // Setas e espaço controlam o Jake (bits como no original).
-            use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, UP};
+            use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
             let mut bits = 0;
             for (sc, bit) in [
                 (Scancode::Left, LEFT),
@@ -148,6 +149,8 @@ fn run() -> Result<(), String> {
                 (Scancode::Up, UP),
                 (Scancode::Down, DOWN),
                 (Scancode::Space, JUMP),
+                (Scancode::LCtrl, SHOOT),
+                (Scancode::RCtrl, SHOOT),
             ] {
                 if keys.is_scancode_pressed(sc) {
                     bits |= bit;

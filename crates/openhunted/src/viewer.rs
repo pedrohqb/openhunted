@@ -132,10 +132,14 @@ impl Viewer {
 
     /// Texto do HUD.
     pub fn hud_text(&self) -> Option<String> {
-        self.scene
-            .jake
-            .as_ref()
-            .map(|j| format!("VIDA {}  ARMADURA {}", j.health.hp, j.health.armor))
+        self.scene.jake.as_ref().map(|j| {
+            format!(
+                "VIDA {}  ARMADURA {}  PISTOLA {}",
+                j.health.hp,
+                j.health.armor,
+                j.inventory.pistol_ammo()
+            )
+        })
     }
 
     /// Uma tecla foi solta: fecha a dica se ela já está aberta há 500 ms.

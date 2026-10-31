@@ -542,3 +542,78 @@ fn tutorial_shooting_kills_the_nearest_mine() {
         "a cápsula não sumiu"
     );
 }
+
+/// Atirar ajuda: andando para a esquerda e disparando uma rajada quando há mina à frente na
+/// mesma altura, o Jake vence com pelo menos a vida do roteiro sem tiros e mata minas a tiro.
+#[test]
+fn t_j_001_shooting_helps() {
+    use openhunted_engine::input::{JUMP, LEFT, SHOOT, UP};
+    let run = |shoot: bool| -> (i32, usize) {
+        let (mut s, _) = load("T_J_001.LEV").unwrap();
+        let mut t = 0;
+        let mut killed_by_bullet = 0;
+        let mut burst = 0;
+        loop {
+            let j = s.jake.as_ref().unwrap();
+            assert!(!j.is_dead(), "morreu no tique {t} (atirando: {shoot})");
+            assert!(t < 1500, "não chegou (atirando: {shoot}) x={}", j.body.x);
+            if j.body.x < 100 {
+                break;
+            }
+            let jb = j.body.bounds();
+            let jc = (jb.x + jb.w / 2, jb.y + jb.h / 2);
+            let mine_ahead = s.entities.iter().any(|e| {
+                e.alive
+                    && e.kind == 102
+                    && e.center().0 < jc.0
+                    && jc.0 - e.center().0 <= 160
+                    && (e.center().1 - jc.1).abs() <= 20
+            });
+            let mines_before = s
+                .entities
+                .iter()
+                .filter(|e| e.alive && e.kind == 102)
+                .count();
+            let input = if shoot && (mine_ahead || burst > 0) {
+                if burst == 0 {
+                    burst = 4;
+                }
+                burst -= 1;
+                SHOOT
+            } else if j.body.hit_wall && t % 10 == 0 {
+                LEFT | JUMP
+            } else {
+                LEFT
+            };
+            s.tick(input);
+            let mines_after = s
+                .entities
+                .iter()
+                .filter(|e| e.alive && e.kind == 102)
+                .count();
+            if mines_after < mines_before && s.entities.iter().any(|e| e.alive && e.kind == 19) {
+                killed_by_bullet += mines_before - mines_after;
+            }
+            t += 1;
+        }
+        for _ in 0..5 {
+            s.tick(0);
+        }
+        s.tick(UP);
+        for _ in 0..60 {
+            s.tick(0);
+        }
+        assert_eq!(s.outcome, Some(openhunted_engine::Outcome::Victory));
+        (s.jake.as_ref().unwrap().health.hp, killed_by_bullet)
+    };
+    if std::env::var_os("OPENHUNTED_DATA").is_none() {
+        return;
+    }
+    let (hp_plain, _) = run(false);
+    let (hp_shoot, killed) = run(true);
+    assert!(killed >= 3, "só {killed} minas mortas a tiro");
+    assert!(
+        hp_shoot >= hp_plain,
+        "atirando {hp_shoot} < sem atirar {hp_plain}"
+    );
+}
