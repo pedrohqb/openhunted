@@ -17,7 +17,8 @@ arquivo de fases e o cabeçalho das fases. O estado de cada formato está em
 [`docs/formats/`](docs/formats/README.md). Na fase, o Jake já corre, pula (pulos médio, longo e
 estendido), cai e colide com o cenário e com os objetos sólidos (peças de pedra, paredes e tetos que são
 objetos), com as constantes e as regras do original. Os obstáculos `OPO` (gotas, bloco que cai,
-portão) ainda não agem: isso vem com o comportamento dos objetos. A cena mostra só os objetos do modo solo; nas missões do Garathe ainda não há
+portão) ainda não agem: isso vem com o comportamento dos objetos. A paleta já segue a do Windows (os
+sprites não mostram mais magenta). A cena mostra só os objetos do modo solo; nas missões do Garathe ainda não há
 personagem controlável (as setas rolam a tela). Os objetos ainda
 ficam parados; não há armas, inimigos ativos, escadas nem furtividade.
 

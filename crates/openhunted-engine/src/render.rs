@@ -123,6 +123,41 @@ impl Framebuffer {
     }
 }
 
+/// As 20 cores estáticas do Windows de 256 cores (índices 0–9 e 246–255).
+const WINDOWS_STATIC: [(u8, [u8; 3]); 20] = [
+    (0, [0, 0, 0]),
+    (1, [128, 0, 0]),
+    (2, [0, 128, 0]),
+    (3, [128, 128, 0]),
+    (4, [0, 0, 128]),
+    (5, [128, 0, 128]),
+    (6, [0, 128, 128]),
+    (7, [192, 192, 192]),
+    (8, [192, 220, 192]),
+    (9, [166, 202, 240]),
+    (246, [255, 251, 240]),
+    (247, [160, 160, 164]),
+    (248, [128, 128, 128]),
+    (249, [255, 0, 0]),
+    (250, [0, 255, 0]),
+    (251, [255, 255, 0]),
+    (252, [0, 0, 255]),
+    (253, [255, 0, 255]),
+    (254, [0, 255, 255]),
+    (255, [255, 255, 255]),
+];
+
+/// Paleta como o original a mostra (`0x004518cf`): a paleta lógica do Windows recebe só os
+/// índices 10–245 do arquivo; 0–9 e 246–255 são as cores estáticas do sistema (o magenta de
+/// marcador da `WORLD.PAL` nesses índices nunca aparece na tela).
+pub fn display_palette(pal: &openhunted_formats::Palette) -> openhunted_formats::Palette {
+    let mut out = pal.0;
+    for (i, c) in WINDOWS_STATIC {
+        out[i as usize] = c;
+    }
+    openhunted_formats::Palette(out)
+}
+
 /// Índice da cor mais escura da paleta, usado para limpar a tela fora da fase (o índice 0
 /// das paletas do jogo é a cor de transparência, magenta na `WORLD.PAL`).
 pub fn background_index(pal: &openhunted_formats::Palette) -> u8 {
@@ -143,6 +178,19 @@ pub fn clamp_camera(scene: (i32, i32), view: (i32, i32), cam: (i32, i32)) -> (i3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_palette_replaces_system_ranges_only() {
+        let mut raw = [[255u8, 0, 191]; 256];
+        raw[10] = [1, 2, 3];
+        raw[245] = [4, 5, 6];
+        let p = display_palette(&openhunted_formats::Palette(raw));
+        assert_eq!(p.0[0], [0, 0, 0]);
+        assert_eq!(p.0[9], [166, 202, 240]);
+        assert_eq!(p.0[246], [255, 251, 240]);
+        assert_eq!(p.0[255], [255, 255, 255]);
+        assert_eq!((p.0[10], p.0[245]), ([1, 2, 3], [4, 5, 6]));
+    }
     use openhunted_formats::Frame;
 
     fn sprite() -> Frame {

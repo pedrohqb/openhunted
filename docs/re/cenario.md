@@ -31,15 +31,16 @@ esquerda têm o campo em 0. A caixa espelhada vai para `x' = 128 − x − largu
   (ex.: `I_J_101`, ~34 mil pixels). Decisão: índice 0 transparente em **todas** as camadas. A
   rotina de blit da biblioteca GFX ainda não foi desmontada para confirmar.
 
-## Paleta: pendência
+## Paleta: as 20 cores estáticas do Windows [confirmado]
 
 Na `WORLD.PAL`, os índices 0–9 e 246–254 valem todos (255, 0, 191), um magenta de
-"marcador", e o 255 é ciano. As outras paletas (`JAKE*.PAL`, `RED.PAL`, `BLUE.PAL`…) têm cores
-de verdade nessas posições, e os sprites das fases as usam bastante (o índice 252 aparece nas
-minas e no Garathe). O jogo original quase certamente preenche essas faixas em tempo de
-execução (com outra paleta ou com as cores estáticas do Windows). Até isso ser decifrado, os
-sprites mostram respingos magenta; a "estrela rosa" das minas é esse defeito, não a aparência
-original.
+"marcador", e o 255 é ciano. O original monta a paleta lógica do Windows em `0x004518cf`:
+copia da paleta do arquivo só a faixa 10–245 (o começo é forçado a ≥ 10 e o fim a ≤ 245) e
+preenche 0–9 e 246–255 com `GetSystemPaletteEntries`, isto é, as 20 cores estáticas do
+Windows de 256 cores (preto, vermelho escuro, …, cinza claro, verde-dinheiro, azul-céu;
+creme, cinza médio, cinza escuro, vermelho, verde, amarelo, azul, magenta, ciano, branco).
+Os sprites usam essas cores de propósito: as minas piscam em branco, amarelo e azul. O
+OpenHunted aplica a mesma tabela (`openhunted_engine::display_palette`).
 
 ## Ritmo
 

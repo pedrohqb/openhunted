@@ -160,9 +160,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         } => {
             use openhunted_engine::{
                 Assets, Framebuffer, SCREEN_H, SCREEN_W, Scene, background_index, clamp_camera,
+                display_palette,
             };
             let lv = Level::parse(&gd.levels()?.get(&level)?).map_err(|e| e.in_resource(&level))?;
-            let palette = openhunted_formats::Palette::parse(ar.get(&lv.palette)?)?;
+            let palette =
+                display_palette(&openhunted_formats::Palette::parse(ar.get(&lv.palette)?)?);
             let mut assets = Assets::new(gd.resources()?);
             let mut scene = Scene::build(&lv, &mut assets)?;
             for w in &scene.warnings {

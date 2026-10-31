@@ -6,6 +6,7 @@ use std::path::Path;
 
 use openhunted_engine::{
     Assets, Framebuffer, SCREEN_H, SCREEN_W, Scene, TICK_MS, background_index, clamp_camera,
+    display_palette,
 };
 use openhunted_formats::{Level, Palette, open_data};
 
@@ -47,7 +48,7 @@ impl Viewer {
         let gd = open_data(data)?;
         let lv = Level::parse(&gd.levels()?.get(level)?).map_err(|e| e.in_resource(level))?;
         let mut assets = Assets::new(gd.resources()?);
-        let palette = Palette::parse(assets.archive().get(&lv.palette)?)?;
+        let palette = display_palette(&Palette::parse(assets.archive().get(&lv.palette)?)?);
         let scene = Scene::build(&lv, &mut assets)?;
         for w in &scene.warnings {
             eprintln!("aviso: {w}");
