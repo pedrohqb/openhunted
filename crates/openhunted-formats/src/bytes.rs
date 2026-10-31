@@ -14,6 +14,10 @@ pub(crate) fn slice<'a>(
         .ok_or(FormatError::Truncated { what, offset: off })
 }
 
+pub(crate) fn u8_at(data: &[u8], off: usize, what: &'static str) -> Result<u8> {
+    Ok(slice(data, off, 1, what)?[0])
+}
+
 pub(crate) fn u16_at(data: &[u8], off: usize, what: &'static str) -> Result<u16> {
     let b = slice(data, off, 2, what)?;
     Ok(u16::from_le_bytes([b[0], b[1]]))

@@ -3,6 +3,7 @@
 
 mod bytes;
 pub mod chunk;
+pub mod compress;
 mod error;
 pub mod game_data;
 pub mod palette;
@@ -15,6 +16,7 @@ pub mod text;
 pub mod volume;
 
 pub use chunk::{Chunk, chunks, find_chunk};
+pub use compress::{decompress, unpack_block};
 pub use error::{FormatError, Result};
 pub use game_data::{GameData, GameVersion, open_data};
 pub use palette::Palette;

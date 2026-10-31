@@ -72,3 +72,14 @@ fn real_standard_formats() {
         .collect();
     assert_eq!(tags, vec![*b"ANM:", *b"TAG:", *b"LAB:", *b"PAL:"]);
 }
+
+#[test]
+fn sabout_decompresses_to_320x256() {
+    let path = data_or_skip!();
+    let ar = open_real_archive(&path);
+    let bmp = ar.get("SABOUT.BMP").unwrap();
+    // "BMP:" + tamanho (8), versão + 1 quadro (4), tabela 4 × 1, largura e altura (4).
+    assert_eq!(&bmp[16..20], &[0x40, 0x01, 0x00, 0x01]);
+    let (pixels, _) = openhunted_formats::unpack_block(&bmp[20..]).unwrap();
+    assert_eq!(pixels.len(), 320 * 256);
+}
