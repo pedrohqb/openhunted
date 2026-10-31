@@ -335,3 +335,29 @@ pub fn mkpft(first_char: u32, glyphs: &[(u32, Vec<u8>)]) -> Vec<u8> {
     body.extend(ch(b"PBMA", &arr));
     ch(b"PFNT", &body)
 }
+
+/// Monta um `hunter.hls` sintético: índice no formato do `RESOURCE.MAP` seguido do volume,
+/// com offsets relativos ao fim do índice.
+pub fn mkhls(files: &[SynthFile<'_>]) -> Vec<u8> {
+    let (mut map, vols) = mkarchive(&[("RESOURCE.001", files)]);
+    map.extend_from_slice(&vols[0].1);
+    map
+}
+
+/// Monta uma fase `.LEV` versão 1006 com grade 2×1×1 e o corpo dado.
+pub fn mklev(body: &[u8]) -> Vec<u8> {
+    let mut lev = Vec::new();
+    for s in ["T_J_001.LEV", "WORLD.PAL"] {
+        lev.extend_from_slice(s.as_bytes());
+        lev.push(0);
+    }
+    lev.extend(le16(&[1006]));
+    for s in ["Teste", "Chegue à saída.", "notas"] {
+        lev.extend(s.bytes().map(|b| if b.is_ascii() { b } else { b'?' }));
+        lev.push(0);
+    }
+    lev.extend(le16(&[0, 2, 1, 1, 1, 36]));
+    let mut v = tagged(b"LEV:", &lev);
+    v.extend_from_slice(body);
+    v
+}

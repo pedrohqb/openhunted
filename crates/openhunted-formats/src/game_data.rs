@@ -5,7 +5,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::{DataSource, DirSource, FormatError, IsoSource, ResourceArchive, Result};
+use crate::{DataSource, DirSource, FormatError, IsoSource, LevelArchive, ResourceArchive, Result};
 
 /// SHA-256 do `RESOURCE.MAP` da versão Windows 95 1.00.
 const V100_MAP_SHA256: &str = "8eb654c4093b3c013705f109af4c205f4854871f220cb7d7a6965ed9557abd7d";
@@ -80,5 +80,10 @@ impl GameData {
     pub fn resources(&self) -> Result<ResourceArchive> {
         let map = self.read("RESOURCE.MAP")?;
         ResourceArchive::from_map(&map, |v| self.read(v))
+    }
+
+    /// Carrega o arquivo de fases (`hunter.hls`).
+    pub fn levels(&self) -> Result<LevelArchive> {
+        LevelArchive::from_bytes(self.read("HUNTER.HLS")?)
     }
 }

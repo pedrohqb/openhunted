@@ -222,3 +222,46 @@ fn real_fonts() {
         18
     );
 }
+
+#[test]
+fn real_levels() {
+    use openhunted_formats::{Level, open_data, parse_mission_list, parse_text_list};
+    let path = data_or_skip!();
+    let gd = open_data(&path).unwrap();
+    let la = gd.levels().unwrap();
+    let names: Vec<String> = la.names().iter().map(|n| n.to_uppercase()).collect();
+    assert_eq!(names.len(), 201);
+    // LEVELS.RES lista 82 fases; 5 delas não estão no hunter.hls da versão 1.00.
+    let ar = gd.resources().unwrap();
+    let mut missing: Vec<String> = parse_text_list(ar.get("LEVELS.RES").unwrap())
+        .into_iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.trim().to_uppercase())
+        .filter(|l| !names.contains(l))
+        .collect();
+    missing.sort();
+    assert_eq!(
+        missing,
+        [
+            "T_J_002.LEV",
+            "T_J_004.LEV",
+            "T_J_008.LEV",
+            "T_J_010.LEV",
+            "T_M_009.LEV"
+        ]
+    );
+    let missions = parse_mission_list(&la.get("ENGLEVEL.TXT").unwrap()).unwrap();
+    assert_eq!(missions.len(), 100);
+    let first_jake = missions.iter().find(|m| m.player == 1).unwrap();
+    assert_eq!(first_jake.file.to_uppercase(), "T_J_001.LEV");
+    assert_eq!(first_jake.title, "TUTORIAL: Jake Gets a Gun");
+    for m in &missions {
+        let l =
+            Level::parse(&la.get(&m.file).unwrap()).unwrap_or_else(|e| panic!("{}: {e}", m.file));
+        assert_eq!(l.version, 1006, "{}", m.file);
+        assert_eq!((l.player, l.extra), (m.player, m.extra), "{}", m.file);
+    }
+    let t = Level::parse(&la.get("T_J_001.LEV").unwrap()).unwrap();
+    assert_eq!((t.grid_x, t.grid_y, t.grid_z), (14, 1, 1));
+    assert_eq!(t.palette, "WORLD.PAL");
+}

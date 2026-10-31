@@ -285,3 +285,42 @@ fn pft_exports_glyph_sheet() {
     // 16 colunas de células com a largura do maior glifo (2) e 16 linhas da altura (2).
     assert_eq!((reader.info().width, reader.info().height), (32, 32));
 }
+
+#[test]
+fn levels_lists_missions_and_exports_json() {
+    use openhunted_formats::test_support::{mkhls, mklev};
+    let cd = tempfile::tempdir().unwrap();
+    synthetic_cd(cd.path());
+    let eng = b"T_J_001.lev\r\np=1,36\r\nt=TUTORIAL: Teste\r\nd=Saia.\r\n".as_slice();
+    let lev = mklev(b"corpo");
+    std::fs::write(
+        cd.path().join("Hunter/hunter.hls"),
+        mkhls(&[("ENGLEVEL.TXT", eng), ("T_J_001.LEV", lev.as_slice())]),
+    )
+    .unwrap();
+    let out = ohtool()
+        .arg("--data")
+        .arg(cd.path())
+        .arg("levels")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "T_J_001.lev\t1\tTUTORIAL: Teste\n"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    ohtool()
+        .arg("--data")
+        .arg(cd.path())
+        .args(["levels", "--out"])
+        .arg(dir.path())
+        .assert()
+        .success();
+    let json = std::fs::read_to_string(dir.path().join("T_J_001.lev.json")).unwrap();
+    assert!(json.contains("\"grid_x\": 2"), "{json}");
+}

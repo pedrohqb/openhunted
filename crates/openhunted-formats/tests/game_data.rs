@@ -64,3 +64,16 @@ fn real_data_is_v100() {
     let path = data_or_skip!();
     assert_eq!(open_data(&path).unwrap().version(), GameVersion::Win95V100);
 }
+
+#[test]
+fn levels_reads_hunter_hls() {
+    use openhunted_formats::test_support::mkhls;
+    let (dir, _) = synthetic_cd();
+    std::fs::write(
+        dir.path().join("Hunter/hunter.hls"),
+        mkhls(&[("ENGLEVEL.TXT", b"x".as_slice())]),
+    )
+    .unwrap();
+    let gd = open_data(dir.path()).unwrap();
+    assert_eq!(gd.levels().unwrap().names(), vec!["ENGLEVEL.TXT"]);
+}

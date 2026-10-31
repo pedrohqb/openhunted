@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use openhunted_formats::{Bitmap, GameVersion, chunks, open_data};
+use openhunted_formats::{Bitmap, GameVersion, Level, chunks, open_data, parse_mission_list};
 
 #[derive(Parser)]
 #[command(
@@ -42,6 +42,12 @@ enum Cmd {
         /// Paleta usada nos PNG.
         #[arg(long, default_value = "WORLD.PAL")]
         palette: String,
+    },
+    /// Lista as missões (ARQUIVO, JOGADOR, TÍTULO) do hunter.hls; com --out, grava o
+    /// cabeçalho de cada fase em JSON.
+    Levels {
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -102,6 +108,22 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 writeln!(out, "quadros: {}", bmp.frames.len())?;
                 for (i, f) in bmp.frames.iter().enumerate() {
                     writeln!(out, "  {i:3}: {}x{}", f.width, f.height)?;
+                }
+            }
+        }
+        Cmd::Levels { out: dir } => {
+            let la = gd.levels()?;
+            let missions = parse_mission_list(&la.get("ENGLEVEL.TXT")?)?;
+            if let Some(dir) = &dir {
+                std::fs::create_dir_all(dir)?;
+            }
+            for m in &missions {
+                writeln!(out, "{}\t{}\t{}", m.file, m.player, m.title)?;
+                if let Some(dir) = &dir {
+                    let level =
+                        Level::parse(&la.get(&m.file)?).map_err(|e| e.in_resource(&m.file))?;
+                    let name = format!("{}.json", extract::safe_file_name(&m.file));
+                    std::fs::write(dir.join(name), serde_json::to_string_pretty(&level)?)?;
                 }
             }
         }

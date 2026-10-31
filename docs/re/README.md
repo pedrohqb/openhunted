@@ -25,4 +25,5 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`executavel.md`](executavel.md): mapa geral do executável.
 - [`compressao.md`](compressao.md): compressão dos recursos.
 - [`anm.md`](anm.md): animações.
+- Fases: formato e endereços em `docs/formats/hls.md` e `lev.md`.
 - Cenários e interfaces: endereços em [`executavel.md`](executavel.md); formato em `docs/formats/brd.md` e `itf.md`.
