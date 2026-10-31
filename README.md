@@ -11,11 +11,11 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
-**M2: visualizador de fase.** **M1 concluída: formatos.** A biblioteca `openhunted-formats` lê os dados do CD (pasta ou
+**M2 concluída: visualizador de fase.** **M1 concluída: formatos.** A biblioteca `openhunted-formats` lê os dados do CD (pasta ou
 imagem `.iso`): bitmaps, paletas, sons, textos, animações, cenários, interfaces, fontes, o
 arquivo de fases e o cabeçalho das fases. O estado de cada formato está em
-[`docs/formats/`](docs/formats/README.md). Ainda não há nada jogável: a próxima etapa (M2) é um
-visualizador de fase, começando pelo corpo das fases.
+[`docs/formats/`](docs/formats/README.md). Ainda não há nada jogável: o visualizador mostra as fases,
+e a próxima etapa (M3) é o Jake se mexendo.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
 reversa, em [`docs/re/`](docs/re/).
@@ -66,13 +66,25 @@ cargo run -p ohtool -- --data /caminho/Hunter_Hunted.iso levels --out fases
 Requer Rust estável (1.85 ou mais recente).
 
 ```sh
-cargo build --release
+cargo build --release            # formatos, engine e ohtool (não precisa de SDL3)
+cargo build --release -p openhunted   # visualizador: precisa da SDL3
 ```
+
+O visualizador linka a SDL3 do sistema. Sem ela, o link falha com
+`rust-lld: error: unable to find library -lSDL3`. Duas saídas:
+
+- instalar a SDL3 (CachyOS/Arch: `pacman -S sdl3`; Fedora: `dnf install SDL3-devel`);
+- ou compilar a SDL3 junto: `cargo build --release -p openhunted --features bundled-sdl`. Isso
+  exige `cmake` e os cabeçalhos de X11, Wayland e áudio (no Ubuntu/Debian: `libx11-dev
+  libxext-dev libxcursor-dev libxrandr-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev
+  libxkbcommon-dev libwayland-dev wayland-protocols libasound2-dev libpulse-dev libdrm-dev
+  libgbm-dev libegl-dev libgl-dev`, a mesma lista da CI).
 
 ## Testes
 
 ```sh
-cargo test --workspace
+cargo test                                            # sem o visualizador
+cargo test --workspace --features openhunted/bundled-sdl   # tudo (como na CI)
 ```
 
 Os testes sobre os dados reais do jogo só rodam quando a variável `OPENHUNTED_DATA` aponta

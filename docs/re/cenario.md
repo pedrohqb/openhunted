@@ -11,17 +11,27 @@
   `real_cell_indices_resolve_to_animation_labels`).
 - Os quadros de `WORLD1.ANM` são de 128×128 e desenham um bitmap de bloco (ex.: `C1A07B.BMP`,
   128×128) na origem. A grade da fase é, portanto, de células de 128×128 pixels: a célula
-  `(x, y, z)` fica em `(128·x, 128·y)`; o `z` é uma camada (todas as fases de um jogador vistas
-  têm `z = 1`, salvo `I_J_101`, com 4).
+  `(x, y, z)` fica em `(128·x, 128·y)`; o `z` é uma camada de profundidade. 95 das 100 fases
+  têm de 2 a 7 camadas (a `T_J_001`, com uma só, é exceção). Desenha-se z = 0 primeiro.
 - As posições dos objetos estão em pixels da fase (na `T_J_001`, x de 51 a 1696 para 14 células).
 
 ## Transparência
 
 - Os bitmaps de sprite (Jake `J001.BMP`, mina `OHM00.BMP`) têm o fundo no índice 0, nos quatro
   cantos e na maior parte da área; os blocos de cenário são opacos (sem índice 0 dominante).
-- Decisão provisória: índice 0 é transparente ao desenhar sprites e decorações; blocos de
-  cenário são desenhados opacos. A rotina de blit da biblioteca GFX ainda não foi desmontada
-  para confirmar.
+- Os blocos da camada z = 0 não usam o índice 0; os das camadas z ≥ 1 o usam como área vazada
+  (ex.: `I_J_101`, ~34 mil pixels). Decisão: índice 0 transparente em **todas** as camadas. A
+  rotina de blit da biblioteca GFX ainda não foi desmontada para confirmar.
+
+## Paleta: pendência
+
+Na `WORLD.PAL`, os índices 0–9 e 246–254 valem todos (255, 0, 191), um magenta de
+"marcador", e o 255 é ciano. As outras paletas (`JAKE*.PAL`, `RED.PAL`, `BLUE.PAL`…) têm cores
+de verdade nessas posições, e os sprites das fases as usam bastante (o índice 252 aparece nas
+minas e no Garathe). O jogo original quase certamente preenche essas faixas em tempo de
+execução (com outra paleta ou com as cores estáticas do Windows). Até isso ser decifrado, os
+sprites mostram respingos magenta; a "estrela rosa" das minas é esse defeito, não a aparência
+original.
 
 ## Ritmo
 

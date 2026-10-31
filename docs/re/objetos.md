@@ -15,6 +15,13 @@ Objetos sem animação (nome vazio) são objetos de lógica: tipos 73 (388 ocorr
 0 (32) e 27 (1). Um objeto de tipo 0 aponta para `EDITOR.INI` (resto do editor de fases).
 Todas as demais animações de objeto e de decoração existem nos dados.
 
+## Tipo 6: itens genéricos
+
+`OGF.ANM` tem um rótulo só cobrindo os 256 quadros de `OGF00.BMP` (216 deles são marcadores de
+1×1; os outros, itens diferentes). Cada objeto do tipo 6 mostra **um** desses quadros, escolhido
+por um campo ainda não decifrado; `values[0]` acerta em 62 dos 215 objetos. Decisão provisória
+(M2): objetos do tipo 6 ficam parados no quadro `values[0]` quando ele é válido, senão no 0.
+
 ## Comportamento por tipo (para a M3)
 
 Depois de ler um objeto, o carregador procura o tipo (campo `+0x1b8`, normalmente igual ao

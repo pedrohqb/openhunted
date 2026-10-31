@@ -32,7 +32,14 @@ pub struct Sprite {
     /// Origem na fase, em pixels.
     pub x: i32,
     pub y: i32,
+    /// Não avança com `tick` (ver `GENERIC_ITEM`).
+    pub frozen: bool,
 }
+
+/// Tipo de objeto cuja animação (`OGF.ANM`) é uma folha de itens num rótulo só: cada objeto
+/// mostra um quadro fixo, escolhido por um campo ainda não decifrado. Provisório (M2): parado
+/// no quadro `values[0]` quando válido, senão no 0. Ver `docs/re/objetos.md`.
+const GENERIC_ITEM: u32 = 6;
 
 /// Objeto sem animação (lógica) ou com animação ausente: mostrado só no overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +96,7 @@ impl Scene {
                             player,
                             x: cx,
                             y: cy,
+                            frozen: false,
                         }),
                         None => s.warnings.push(format!(
                             "{}: rótulo {} inexistente",
@@ -118,8 +126,9 @@ impl Scene {
                             layer: Layer::Decoration,
                             anim: a,
                             player,
-                            x: cx + d.x,
-                            y: cy + d.y,
+                            x: cx.saturating_add(d.x),
+                            y: cy.saturating_add(d.y),
+                            frozen: false,
                         });
                     }
                     Err(e) => s.warnings.push(format!("{}: {e}", d.animation)),
@@ -139,13 +148,24 @@ impl Scene {
             }
             match assets.animation(&o.names[0]) {
                 Ok(a) => {
-                    let player = AnimPlayer::from_frame(&a, 0);
+                    let frozen = o.kind == GENERIC_ITEM;
+                    let start = if frozen {
+                        o.values
+                            .first()
+                            .map(|&v| v.max(0) as usize)
+                            .filter(|&f| f < a.frames.len())
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    let player = AnimPlayer::from_frame(&a, start);
                     s.sprites.push(Sprite {
                         layer: Layer::Object,
                         anim: a,
                         player,
                         x: o.x,
                         y: o.y,
+                        frozen,
                     });
                 }
                 Err(e) => {
@@ -160,7 +180,7 @@ impl Scene {
     }
 
     /// Desenha a cena com a câmera em `camera` (canto superior esquerdo, em pixels da fase).
-    /// Cenário é opaco; decorações e objetos usam o índice 0 como transparente. Com
+    /// O índice 0 é transparente em todas as camadas (cenário, decorações, objetos). Com
     /// `overlay`, desenha as caixas de colisão das células e os marcadores.
     pub fn draw(
         &self,
@@ -179,13 +199,15 @@ impl Scene {
                 };
                 let x = sp.x.saturating_add(op.x).saturating_sub(camera.0);
                 let y = sp.y.saturating_add(op.y).saturating_sub(camera.1);
-                fb.blit(frame, x, y, sp.layer != Layer::Scenery);
+                // Índice 0 é transparente em todas as camadas: os blocos de z = 0 não o usam, e os
+                // das camadas de cima o usam como área vazada.
+                fb.blit(frame, x, y, true);
             }
         }
         if overlay {
             for (bx, by, b) in &self.borders {
-                let x = bx + i32::from(b.x) - camera.0;
-                let y = by + i32::from(b.y) - camera.1;
+                let x = bx.saturating_add(i32::from(b.x)).saturating_sub(camera.0);
+                let y = by.saturating_add(i32::from(b.y)).saturating_sub(camera.1);
                 fb.rect(
                     x,
                     y,
@@ -195,14 +217,20 @@ impl Scene {
                 );
             }
             for m in &self.markers {
-                fb.rect(m.x - 4 - camera.0, m.y - 4 - camera.1, 9, 9, OVERLAY_MARKER);
+                fb.rect(
+                    m.x.saturating_sub(4).saturating_sub(camera.0),
+                    m.y.saturating_sub(4).saturating_sub(camera.1),
+                    9,
+                    9,
+                    OVERLAY_MARKER,
+                );
             }
         }
     }
 
     /// Avança todas as animações um quadro.
     pub fn tick(&mut self) {
-        for sp in &mut self.sprites {
+        for sp in self.sprites.iter_mut().filter(|sp| !sp.frozen) {
             let anim = sp.anim.clone();
             sp.player.tick(&anim);
         }
@@ -321,6 +349,24 @@ mod tests {
         assert_eq!(fb.pixels[(37 - 20) * 64 + (198 - 190) - 1], 0);
         let mut empty = crate::Framebuffer::new(64, 64);
         s.draw(&mut a, &mut empty, (10_000, 10_000), true);
+    }
+
+    #[test]
+    fn extreme_coordinates_never_panic() {
+        let mut l = level();
+        l.objects.push(object(73, i32::MIN, i32::MAX, ""));
+        if let Some(Some(c)) = l.cells.get_mut(1) {
+            c.decorations.push(openhunted_formats::Decoration {
+                animation: "OAN.ANM".into(),
+                x: i32::MAX,
+                y: i32::MIN,
+                fields: vec![0],
+            });
+        }
+        let s = Scene::build(&l, &mut assets()).unwrap();
+        let mut fb = crate::Framebuffer::new(64, 64);
+        s.draw(&mut assets(), &mut fb, (i32::MAX, i32::MIN), true);
+        s.draw(&mut assets(), &mut fb, (i32::MIN, i32::MAX), true);
     }
 
     #[test]

@@ -70,3 +70,38 @@ fn tutorial_render_matches_reference() {
 }
 
 const REFERENCE: u64 = 0x319f_3c56_50cc_fc02;
+
+/// Camadas z ≥ 1 usam o índice 0 como transparência: nada de índice 0 pode chegar à tela.
+#[test]
+fn multilayer_level_has_no_transparent_holes() {
+    use openhunted_engine::{Framebuffer, SCREEN_H, SCREEN_W};
+    for lev in ["I_J_101.LEV", "H_J_001.LEV", "C_J_027.LEV"] {
+        let Some((s, mut a)) = load(lev) else { return };
+        let mut fb = Framebuffer::new(SCREEN_W, SCREEN_H);
+        fb.clear(37);
+        s.draw(&mut a, &mut fb, (0, 0), false);
+        let holes = fb.pixels.iter().filter(|&&p| p == 0).count();
+        assert_eq!(holes, 0, "{lev}: {holes} pixels de índice 0");
+    }
+}
+
+/// Objetos do tipo 6 (OGF.ANM, uma folha de itens num rótulo só) ficam parados.
+#[test]
+fn generic_item_objects_do_not_cycle() {
+    let Some((mut s, _)) = load("H_J_027.LEV") else {
+        return;
+    };
+    let frames = |s: &openhunted_engine::Scene| -> Vec<usize> {
+        s.sprites
+            .iter()
+            .filter(|p| p.anim.frames.len() == 256)
+            .map(|p| p.player.frame())
+            .collect()
+    };
+    let before = frames(&s);
+    assert!(!before.is_empty());
+    for _ in 0..40 {
+        s.tick();
+    }
+    assert_eq!(frames(&s), before);
+}

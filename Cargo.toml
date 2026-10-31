@@ -1,5 +1,8 @@
 [workspace]
 members = ["crates/*"]
+# Sem a SDL3 instalada, `cargo build`/`cargo test` cobrem formatos, engine e ohtool; o
+# visualizador se compila com `-p openhunted` (ver README).
+default-members = ["crates/openhunted-formats", "crates/openhunted-engine", "crates/ohtool"]
 resolver = "3"
 
 [workspace.package]
