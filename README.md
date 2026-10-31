@@ -36,8 +36,8 @@ cargo run --release -p openhunted --features bundled-sdl -- --data /caminho/Hunt
 
 Opções: `--level T_J_001.LEV` (padrão: o primeiro tutorial do Jake), `--frames N` (fecha depois
 de N quadros). Teclas: setas movem o Jake e espaço pula (correndo, o pulo escolhe a distância
-conforme o chão adiante); a câmera o acompanha. Em fases sem o Jake, as setas rolam a tela.
-PageUp/PageDown pulam uma tela; Home/End vão às pontas; Tab mostra as caixas de colisão e os
+conforme o chão adiante); a câmera o acompanha. Em fases sem o Jake, as setas rolam a tela,
+PageUp/PageDown pulam uma tela e Home/End vão às pontas. Tab mostra as caixas de colisão e os
 objetos de lógica; Esc sai. A variável `OPENHUNTED_DATA`
 substitui `--data`.
 

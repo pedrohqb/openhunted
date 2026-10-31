@@ -37,6 +37,8 @@ pub struct Viewer {
     pending_ms: u32,
     fb: Framebuffer,
     input: u32,
+    /// Teclas apertadas desde o último tique (um toque curto entre dois tiques não se perde).
+    taps: u32,
 }
 
 impl Viewer {
@@ -68,6 +70,7 @@ impl Viewer {
             pending_ms: 0,
             fb: Framebuffer::new(SCREEN_W, SCREEN_H),
             input: 0,
+            taps: 0,
         }
     }
 
@@ -107,13 +110,20 @@ impl Viewer {
         self.input = input;
     }
 
+    /// Registra um toque de tecla (ex.: `JUMP`): entra no próximo tique mesmo que a tecla já
+    /// tenha sido solta.
+    pub fn tap(&mut self, bits: u32) {
+        self.taps |= bits;
+    }
+
     /// Avança o relógio em `ms` milissegundos; devolve quantos ticks de animação rodaram.
     pub fn advance(&mut self, ms: u32) -> u32 {
         self.pending_ms = self.pending_ms.saturating_add(ms);
         let ticks = self.pending_ms / TICK_MS;
         self.pending_ms %= TICK_MS;
         for _ in 0..ticks {
-            self.scene.tick(self.input);
+            self.scene.tick(self.input | self.taps);
+            self.taps = 0;
             if let Some((fx, fy)) = self.scene.focus() {
                 // A câmera segue o Jake, centrado na tela.
                 let view = (SCREEN_W as i32, SCREEN_H as i32);
@@ -184,6 +194,20 @@ mod tests {
         assert!(!v.has_jake());
         v.set_input(openhunted_engine::input::LEFT);
         assert_eq!(v.advance(50), 1);
+    }
+
+    #[test]
+    fn taps_reach_the_next_tick_only() {
+        let mut v = viewer(640, 480);
+        v.tap(openhunted_engine::input::JUMP);
+        assert_eq!(v.advance(20), 0);
+        assert_eq!(
+            v.taps,
+            openhunted_engine::input::JUMP,
+            "guardado até haver tique"
+        );
+        assert_eq!(v.advance(30), 1);
+        assert_eq!(v.taps, 0);
     }
 
     #[test]

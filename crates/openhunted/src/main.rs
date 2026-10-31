@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! OpenHunted: visualizador de fase (M2). Abre uma fase do Hunter Hunted numa janela SDL3,
-//! com rolagem e animações.
+//! OpenHunted: abre uma fase do Hunter Hunted numa janela SDL3, com animações e o Jake
+//! controlável (M3a).
 //!
 //! Uso: `openhunted --data <CD, pasta Hunter/ ou .iso> [--level T_J_001.LEV] [--frames N]`
-//! Teclas: setas movem o Jake e espaço pula (sem Jake na fase, as setas rolam a tela);
-//! PageUp/PageDown pulam uma tela, Home/End vão às pontas, Tab mostra a colisão e os objetos
-//! de lógica, Esc sai.
+//! Teclas: setas movem o Jake e espaço pula (a câmera o acompanha). Sem Jake na fase, as setas
+//! rolam a tela, PageUp/PageDown pulam uma tela e Home/End vão às pontas. Tab mostra a colisão e
+//! os objetos de lógica, Esc sai.
 
 mod viewer;
 
@@ -119,6 +119,7 @@ fn run() -> Result<(), String> {
                     ..
                 } => match k {
                     Keycode::Tab => viewer.apply(Action::ToggleOverlay),
+                    Keycode::Space => viewer.tap(openhunted_engine::input::JUMP),
                     Keycode::PageUp => viewer.apply(Action::PageLeft),
                     Keycode::PageDown => viewer.apply(Action::PageRight),
                     Keycode::Home => viewer.apply(Action::Home),
