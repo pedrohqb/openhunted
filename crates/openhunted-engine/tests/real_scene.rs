@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Cena montada a partir dos dados reais (OPENHUNTED_DATA).
 
-use openhunted_engine::{Assets, Layer, Scene};
+use openhunted_engine::{Assets, Event, Layer, Scene};
 use openhunted_formats::{Level, open_data};
 
 pub fn load(level: &str) -> Option<(Scene, Assets)> {
@@ -285,4 +285,53 @@ fn jake_health_comes_from_level() {
     };
     let h = s.jake.as_ref().unwrap().health;
     assert_eq!((h.hp, h.armor), (50, 0));
+}
+
+/// Na T_J_001, correr para a esquerda dispara a dica das minas; ao chegar perto da saída, a
+/// dica "To exit press UP." (textos do `WIZARD.RES`, linhas 2 e 24).
+#[test]
+fn tutorial_hints_fire_in_order() {
+    use openhunted_engine::input::{JUMP, LEFT};
+    let Some((mut s, _)) = load("T_J_001.LEV") else {
+        return;
+    };
+    // sem as minas (ainda sólidas e paradas nesta tarefa; a Task 6 lhes dá vida)
+    s.entities.retain(|e| e.kind != 102);
+    s.rebuild_world();
+    let mut hints = Vec::new();
+    for t in 0..900 {
+        let j = s.jake.as_ref().unwrap();
+        let input = if j.body.hit_wall && t % 10 == 0 {
+            LEFT | JUMP
+        } else {
+            LEFT
+        };
+        s.tick(input);
+        for ev in s.events.drain(..) {
+            if let Event::Hint { text, left_of_jake } = ev {
+                hints.push((text, left_of_jake, s.jake.as_ref().unwrap().body.x));
+            }
+        }
+        if s.jake.as_ref().unwrap().body.x < 120 {
+            break;
+        }
+    }
+    let j = s.jake.as_ref().unwrap();
+    assert_eq!(
+        hints.len(),
+        2,
+        "{hints:?} x={} estado {:?}",
+        j.body.x,
+        j.state()
+    );
+    assert_eq!(
+        hints[0].0,
+        "Hovering mines explode on contact. SHOOT them before they get you."
+    );
+    assert!(
+        !hints[0].1,
+        "ao disparar, o Jake (x≈1430) já passou o mago 1 (x=1514)"
+    );
+    assert_eq!(hints[1].0, "To exit press UP.");
+    assert!(hints[1].2 < 200);
 }

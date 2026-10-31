@@ -7,9 +7,11 @@ use std::collections::HashMap;
 
 use openhunted_formats::{Animation, Border, BorderBox, Level, LevelObject, Result};
 
-use crate::entity::{BOX, Entity, from_object, object_scale, object_start};
+use crate::behaviour::{self, Ctx, Event, Out, Outcome};
+use crate::entity::{BOX, Behaviour, Entity, from_object, object_scale, object_start};
 use crate::objects::{SOLO, flags, is_player_start, present};
 use crate::physics::{Rect, World};
+use crate::rng::Rng;
 use crate::{AnimPlayer, Assets, Framebuffer, Jake, draw_ops};
 
 /// Duração de um tick de animação, em milissegundos (provisório: `docs/re/cenario.md`).
@@ -83,6 +85,19 @@ pub struct Scene {
     pub object_solids: Vec<Rect>,
     /// Os objetos da fase em jogo (sem o Jake), em ordem de desenho.
     pub entities: Vec<Entity>,
+    /// Camada do Jake (`+0x17c`) e sinalizadores dele.
+    pub jake_layer: i32,
+    jake_flags: i32,
+    /// Caixas sólidas das células da camada do Jake.
+    cell_solids: Vec<Rect>,
+    /// Linhas do `WIZARD.RES` (dicas), se houver.
+    pub hints: Vec<String>,
+    /// Eventos do último tique (quem mostra a cena esvazia).
+    pub events: Vec<Event>,
+    /// Fim da partida, quando decidido.
+    pub outcome: Option<Outcome>,
+    pub tick_count: u32,
+    pub rng: Rng,
 }
 
 /// Tipo de objeto do Jake.
@@ -173,6 +188,14 @@ impl Scene {
             world: World::default(),
             object_solids: Vec::new(),
             entities: Vec::new(),
+            jake_layer: 0,
+            jake_flags: 0,
+            cell_solids: Vec::new(),
+            hints: Vec::new(),
+            events: Vec::new(),
+            outcome: None,
+            tick_count: 0,
+            rng: Rng::new(0x4a4b_4531),
         }
     }
 
@@ -196,6 +219,14 @@ impl Scene {
             world: World::default(),
             object_solids: Vec::new(),
             entities: Vec::new(),
+            jake_layer: 0,
+            jake_flags: 0,
+            cell_solids: Vec::new(),
+            hints: Vec::new(),
+            events: Vec::new(),
+            outcome: None,
+            tick_count: 0,
+            rng: Rng::new(0x4a4b_4531),
         };
         let mut jake_layer = 0;
         let mut jake_flags = 0;
@@ -336,7 +367,9 @@ impl Scene {
             s.entities.push(e);
         }
         s.sprites.sort_by_key(|p| p.layer);
-        let mut solids: Vec<Rect> = s
+        s.jake_layer = jake_layer;
+        s.jake_flags = jake_flags;
+        s.cell_solids = s
             .borders
             .iter()
             .filter(|(_, _, z, b)| *z == jake_layer && b.kind == BOX)
@@ -347,22 +380,10 @@ impl Scene {
                 h: i32::from(b.height),
             })
             .collect();
-        let cell_solids = solids.len();
-        if s.jake.is_some() {
-            // Formas do objeto: relativas à posição dele, já em px da fase.
-            for e in s.entities.iter().filter(|e| e.layer == jake_layer) {
-                if !blocks_entity(jake_flags, e) {
-                    continue;
-                }
-                solids.extend(e.boxes.iter().map(|b| Rect {
-                    x: e.x.saturating_add(b.x),
-                    y: e.y.saturating_add(b.y),
-                    ..*b
-                }));
-            }
+        s.rebuild_world();
+        if let Ok(res) = assets.archive().get("WIZARD.RES") {
+            s.hints = openhunted_formats::parse_text_list(res);
         }
-        s.object_solids = solids[cell_solids..].to_vec();
-        s.world = World::new(solids);
         Ok(s)
     }
 
@@ -428,12 +449,20 @@ impl Scene {
         })
     }
 
-    /// Um tique (50 ms): o Jake reage à entrada `input` (bits de `crate::input`) e todas as
-    /// animações avançam.
+    /// Um tique (50 ms): o Jake reage à entrada `input` (bits de `crate::input`), as
+    /// entidades agem, e todas as animações avançam. Com a partida decidida, só anima.
     pub fn tick(&mut self, input: u32) {
+        let input = if self.outcome.is_some() { 0 } else { input };
         if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
             j.tick(input, &self.world);
             j.respawn_if_outside((self.width, self.height));
+            sp.x = j.body.x;
+            sp.y = j.body.y;
+        }
+        if self.outcome.is_none() {
+            self.tick_entities();
+        }
+        if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
             sp.x = j.body.x;
             sp.y = j.body.y;
             // A arte do Jake olha para a esquerda: espelha quando ele olha para a direita.
@@ -454,15 +483,82 @@ impl Scene {
             let anim = sp.anim.clone();
             sp.player.tick(&anim);
         }
-        for sp in self
-            .entities
-            .iter_mut()
-            .filter_map(|e| e.sprite.as_mut())
-            .filter(|sp| !sp.frozen)
-        {
-            let anim = sp.anim.clone();
-            sp.player.tick(&anim);
+        for e in self.entities.iter_mut().filter(|e| e.alive) {
+            if let Some(sp) = e.sprite.as_mut() {
+                sp.x = e.x;
+                sp.y = e.y;
+                if !sp.frozen
+                    && !matches!(e.behaviour, Behaviour::Exit(_) | Behaviour::Explosion(_))
+                {
+                    let anim = sp.anim.clone();
+                    sp.player.tick(&anim);
+                }
+            }
         }
+        self.tick_count = self.tick_count.saturating_add(1);
+    }
+
+    /// Refaz o mundo do Jake: caixas das células mais as dos objetos sólidos vivos da camada
+    /// dele (formas relativas à posição atual do objeto).
+    pub fn rebuild_world(&mut self) {
+        let mut solids = self.cell_solids.clone();
+        let n = solids.len();
+        if self.jake.is_some() {
+            for e in self.entities.iter().filter(|e| e.layer == self.jake_layer) {
+                if !blocks_entity(self.jake_flags, e) {
+                    continue;
+                }
+                solids.extend(e.boxes.iter().map(|b| Rect {
+                    x: e.x.saturating_add(b.x),
+                    y: e.y.saturating_add(b.y),
+                    ..*b
+                }));
+            }
+        }
+        self.object_solids = solids[n..].to_vec();
+        self.world = World::new(solids);
+    }
+
+    /// Tique das entidades: estado dos gatilhos congelado antes do tique; cada entidade age
+    /// em ordem de lista; depois as saídas (dano ao Jake, novas entidades, eventos).
+    fn tick_entities(&mut self) {
+        let snapshot: Vec<(i32, bool)> = self
+            .entities
+            .iter()
+            .filter(|e| e.alive && e.id != 0)
+            .map(|e| (e.id, e.on))
+            .collect();
+        let on = |id: i32| snapshot.iter().find(|(i, _)| *i == id).map(|(_, o)| *o);
+        let mut out = Out::default();
+        let mut rng = self.rng.clone();
+        {
+            let ctx = Ctx {
+                tick: self.tick_count,
+                jake: self.jake.as_ref(),
+                jake_layer: self.jake_layer,
+                world: &self.world,
+                on: &on,
+                rng: &mut rng,
+                hints: &self.hints,
+                level: (self.width, self.height),
+            };
+            for e in self.entities.iter_mut().filter(|e| e.alive) {
+                match e.behaviour {
+                    Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, &mut out),
+                    Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, &mut out),
+                    _ => {}
+                }
+            }
+        }
+        self.rng = rng;
+        if let Some(j) = self.jake.as_mut() {
+            if !out.jake_damage.is_empty() {
+                j.hurt(out.jake_damage);
+            }
+        }
+        self.entities.extend(out.spawn);
+        self.events.extend(out.events);
+        self.rebuild_world();
     }
 }
 
