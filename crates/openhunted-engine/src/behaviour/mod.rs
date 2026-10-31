@@ -2,6 +2,8 @@
 //! Comportamentos por tipo de objeto (`docs/re/logica-fase.md`, `dicas.md`, `itens.md`,
 //! `minas.md`, `dano-vida.md`).
 
+pub mod bullet;
+pub mod casing;
 pub mod exit;
 pub mod explosion;
 pub mod hint;
@@ -77,6 +79,8 @@ pub struct Out {
     pub blasts: Vec<Blast>,
     /// Vida do Jake depois de apanhar itens neste tique (acumulada item a item).
     pub heal: Option<crate::damage::Health>,
+    /// Impactos de bala (centro x, y, camada): faísca `oex15` e som.
+    pub impacts: Vec<(i32, i32, i32)>,
 }
 
 #[cfg(test)]

@@ -65,7 +65,7 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         ticks: u32,
         /// Entrada do Jake durante os ticks: letras L (esquerda), R (direita), U, D, J (pular),
-        /// repetidas ou uma só para todos (ex.: "L" ou "LLLJ").
+        /// S (atirar); repetidas ou uma só para todos (ex.: "L" ou "LLLJ").
         #[arg(long, default_value = "")]
         input: String,
     },
@@ -181,6 +181,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 'U' => openhunted_engine::input::UP,
                 'D' => openhunted_engine::input::DOWN,
                 'J' => openhunted_engine::input::JUMP,
+                'S' => openhunted_engine::input::SHOOT,
                 _ => 0,
             };
             let seq: Vec<char> = input.chars().collect();

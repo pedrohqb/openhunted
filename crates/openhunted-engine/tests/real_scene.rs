@@ -486,3 +486,59 @@ fn tutorial_jake_starts_with_the_pistol() {
     };
     assert_eq!(s.jake.as_ref().unwrap().inventory.pistol_ammo(), 80);
 }
+
+/// Parado no início da T_J_001, olhando para a esquerda, uma rajada mata a mina mais
+/// próxima (que vem ao encontro dele) e deixa a faísca `oex15`; a cápsula cai e some.
+#[test]
+fn tutorial_shooting_kills_the_nearest_mine() {
+    use openhunted_engine::input::{LEFT, SHOOT};
+    let Some((mut s, _)) = load("T_J_001.LEV") else {
+        return;
+    };
+    for _ in 0..20 {
+        s.tick(0);
+    }
+    s.tick(LEFT); // vira para a esquerda
+    let alive = |s: &Scene| {
+        s.entities
+            .iter()
+            .filter(|e| e.alive && e.kind == 102)
+            .count()
+    };
+    assert_eq!(alive(&s), 7);
+    let mut saw_casing = false;
+    let mut saw_spark = false;
+    let mut t = 0;
+    while alive(&s) == 7 && t < 200 {
+        let input = if t % 6 == 0 { SHOOT } else { 0 };
+        s.tick(input);
+        saw_casing |= s.entities.iter().any(|e| e.alive && e.kind == 22);
+        saw_spark |= s.entities.iter().any(|e| {
+            e.alive
+                && e.kind == 86
+                && e.sprite.as_ref().is_some_and(|sp| {
+                    sp.anim
+                        .labels
+                        .iter()
+                        .any(|l| l.id == 15 && l.frame as usize <= sp.player.frame())
+                        && sp
+                            .anim
+                            .labels
+                            .iter()
+                            .all(|l| l.id <= 15 || l.frame as usize > sp.player.frame())
+                })
+        });
+        t += 1;
+    }
+    assert!(alive(&s) < 7, "nenhuma mina morreu em {t} tiques");
+    assert!(saw_casing);
+    assert!(saw_spark, "sem faísca oex15");
+    assert!(s.jake.as_ref().unwrap().inventory.pistol_ammo() < 80);
+    for _ in 0..60 {
+        s.tick(0);
+    }
+    assert!(
+        !s.entities.iter().any(|e| e.alive && e.kind == 22),
+        "a cápsula não sumiu"
+    );
+}

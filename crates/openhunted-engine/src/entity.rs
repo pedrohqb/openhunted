@@ -5,7 +5,8 @@
 use openhunted_formats::{Animation, Border, LevelObject};
 
 use crate::behaviour::{
-    exit::ExitState, explosion::ExplosionState, hint::HintState, mine::MineState, zone::ZoneState,
+    bullet::BulletState, casing::CasingState, exit::ExitState, explosion::ExplosionState,
+    hint::HintState, mine::MineState, zone::ZoneState,
 };
 use crate::objects::flags;
 use crate::physics::Rect;
@@ -26,6 +27,8 @@ pub const ZONE: u32 = 73;
 pub const ARMOR_ITEM: u32 = 79;
 pub const EXPLOSION: u32 = 86;
 pub const MINE: u32 = 102;
+pub const BULLET: u32 = 19;
+pub const CASING: u32 = 22;
 
 /// Estado por tipo.
 #[derive(Debug, Clone)]
@@ -37,6 +40,8 @@ pub enum Behaviour {
     Mine(MineState),
     Exit(ExitState),
     Explosion(ExplosionState),
+    Bullet(BulletState),
+    Casing(CasingState),
 }
 
 #[derive(Debug, Clone)]

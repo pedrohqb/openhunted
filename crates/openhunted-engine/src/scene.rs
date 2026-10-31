@@ -10,13 +10,15 @@ use openhunted_formats::{Animation, Border, BorderBox, Level, LevelObject, Resul
 use crate::behaviour::{self, Ctx, Event, Out, Outcome};
 use crate::entity::{BOX, Behaviour, Entity, from_object, object_scale, object_start};
 use crate::objects::{SOLO, flags, is_player_start, present};
-use crate::physics::{Rect, World};
+use crate::physics::{Rect, SUB, World};
 use crate::rng::Rng;
 use crate::verdict::{self, Streak};
 use crate::{AnimPlayer, Assets, Framebuffer, Jake, draw_ops};
 
 /// Duração de um tick de animação, em milissegundos (provisório: `docs/re/cenario.md`).
 pub const TICK_MS: u32 = 50;
+/// Som "Pistol" (SOUND.TBL, primeiro quadro dos estados de tiro).
+pub const SOUND_PISTOL: u16 = 3040;
 /// Cores do overlay (índices da paleta).
 const OVERLAY_BORDER: u8 = 255;
 const OVERLAY_MARKER: u8 = 254;
@@ -53,6 +55,20 @@ pub struct Sprite {
 /// ou própria, e só o que ainda está em jogo).
 fn blocks_entity(jake_flags: i32, e: &Entity) -> bool {
     e.alive && e.solid_shapes && crate::objects::blocks_flags(jake_flags, e.flags)
+}
+
+/// Parâmetros de um projétil a criar.
+struct Projectile {
+    kind: u32,
+    anim: &'static str,
+    label: u16,
+    mirror: u8,
+    brd: &'static str,
+    /// Tamanho-alvo em px (`+0x1f0`).
+    target: i32,
+    x: i32,
+    y: i32,
+    layer: i32,
 }
 
 /// Objeto sem animação (lógica) ou com animação ausente: mostrado só no overlay.
@@ -95,6 +111,9 @@ pub struct Scene {
     cell_world: World,
     /// `OEX.ANM`, se existir nos dados.
     explosion_anim: Option<Rc<Animation>>,
+    /// Animações e BRDs dos projéteis, carregados na montagem.
+    projectile_anims: HashMap<String, Rc<Animation>>,
+    projectile_borders: HashMap<String, Border>,
     /// Zonas PR de tipo 0x40 (diante das saídas): (camada, retângulo em px da fase).
     exit_zones: Vec<(i32, Rect)>,
     streak: Streak,
@@ -202,6 +221,8 @@ impl Scene {
             cell_solids: Vec::new(),
             cell_world: World::default(),
             explosion_anim: None,
+            projectile_anims: HashMap::new(),
+            projectile_borders: HashMap::new(),
             exit_zones: Vec::new(),
             streak: Streak::default(),
             prev_input: 0,
@@ -238,6 +259,8 @@ impl Scene {
             cell_solids: Vec::new(),
             cell_world: World::default(),
             explosion_anim: None,
+            projectile_anims: HashMap::new(),
+            projectile_borders: HashMap::new(),
             exit_zones: Vec::new(),
             streak: Streak::default(),
             prev_input: 0,
@@ -421,6 +444,16 @@ impl Scene {
             s.hints = openhunted_formats::parse_text_list(res);
         }
         s.explosion_anim = assets.animation("OEX.ANM").ok();
+        for name in ["OBU.ANM", "OBS00.ANM"] {
+            if let Ok(a) = assets.animation(name) {
+                s.projectile_anims.insert(name.to_string(), a);
+            }
+        }
+        for name in ["OBU00.BRD", "OBU01.BRD", "OBU02.BRD", "OBS.BRD"] {
+            if let Ok(b) = assets.archive().get(name).and_then(Border::parse) {
+                s.projectile_borders.insert(name.to_string(), b);
+            }
+        }
         Ok(s)
     }
 
@@ -496,6 +529,7 @@ impl Scene {
             sp.x = j.body.x;
             sp.y = j.body.y;
         }
+        self.spawn_shots();
         if self.outcome.is_none() {
             let up_edge = input & crate::input::UP != 0 && self.prev_input & crate::input::UP == 0;
             if up_edge {
@@ -543,6 +577,182 @@ impl Scene {
             }
         }
         self.tick_count = self.tick_count.saturating_add(1);
+    }
+
+    fn assets_anim(&self, name: &str) -> Option<Rc<Animation>> {
+        self.projectile_anims.get(name).cloned()
+    }
+
+    fn assets_border(&self, name: &str) -> Option<Border> {
+        self.projectile_borders.get(name).cloned()
+    }
+
+    /// Balas e cápsulas que o Jake disparou neste tique viram entidades; som do tiro ao
+    /// entrar num estado de tiro; aviso de sem munição.
+    fn spawn_shots(&mut self) {
+        let Some(j) = self.jake.as_mut() else { return };
+        let shots: Vec<_> = j.shots.drain(..).collect();
+        if j.no_ammo {
+            self.events.push(Event::Sound(crate::jake::SOUND_NO_AMMO));
+        }
+        if j.is_firing() && j.label_changed() {
+            self.events.push(Event::Sound(SOUND_PISTOL));
+        }
+        let layer = self.jake_layer;
+        for s in shots {
+            let e = if s.casing {
+                self.casing_entity(&s, layer)
+            } else {
+                self.bullet_entity(&s, layer)
+            };
+            if let Some(e) = e {
+                self.entities.push(e);
+            }
+        }
+    }
+
+    /// Entidade de projétil: animação, rótulo, espelho, caixa do BRD e tamanho-alvo.
+    fn projectile_entity(&mut self, p: Projectile, behaviour: Behaviour) -> Option<Entity> {
+        let Projectile {
+            kind,
+            anim: anim_name,
+            label,
+            mirror,
+            brd,
+            target,
+            x,
+            y,
+            layer,
+        } = p;
+        let anim = self.assets_anim(anim_name)?;
+        let player = AnimPlayer::at_label(&anim, label)?;
+        let f = anim.frames.get(player.frame())?;
+        let (fw, fh) = (i32::from(f.width).max(1), i32::from(f.height).max(1));
+        let scale = if fw >= fh { (target, fw) } else { (target, fh) };
+        let boxes = self
+            .assets_border(brd)
+            .map(|b| crate::entity::border_boxes(&b))
+            .unwrap_or_else(|| {
+                vec![Rect {
+                    x: 0,
+                    y: 0,
+                    w: 4,
+                    h: 4,
+                }]
+            });
+        Some(Entity {
+            kind,
+            x,
+            y,
+            flags: 0x2019,
+            layer,
+            id: 0,
+            values: vec![],
+            triggers: vec![],
+            objective: 0,
+            health: 1,
+            armor: 0,
+            boxes,
+            solid_shapes: false,
+            on: false,
+            alive: true,
+            sprite: Some(Sprite {
+                layer: Layer::Object,
+                anim,
+                player,
+                x,
+                y,
+                frozen: false,
+                scale,
+                mirror: mirror & 1 != 0,
+            }),
+            behaviour,
+        })
+    }
+
+    fn bullet_entity(&mut self, s: &crate::jake::Shot, layer: i32) -> Option<Entity> {
+        let (label, mirror) = behaviour::bullet::label_and_mirror(s.vx, s.vy);
+        let brd = ["OBU00.BRD", "OBU00.BRD", "OBU01.BRD", "OBU02.BRD"][label as usize];
+        self.projectile_entity(
+            Projectile {
+                kind: crate::entity::BULLET,
+                anim: "OBU.ANM",
+                label,
+                mirror,
+                brd,
+                target: 10,
+                x: s.x,
+                y: s.y,
+                layer,
+            },
+            Behaviour::Bullet(behaviour::bullet::BulletState {
+                vx: s.vx * SUB,
+                vy: s.vy * SUB,
+            }),
+        )
+    }
+
+    fn casing_entity(&mut self, s: &crate::jake::Shot, layer: i32) -> Option<Entity> {
+        self.projectile_entity(
+            Projectile {
+                kind: crate::entity::CASING,
+                anim: "OBS00.ANM",
+                label: 1,
+                mirror: 0,
+                brd: "OBS.BRD",
+                target: 3,
+                x: s.x,
+                y: s.y,
+                layer,
+            },
+            Behaviour::Casing(behaviour::casing::CasingState {
+                vx: s.vx * SUB,
+                vy: s.vy * SUB,
+                slow: 0,
+                clinked: false,
+            }),
+        )
+    }
+
+    /// Balas contra as entidades sólidas da camada (minas, inimigos…): vítima leva o dano
+    /// da linha (19, qualquer); a bala vira faísca.
+    fn bullet_hits(&mut self, out: &mut Out) {
+        let hits: Vec<(usize, usize)> = {
+            let bullets: Vec<(usize, Rect, i32)> = self
+                .entities
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| e.alive && matches!(e.behaviour, Behaviour::Bullet(_)))
+                .filter_map(|(i, e)| e.bounds().map(|b| (i, b, e.layer)))
+                .collect();
+            let mut v = Vec::new();
+            for (bi, bb, layer) in bullets {
+                let victim = self.entities.iter().position(|e| {
+                    e.alive
+                        && e.layer == layer
+                        && e.flags & 0x80003 == 0x80001
+                        && e.flags & 0x20 == 0
+                        && !matches!(e.behaviour, Behaviour::Bullet(_) | Behaviour::Casing(_))
+                        && e.bounds().is_some_and(|b| b.overlaps(&bb))
+                });
+                if let Some(vi) = victim {
+                    v.push((bi, vi));
+                }
+            }
+            v
+        };
+        for (bi, vi) in hits {
+            if !self.entities[bi].alive {
+                continue;
+            }
+            self.entities[vi].health -= behaviour::bullet::DAMAGE;
+            if let Behaviour::Mine(_) = self.entities[vi].behaviour {
+                self.entities[vi].health = 0;
+            }
+            let c = self.entities[bi].center();
+            self.entities[bi].alive = false;
+            out.impacts.push((c.0, c.1, self.entities[bi].layer));
+        }
     }
 
     /// CIMA (`0x00423b8e`): o Jake parado sobre uma zona PR 0x40 e tocando a caixa de uma
@@ -598,8 +808,13 @@ impl Scene {
     /// Entidade visual de uma explosão: `OEX.ANM`, rótulo sorteado 1–4, com o sprite medindo
     /// `2 · raio` px de altura, centrado no ponto. Sem animação disponível, nenhuma.
     fn explosion_entity(&mut self, b: &behaviour::Blast) -> Option<Entity> {
-        let anim = self.explosion_anim.clone()?;
         let label = 1 + self.rng.below(4) as u16;
+        self.effect_entity(b, label)
+    }
+
+    /// Efeito do `OEX.ANM` com um rótulo dado (faísca de bala: 15).
+    fn effect_entity(&mut self, b: &behaviour::Blast, label: u16) -> Option<Entity> {
+        let anim = self.explosion_anim.clone()?;
         let player = AnimPlayer::at_label(&anim, label)?;
         let f = anim.frames.get(player.frame())?;
         let (fw, fh) = (i32::from(f.width).max(1), i32::from(f.height).max(1));
@@ -693,11 +908,27 @@ impl Scene {
                     Behaviour::Mine(_) => behaviour::mine::tick(e, &mut ctx, &mut out),
                     Behaviour::Explosion(_) => behaviour::explosion::tick(e),
                     Behaviour::Exit(_) => behaviour::exit::tick(e),
+                    Behaviour::Bullet(_) => behaviour::bullet::tick(e, &ctx, &mut out),
+                    Behaviour::Casing(_) => behaviour::casing::tick(e, &mut ctx, &mut out),
                     _ => {}
                 }
             }
         }
         self.rng = rng;
+        self.bullet_hits(&mut out);
+        for (x, y, layer) in std::mem::take(&mut out.impacts) {
+            let b = behaviour::Blast {
+                center: (x, y),
+                layer,
+                radius: behaviour::bullet::IMPACT_RADIUS,
+                push: 0,
+                damage: 0,
+            };
+            if let Some(e) = self.effect_entity(&b, behaviour::bullet::IMPACT_LABEL) {
+                out.spawn.push(e);
+            }
+            out.events.push(Event::Sound(behaviour::bullet::SOUND_WALL));
+        }
         // Explosões: dano de área ao Jake e às minas, e o efeito visual (`OEX.ANM`).
         for b in &out.blasts {
             if let Some(j) = self.jake.as_mut().filter(|j| j.is_active()) {
@@ -800,6 +1031,8 @@ mod tests {
     fn platform_level(layer: i32, flags: i32) -> (Level, Assets) {
         let mut jake = object(JAKE, 50, 0, "OAN.ANM");
         jake.fields = vec![0, 0, 0, 0x94801, 0];
+        jake.fields.resize(21, 0);
+        jake.fields[14] = 50; // vivo: senão o veredito dá derrota em 40 tiques
         let mut piece = object(56, 40, 60, "OAN.ANM");
         piece.fields = vec![0, 0, 0, flags, layer];
         piece.names[1] = "PL.BRD".into();
@@ -815,6 +1048,9 @@ mod tests {
             &[
                 ("OAN00.BMP", bmp.as_slice()),
                 ("OAN.ANM", anm.as_slice()),
+                ("OBU.ANM", anm.as_slice()),
+                ("OBS00.ANM", anm.as_slice()),
+                ("OEX.ANM", anm.as_slice()),
                 ("PL.BRD", brd.as_slice()),
             ],
         )]);
@@ -1011,6 +1247,98 @@ mod tests {
             s.tick(0);
         }
         assert_eq!(s.outcome, Some(Outcome::Defeat));
+    }
+
+    /// Jake com pistola na peça; atira para a direita contra uma parede a 100 px e, depois,
+    /// contra uma mina na linha de tiro.
+    #[test]
+    fn bullets_fly_spark_on_walls_and_kill_mines() {
+        use crate::behaviour::mine::MineState;
+        use crate::input::SHOOT;
+        let (mut l, mut a) = platform_level(0, 0x80089);
+        l.grid_x = 4;
+        l.cells = vec![None; 32];
+        l.objects[0].points = vec![(0, 0), (1, 20), (1, 80)];
+        l.objects[0].fields[4] = 0;
+        // parede a 100 px à direita do Jake (como objeto sólido com BRD)
+        let mut wall = object(56, 160, 0, "OAN.ANM");
+        wall.fields = vec![0, 0, 0, 0x80089, 0];
+        wall.names[1] = "PL.BRD".into(); // caixa 60×10 em (0,0): fica em y 0..10
+        l.objects.push(wall);
+        let mut s = Scene::build(&l, &mut a).unwrap();
+        for _ in 0..30 {
+            s.tick(0);
+        }
+        s.tick(crate::input::RIGHT);
+        s.tick(SHOOT);
+        s.tick(SHOOT); // t = 1: 1ª bala + cápsula
+        let bullets = |s: &Scene| {
+            s.entities
+                .iter()
+                .filter(|e| e.alive && e.kind == crate::entity::BULLET)
+                .map(|e| (e.x, e.y))
+                .collect::<Vec<_>>()
+        };
+        let b0 = bullets(&s);
+        assert_eq!(b0.len(), 1);
+        assert!(
+            s.entities
+                .iter()
+                .any(|e| e.alive && e.kind == crate::entity::CASING)
+        );
+        s.tick(0);
+        let b1 = bullets(&s);
+        assert_eq!(b1[0].0 - b0[0].0, 20, "20 px por tique");
+        // some ao sair da fase (sem parede na altura do tiro, y ≈ 15) e nenhuma faísca
+        let mut trace = vec![];
+        for _ in 0..40 {
+            s.tick(0);
+            trace.push(bullets(&s));
+        }
+        assert!(bullets(&s).is_empty(), "{:?} {:?}", trace.last(), s.outcome);
+        // mina à direita, na altura, fora do alcance dela (fica parada): morre com a bala,
+        // e a faísca aparece
+        let mut mine = Entity {
+            kind: crate::entity::MINE,
+            x: 300,
+            y: 10,
+            flags: 0x80801,
+            layer: 0,
+            id: 0,
+            values: vec![],
+            triggers: vec![],
+            objective: 0,
+            health: 1,
+            armor: 0,
+            boxes: vec![Rect {
+                x: 0,
+                y: 0,
+                w: 17,
+                h: 17,
+            }],
+            solid_shapes: true,
+            on: false,
+            alive: true,
+            sprite: None,
+            behaviour: Behaviour::Mine(MineState::new(0)),
+        };
+        mine.values = vec![0];
+        s.entities.push(mine);
+        s.tick(SHOOT);
+        for _ in 0..20 {
+            s.tick(0);
+        }
+        assert!(
+            !s.entities
+                .iter()
+                .any(|e| e.alive && e.kind == crate::entity::MINE)
+        );
+        // (a animação sintética só tem o rótulo 1: a faísca `oex15` fica para o teste real)
+        assert!(
+            s.events
+                .contains(&Event::Sound(crate::behaviour::bullet::SOUND_WALL))
+        );
+        assert!(s.events.contains(&Event::Sound(SOUND_PISTOL)));
     }
 
     #[test]
