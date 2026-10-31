@@ -336,3 +336,34 @@ fn real_cell_indices_resolve_to_animation_labels() {
         }
     }
 }
+
+#[test]
+fn real_object_and_decoration_animations_exist() {
+    use openhunted_formats::{Level, open_data, parse_mission_list};
+    let path = data_or_skip!();
+    let gd = open_data(&path).unwrap();
+    let (ar, la) = (gd.resources().unwrap(), gd.levels().unwrap());
+    let mut missing = Vec::new();
+    for m in parse_mission_list(&la.get("ENGLEVEL.TXT").unwrap()).unwrap() {
+        let l = Level::parse(&la.get(&m.file).unwrap()).unwrap();
+        let cells = l.cells.iter().flatten();
+        let objs = l
+            .objects
+            .iter()
+            .chain(cells.clone().flat_map(|c| c.objects.iter()));
+        for o in objs {
+            if !o.names[0].is_empty() && ar.get(&o.names[0]).is_err() {
+                missing.push((o.kind, o.names[0].to_uppercase()));
+            }
+        }
+        for d in cells.flat_map(|c| c.decorations.iter()) {
+            assert!(
+                d.animation.is_empty() || ar.get(&d.animation).is_ok(),
+                "{}",
+                d.animation
+            );
+        }
+    }
+    // Um objeto de tipo 0 aponta para "EDITOR.INI" (resto do editor de fases).
+    assert_eq!(missing, vec![(0, "EDITOR.INI".to_string())]);
+}
