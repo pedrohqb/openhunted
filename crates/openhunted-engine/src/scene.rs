@@ -90,6 +90,10 @@ pub struct Scene {
     jake_flags: i32,
     /// Caixas sólidas das células da camada do Jake.
     cell_solids: Vec<Rect>,
+    /// Mundo só com as células (para as minas).
+    cell_world: World,
+    /// `OEX.ANM`, se existir nos dados.
+    explosion_anim: Option<Rc<Animation>>,
     /// Linhas do `WIZARD.RES` (dicas), se houver.
     pub hints: Vec<String>,
     /// Eventos do último tique (quem mostra a cena esvazia).
@@ -191,6 +195,8 @@ impl Scene {
             jake_layer: 0,
             jake_flags: 0,
             cell_solids: Vec::new(),
+            cell_world: World::default(),
+            explosion_anim: None,
             hints: Vec::new(),
             events: Vec::new(),
             outcome: None,
@@ -222,6 +228,8 @@ impl Scene {
             jake_layer: 0,
             jake_flags: 0,
             cell_solids: Vec::new(),
+            cell_world: World::default(),
+            explosion_anim: None,
             hints: Vec::new(),
             events: Vec::new(),
             outcome: None,
@@ -380,10 +388,12 @@ impl Scene {
                 h: i32::from(b.height),
             })
             .collect();
+        s.cell_world = World::new(s.cell_solids.clone());
         s.rebuild_world();
         if let Ok(res) = assets.archive().get("WIZARD.RES") {
             s.hints = openhunted_formats::parse_text_list(res);
         }
+        s.explosion_anim = assets.animation("OEX.ANM").ok();
         Ok(s)
     }
 
@@ -498,6 +508,51 @@ impl Scene {
         self.tick_count = self.tick_count.saturating_add(1);
     }
 
+    /// Entidade visual de uma explosão: `OEX.ANM`, rótulo sorteado 1–4, com o sprite medindo
+    /// `2 · raio` px de altura, centrado no ponto. Sem animação disponível, nenhuma.
+    fn explosion_entity(&mut self, b: &behaviour::Blast) -> Option<Entity> {
+        let anim = self.explosion_anim.clone()?;
+        let label = 1 + self.rng.below(4) as u16;
+        let player = AnimPlayer::at_label(&anim, label)?;
+        let f = anim.frames.get(player.frame())?;
+        let (fw, fh) = (i32::from(f.width).max(1), i32::from(f.height).max(1));
+        let scale = (2 * b.radius.max(1), fh);
+        let (w, h) = (fw * scale.0 / scale.1, 2 * b.radius.max(1));
+        Some(Entity {
+            kind: crate::entity::EXPLOSION,
+            x: b.center.0 - w / 2,
+            y: b.center.1 - h / 2,
+            flags: 0x99,
+            layer: b.layer,
+            id: 0,
+            values: vec![],
+            triggers: vec![],
+            objective: 0,
+            health: 0,
+            armor: 0,
+            boxes: vec![],
+            solid_shapes: false,
+            on: false,
+            alive: true,
+            sprite: Some(Sprite {
+                layer: Layer::Object,
+                anim,
+                player,
+                x: b.center.0 - w / 2,
+                y: b.center.1 - h / 2,
+                frozen: true,
+                scale,
+                mirror: false,
+            }),
+            behaviour: Behaviour::Explosion(Default::default()),
+        })
+    }
+
+    /// Mundo só com as caixas das células da camada do Jake.
+    pub fn cell_world(&self) -> &World {
+        &self.cell_world
+    }
+
     /// Refaz o mundo do Jake: caixas das células mais as dos objetos sólidos vivos da camada
     /// dele (formas relativas à posição atual do objeto).
     pub fn rebuild_world(&mut self) {
@@ -532,11 +587,12 @@ impl Scene {
         let mut out = Out::default();
         let mut rng = self.rng.clone();
         {
-            let ctx = Ctx {
+            let mut ctx = Ctx {
                 tick: self.tick_count,
                 jake: self.jake.as_ref(),
                 jake_layer: self.jake_layer,
                 world: &self.world,
+                cells: &self.cell_world,
                 on: &on,
                 rng: &mut rng,
                 hints: &self.hints,
@@ -547,11 +603,33 @@ impl Scene {
                     Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, &mut out),
                     Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, &mut out),
                     Behaviour::Pickup => behaviour::pickup::tick(e, &ctx, &mut out),
+                    Behaviour::Mine(_) => behaviour::mine::tick(e, &mut ctx, &mut out),
+                    Behaviour::Explosion(_) => behaviour::explosion::tick(e),
                     _ => {}
                 }
             }
         }
         self.rng = rng;
+        // Explosões: dano de área ao Jake e às minas, e o efeito visual (`OEX.ANM`).
+        for b in &out.blasts {
+            if let Some(j) = self.jake.as_mut().filter(|j| j.is_active()) {
+                let jb = j.body.bounds();
+                let jc = (jb.x + jb.w / 2, jb.y + jb.h / 2);
+                if let Some(p) = behaviour::explosion::area_effect(b, jc, self.jake_layer) {
+                    out.jake_damage.add(&p);
+                }
+            }
+            for e in self.entities.iter_mut().filter(|e| e.alive) {
+                if let Behaviour::Mine(_) = e.behaviour {
+                    if let Some(p) = behaviour::explosion::area_effect(b, e.center(), e.layer) {
+                        e.health -= p.amount.max(1);
+                    }
+                }
+            }
+            if let Some(e) = self.explosion_entity(b) {
+                out.spawn.push(e);
+            }
+        }
         if let Some(j) = self.jake.as_mut() {
             if let Some(h) = out.heal.last() {
                 j.health = *h;
@@ -687,6 +765,53 @@ mod tests {
             settle(&l, a).y > 60,
             "objeto de contato (0x20) não sustenta"
         );
+    }
+
+    /// Duas minas a 20 px uma da outra e o Jake encostado na primeira: a primeira explode no
+    /// contato, a explosão fere o Jake e mata a segunda em cadeia.
+    #[test]
+    fn mine_contact_hurts_jake_and_chains() {
+        use crate::behaviour::mine::MineState;
+        let mut jake = object(JAKE, 50, 0, "OAN.ANM");
+        jake.fields = vec![0, 0, 0, 0x94801, 0];
+        jake.fields.resize(16, 0);
+        jake.fields[14] = 50;
+        let mine = |x: i32| {
+            let mut m = object(crate::entity::MINE, x, 10, "OAN.ANM");
+            m.fields = vec![0, 0, 0, 0x80801, 0];
+            m.fields.resize(16, 0);
+            m.fields[14] = 1;
+            m.names[1] = "PL.BRD".into();
+            m
+        };
+        let (mut l, mut a) = platform_level(0, 0x80089);
+        l.objects = vec![jake, mine(60), mine(80)];
+        let mut s = Scene::build(&l, &mut a).unwrap();
+        for e in s.entities.iter_mut() {
+            e.behaviour = Behaviour::Mine(MineState::new(0));
+            e.boxes = vec![Rect {
+                x: 0,
+                y: 0,
+                w: 17,
+                h: 17,
+            }];
+        }
+        s.rebuild_world();
+        s.tick(0);
+        s.tick(0);
+        let dead: Vec<_> = s
+            .entities
+            .iter()
+            .filter(|e| e.kind == 102)
+            .map(|e| e.alive)
+            .collect();
+        assert_eq!(
+            dead,
+            vec![false, false],
+            "as duas minas explodem (em cadeia)"
+        );
+        let j = s.jake.as_ref().unwrap();
+        assert!(j.health.hp < 50 && j.health.hp > 0, "vida {}", j.health.hp);
     }
 
     #[test]

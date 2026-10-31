@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Cena montada a partir dos dados reais (OPENHUNTED_DATA).
 
-use openhunted_engine::{Assets, Event, Layer, Scene};
+use openhunted_engine::{Assets, Behaviour, Event, Layer, Scene};
 use openhunted_formats::{Level, open_data};
 
 pub fn load(level: &str) -> Option<(Scene, Assets)> {
@@ -209,9 +209,10 @@ fn mission_files() -> Vec<String> {
         .collect()
 }
 
-/// Índices dos sólidos que `r` intersecta.
+/// Índices dos sólidos das células que `r` intersecta (os objetos móveis, como as minas,
+/// podem encostar no Jake de propósito).
 fn overlapped(s: &Scene, r: &openhunted_engine::Rect) -> Vec<usize> {
-    let solids = s.world.solids();
+    let solids = s.cell_world().solids();
     (0..solids.len())
         .filter(|&i| solids[i].overlaps(r))
         .collect()
@@ -295,9 +296,6 @@ fn tutorial_hints_fire_in_order() {
     let Some((mut s, _)) = load("T_J_001.LEV") else {
         return;
     };
-    // sem as minas (ainda sólidas e paradas nesta tarefa; a Task 6 lhes dá vida)
-    s.entities.retain(|e| e.kind != 102);
-    s.rebuild_world();
     let mut hints = Vec::new();
     for t in 0..900 {
         let j = s.jake.as_ref().unwrap();
@@ -344,8 +342,7 @@ fn tutorial_items_are_picked_up() {
     let Some((mut s, _)) = load("T_J_001.LEV") else {
         return;
     };
-    s.entities.retain(|e| e.kind != 102);
-    s.rebuild_world();
+    let mut best = (0, 0);
     for t in 0..600 {
         let j = s.jake.as_ref().unwrap();
         let input = if j.body.hit_wall && t % 10 == 0 {
@@ -354,16 +351,73 @@ fn tutorial_items_are_picked_up() {
             LEFT
         };
         s.tick(input);
+        let h = s.jake.as_ref().unwrap().health;
+        best = (best.0.max(h.hp), best.1.max(h.armor));
         if s.jake.as_ref().unwrap().body.x < 1300 {
             break;
         }
     }
-    let h = s.jake.as_ref().unwrap().health;
-    assert_eq!((h.hp, h.armor), (75, 25));
+    // apanhou os dois (as minas podem ter tirado um pouco depois)
     assert!(
         s.entities
             .iter()
             .filter(|e| matches!(e.kind, 32 | 79))
             .all(|e| !e.alive)
+    );
+    assert!(
+        best.0 >= 75 && best.1 >= 25,
+        "melhor vida/armadura vistas: {best:?}"
+    );
+}
+
+/// A T_J_001 tem 7 minas Alpha com vida 1; correndo às cegas para a esquerda, o Jake esbarra
+/// nelas: explodem (aparece a explosão `OEX.ANM`), ele perde vida mas chega vivo à saída.
+#[test]
+fn tutorial_mines_explode_on_jake() {
+    use openhunted_engine::input::{JUMP, LEFT};
+    let Some((mut s, _)) = load("T_J_001.LEV") else {
+        return;
+    };
+    let mines: Vec<_> = s
+        .entities
+        .iter()
+        .filter(|e| e.kind == 102)
+        .map(|e| {
+            (
+                e.health,
+                matches!(&e.behaviour, Behaviour::Mine(m) if m.variant == 0),
+            )
+        })
+        .collect();
+    assert_eq!(mines, vec![(1, true); 7]);
+    let mut saw_explosion = false;
+    let mut hurt = false;
+    let mut last_hp = 50;
+    for t in 0..900 {
+        let j = s.jake.as_ref().unwrap();
+        let input = if j.body.hit_wall && t % 10 == 0 {
+            LEFT | JUMP
+        } else {
+            LEFT
+        };
+        s.tick(input);
+        saw_explosion |= s.entities.iter().any(|e| e.alive && e.kind == 86);
+        let hp = s.jake.as_ref().unwrap().health.hp;
+        hurt |= hp < last_hp;
+        last_hp = hp;
+        if s.jake.as_ref().unwrap().body.x < 120 || s.jake.as_ref().unwrap().is_dead() {
+            break;
+        }
+    }
+    let j = s.jake.as_ref().unwrap();
+    assert!(saw_explosion);
+    assert!(hurt, "nenhuma mina feriu o Jake");
+    assert!(!j.is_dead(), "o Jake morreu em x={}", j.body.x);
+    assert!(j.body.x < 120, "parou em x={}", j.body.x);
+    assert!(
+        s.entities
+            .iter()
+            .filter(|e| e.kind == 102)
+            .any(|e| !e.alive)
     );
 }

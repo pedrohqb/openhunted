@@ -50,6 +50,8 @@ pub struct Ctx<'a> {
     pub jake: Option<&'a Jake>,
     pub jake_layer: i32,
     pub world: &'a World,
+    /// Só as caixas das células (para quem se move sem ser o Jake).
+    pub cells: &'a World,
     /// Estado "ligado" de um id de gatilho antes do tique (`None` = id inexistente).
     pub on: &'a dyn Fn(i32) -> Option<bool>,
     pub rng: &'a mut Rng,
@@ -156,6 +158,7 @@ pub(crate) mod test_support {
             jake: Some(j),
             jake_layer: 0,
             world: w,
+            cells: w,
             on,
             rng,
             hints: &[],

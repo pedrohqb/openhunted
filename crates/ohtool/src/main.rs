@@ -64,6 +64,10 @@ enum Cmd {
         /// Avança N ticks de animação antes de renderizar.
         #[arg(long, default_value_t = 0)]
         ticks: u32,
+        /// Entrada do Jake durante os ticks: letras L (esquerda), R (direita), U, D, J (pular),
+        /// repetidas ou uma só para todos (ex.: "L" ou "LLLJ").
+        #[arg(long, default_value = "")]
+        input: String,
     },
 }
 
@@ -157,6 +161,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             camera,
             overlay,
             ticks,
+            input,
         } => {
             use openhunted_engine::{
                 Assets, Framebuffer, SCREEN_H, SCREEN_W, Scene, background_index, clamp_camera,
@@ -170,8 +175,25 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             for w in &scene.warnings {
                 eprintln!("aviso: {w}");
             }
-            for _ in 0..ticks {
-                scene.tick(0);
+            let bits = |c: char| match c {
+                'L' => openhunted_engine::input::LEFT,
+                'R' => openhunted_engine::input::RIGHT,
+                'U' => openhunted_engine::input::UP,
+                'D' => openhunted_engine::input::DOWN,
+                'J' => openhunted_engine::input::JUMP,
+                _ => 0,
+            };
+            let seq: Vec<char> = input.chars().collect();
+            for t in 0..ticks as usize {
+                let c = if seq.len() == 1 {
+                    seq[0]
+                } else {
+                    seq.get(t).copied().unwrap_or(' ')
+                };
+                scene.tick(bits(c));
+            }
+            if let Some(c) = scene.jake.as_ref().and_then(|_| scene.focus()) {
+                eprintln!("jake em {:?}", c);
             }
             let view = (SCREEN_W as i32, SCREEN_H as i32);
             let cam = clamp_camera((scene.width, scene.height), view, camera);
