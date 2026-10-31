@@ -370,6 +370,7 @@ version = "0.1.0"
 dependencies = [
  "openhunted-engine",
  "openhunted-formats",
+ "png",
  "sdl3",
 ]
 
