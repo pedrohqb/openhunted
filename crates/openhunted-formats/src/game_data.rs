@@ -37,7 +37,12 @@ pub fn open_data(path: &Path) -> Result<GameData> {
     let source: Box<dyn DataSource> = if is_iso {
         Box::new(IsoSource::open(path)?)
     } else if path.is_file() {
-        Box::new(DirSource::new(path.parent().unwrap_or(Path::new("."))))
+        // "RESOURCE.MAP" sozinho tem pai "" (não None): trate como a pasta atual.
+        let dir = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        Box::new(DirSource::new(dir))
     } else {
         Box::new(DirSource::new(path))
     };

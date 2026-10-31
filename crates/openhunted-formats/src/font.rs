@@ -5,6 +5,8 @@ use crate::bytes::{slice, u32_at};
 use crate::{FormatError, Result};
 
 const WHAT: &str = "fonte PFT";
+/// Limite de sanidade para larguras de glifo e alturas (as fontes reais têm de 18 a 46 px).
+const MAX_DIM: usize = 255;
 
 /// Glifo: largura e pixels (índices, sem preenchimento), com a altura da fonte.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,10 +58,13 @@ impl Font {
         }
         let first_char = header[1] as usize;
         let count = header[2] as usize;
-        let height = u16::try_from(header[3]).map_err(|_| FormatError::Unsupported {
-            what: WHAT,
-            detail: format!("altura {}", header[3]),
-        })?;
+        let height = u16::try_from(header[3])
+            .ok()
+            .filter(|&h| h as usize <= MAX_DIM)
+            .ok_or_else(|| FormatError::Unsupported {
+                what: WHAT,
+                detail: format!("altura {}", header[3]),
+            })?;
         let mut pos = 16 + head_size;
         expect(data, pos, b"PBMA")?;
         pos += 8;
@@ -117,7 +122,7 @@ fn read_glyph(d: &[u8], pos: usize) -> Result<(Glyph, usize)> {
     let width = u32_at(d, pos + 12, WHAT)? as usize;
     let height = u32_at(d, pos + 16, WHAT)? as usize;
     let depth = u32_at(d, pos + 20, WHAT)?;
-    if depth != 8 || width > u16::MAX as usize {
+    if depth != 8 || width == 0 || width > MAX_DIM || height == 0 || height > MAX_DIM {
         return Err(FormatError::Unsupported {
             what: WHAT,
             detail: format!("glifo {width}x{height} com {depth} bits"),
@@ -162,6 +167,20 @@ mod tests {
         let b = f.glyphs[b'B' as usize].as_ref().unwrap();
         assert_eq!(b.width, 5);
         assert_eq!(b.pixels, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn absurd_dimensions_are_rejected() {
+        // glifo de largura 65535 e altura 0 (passa na conferência de tamanho dos dados)
+        let mut v = mkpft(65, &[(1, vec![1, 2])]);
+        let at = v.windows(4).rposition(|w| w == b"head").unwrap();
+        v[at + 12..at + 16].copy_from_slice(&65535u32.to_le_bytes());
+        v[at + 16..at + 20].copy_from_slice(&0u32.to_le_bytes());
+        assert!(Font::parse(&v).is_err());
+        // altura da fonte 4000
+        let mut v = mkpft(65, &[(1, vec![1, 2])]);
+        v[16 + 4 + 12..16 + 4 + 16].copy_from_slice(&4000u32.to_le_bytes());
+        assert!(Font::parse(&v).is_err());
     }
 
     #[test]

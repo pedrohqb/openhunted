@@ -62,7 +62,9 @@ fn lz_flags(src: &[u8], expected_len: usize) -> Result<Vec<u8>> {
 
     let mut flag_pos = pos;
     let mut data_pos = pos + tokens.div_ceil(8);
-    let mut out = Vec::with_capacity(expected_len);
+    // Cada palavra de referência gera no máximo 66 bytes: limita a reserva pelo que os
+    // dados conseguem produzir, em vez de confiar no tamanho declarado.
+    let mut out = Vec::with_capacity(expected_len.min(src.len().saturating_mul(33)));
     let mut flags = 0u8;
     for i in 0..tokens {
         if i % 8 == 0 {
@@ -156,6 +158,12 @@ mod tests {
                 Err(FormatError::Unsupported { .. })
             ));
         }
+    }
+
+    #[test]
+    fn huge_declared_size_errors_without_allocating() {
+        let too_big = isize::MAX as usize + 1;
+        assert!(decompress(3, &[0x00, 3, 0x00, b'a', b'b', b'c'], too_big).is_err());
     }
 
     #[test]

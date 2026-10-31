@@ -324,3 +324,20 @@ fn levels_lists_missions_and_exports_json() {
     let json = std::fs::read_to_string(dir.path().join("T_J_001.lev.json")).unwrap();
     assert!(json.contains("\"grid_x\": 2"), "{json}");
 }
+
+#[test]
+fn bare_relative_resource_map_path_opens() {
+    let cd = tempfile::tempdir().unwrap();
+    synthetic_cd(cd.path());
+    let out = ohtool()
+        .current_dir(cd.path().join("Hunter"))
+        .args(["--data", "RESOURCE.MAP", "list"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8(out.stdout).unwrap().lines().count(), 4);
+}
