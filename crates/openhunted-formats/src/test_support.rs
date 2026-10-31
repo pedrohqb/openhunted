@@ -200,3 +200,42 @@ pub fn mkpal() -> Vec<u8> {
     v.extend(data);
     v
 }
+
+/// Monta uma animação mínima válida: um quadro que desenha o quadro 0 do bitmap 2
+/// (`oan00.bmp`), com um rótulo "parado".
+pub fn mkanm() -> Vec<u8> {
+    fn block(tag: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut v = tag.to_vec();
+        v.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        v.extend_from_slice(data);
+        v
+    }
+    fn words(ws: &[i16]) -> Vec<u8> {
+        ws.iter().flat_map(|w| w.to_le_bytes()).collect()
+    }
+    let script = words(&[2, 2, 0, 5, 6, 0, 0, 1]);
+    let mut anm = b"TB".to_vec();
+    anm.extend(words(&[
+        1004,
+        0,
+        1,
+        1,
+        script.len() as i16,
+        22,
+        17,
+        20,
+        55,
+        66,
+    ]));
+    anm.extend(words(&[-7, 1, 20, 20, 0, 0]));
+    anm.extend(words(&[0, 1]));
+    anm.extend(script);
+    let mut tag = words(&[1, 2]);
+    tag.extend_from_slice(b"oan00.bmp\0");
+    let mut lab = words(&[1, 1]);
+    lab.extend_from_slice(b"parado\0");
+    let mut v = block(b"ANM:", &anm);
+    v.extend(block(b"TAG:", &tag));
+    v.extend(block(b"LAB:", &lab));
+    v
+}

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use openhunted_formats::{Bitmap, Palette, ResourceArchive};
+use openhunted_formats::{Animation, Bitmap, Palette, ResourceArchive};
 
 /// Nome de arquivo seguro para um recurso: troca todo caractere fora de
 /// `[A-Za-z0-9._-]` e os pontos iniciais por `_`; nome vazio ou só com pontos vira `_`.
@@ -56,12 +56,32 @@ pub fn extract(
                 write_png(&out.join(format!("{base}_{i:03}.png")), f, pal)?;
                 written += 1;
             }
+        } else if let Some(json) = structured_json(&e.name, data) {
+            let json = json.map_err(|err| format!("{}: {err}", e.name))?;
+            std::fs::write(out.join(format!("{base}.json")), json)?;
+            written += 1;
         } else {
             std::fs::write(out.join(&base), data)?;
             written += 1;
         }
     }
     Ok(written)
+}
+
+/// JSON dos formatos estruturados (ANM…); `None` para os demais.
+pub fn structured_json(
+    name: &str,
+    data: &[u8],
+) -> Option<Result<String, Box<dyn std::error::Error>>> {
+    fn to_json<T: serde::Serialize>(
+        v: openhunted_formats::Result<T>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        Ok(serde_json::to_string_pretty(&v?)?)
+    }
+    match extension(name).as_str() {
+        "ANM" => Some(to_json(Animation::parse(data))),
+        _ => None,
+    }
 }
 
 /// Extensão em maiúsculas.

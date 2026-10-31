@@ -3,16 +3,18 @@
 use std::path::Path;
 
 use assert_cmd::Command;
-use openhunted_formats::test_support::{mkarchive, mkbmp, mkpal};
+use openhunted_formats::test_support::{mkanm, mkarchive, mkbmp, mkpal};
 
 /// Grava um CD sintético (pasta Hunter/ com RESOURCE.MAP e um volume).
 fn synthetic_cd(dir: &Path) {
     let bmp = mkbmp(&[(2, 2, vec![1, 2, 3, 4])]);
     let pal = mkpal();
+    let anm = mkanm();
     let (map, vols) = mkarchive(&[(
         "RESOURCE.001",
         &[
             ("TEST.BMP", bmp.as_slice()),
+            ("OAN.ANM", anm.as_slice()),
             ("WORLD.PAL", pal.as_slice()),
             ("X.WAV", b"RIFFxxxx".as_slice()),
         ],
@@ -41,7 +43,7 @@ fn list_prints_all_entries() {
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
     let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines.len(), 3);
+    assert_eq!(lines.len(), 4);
     assert!(lines[0].starts_with("TEST.BMP\tRESOURCE.001\t"));
     let only = ohtool()
         .arg("--data")
@@ -203,4 +205,29 @@ fn closed_stdout_does_not_panic() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+#[test]
+fn anm_exports_json() {
+    let cd = tempfile::tempdir().unwrap();
+    synthetic_cd(cd.path());
+    let info = ohtool()
+        .arg("--data")
+        .arg(cd.path())
+        .args(["info", "OAN.ANM"])
+        .output()
+        .unwrap();
+    assert!(info.status.success());
+    let text = String::from_utf8(info.stdout).unwrap();
+    assert!(text.contains("\"frames\""), "{text}");
+    let out = tempfile::tempdir().unwrap();
+    ohtool()
+        .arg("--data")
+        .arg(cd.path())
+        .args(["extract", "--type", "ANM", "--out"])
+        .arg(out.path())
+        .assert()
+        .success();
+    let json = std::fs::read_to_string(out.path().join("OAN.ANM.json")).unwrap();
+    assert!(json.contains("oan00.bmp"), "{json}");
 }

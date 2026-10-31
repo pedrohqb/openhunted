@@ -94,6 +94,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             if !tags.is_empty() {
                 writeln!(out, "blocos: {}", tags.join(" "))?;
             }
+            if let Some(json) = extract::structured_json(&name, data) {
+                writeln!(out, "{}", json?)?;
+            }
             if extract::extension(&name) == "BMP" {
                 let bmp = Bitmap::parse(data)?;
                 writeln!(out, "quadros: {}", bmp.frames.len())?;

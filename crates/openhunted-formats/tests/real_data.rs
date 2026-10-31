@@ -123,3 +123,48 @@ fn real_bitmaps() {
     }
     assert_eq!(n, 1654);
 }
+
+#[test]
+fn real_animations() {
+    use openhunted_formats::Animation;
+    let path = data_or_skip!();
+    let ar = open_real_archive(&path);
+    let sabout = Animation::parse(ar.get("SABOUT.ANM").unwrap()).unwrap();
+    assert!(
+        sabout
+            .bitmaps
+            .iter()
+            .any(|(_, n)| n.to_lowercase().starts_with("sabout."))
+    );
+    // Referências quebradas que já vêm assim nos dados originais.
+    let known_missing = [
+        ("WORLD1.ANM", "CDUMMY.BMP"),
+        ("WORLD2.ANM", "C2C03D.BMP"),
+        ("WORLD2.ANM", "C2C03E.BMP"),
+        ("WORLD2.ANM", "C2C03F.BMP"),
+        ("WORLD2.ANM", "CDUMMY.BMP"),
+    ];
+    let mut missing = Vec::new();
+    let mut n = 0;
+    for e in ar
+        .entries()
+        .iter()
+        .filter(|e| e.name.to_uppercase().ends_with(".ANM"))
+    {
+        let a = Animation::parse(ar.get(&e.name).unwrap())
+            .unwrap_or_else(|err| panic!("{}: {err}", e.name));
+        for (_, bmp) in &a.bitmaps {
+            if ar.get(bmp).is_err() {
+                missing.push((e.name.to_uppercase(), bmp.to_uppercase()));
+            }
+        }
+        n += 1;
+    }
+    missing.sort();
+    let expected: Vec<(String, String)> = known_missing
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+    assert_eq!(missing, expected);
+    assert_eq!(n, 87);
+}
