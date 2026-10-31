@@ -130,9 +130,14 @@ fn put(img: &mut [u8], off: usize, data: &[u8]) {
     img[off..off + data.len()].copy_from_slice(data);
 }
 
+/// Um arquivo sintético: (nome, dados).
+pub type SynthFile<'a> = (&'a str, &'a [u8]);
+/// Um volume sintético: (nome do volume, arquivos).
+pub type SynthVolume<'a> = (&'a str, &'a [SynthFile<'a>]);
+
 /// Monta um mapa e volumes sintéticos no formato da Dynamix.
 /// Devolve `(mapa, [(nome do volume, bytes)])`.
-pub fn mkarchive(volumes: &[(&str, &[(&str, &[u8])])]) -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
+pub fn mkarchive(volumes: &[SynthVolume<'_>]) -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
     let mut map = vec![1, 2, 3, 5];
     map.extend_from_slice(&(volumes.len() as u16).to_le_bytes());
     let mut out = Vec::new();
