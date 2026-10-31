@@ -27,6 +27,45 @@ Nos dados, as plataformas do `OPO.ANM` usam o próprio tipo ou uma variante (68 
 inimigos `OH1`/`OH2` um estado (50…55, 300…). O Jake e os itens de tipo 6 não têm o bit: a
 referência é o quadro 0. Com o quadro 0 em todos (M3a), a plataforma 72 saía 6,4× maior.
 
+## Presença por modo de jogo e jogador
+
+O laço de atualização (`0x004045a5`, em `0x00404603`) e a colisão só consideram um objeto se
+`modos & modo_do_jogo ≠ 0` ou se o sinalizador 0x10 de `+0x178` está ligado. `modos` é o campo
+`+0x1a8` (versão ≥ 1010; senão 0xfe, e o leitor liga o bit 0 se a versão < 1011 e `+0x19c` ≠
+0). O modo do jogo é a máscara global `0x4972f8`, fixada no início da partida (`0x0043c9c2`…):
+0x2 é o padrão (solo); 0x8 a 0x80 e 0xe0 aparecem nos modos de vários jogadores.
+
+O bit 0 de `modos` marca uma **vaga de jogador**: o objeto só existe com um jogador atribuído
+(`+0x19c`, zerado pelo leitor). Nas 65 missões solo do `ENGLEVEL.TXT` (jogador 1 = Jake, 2 =
+Garathe) há exatamente um objeto com `modos & 3 = 3`, do tipo do jogador: é o início dele.
+Outros objetos de tipo 1 com 0xfe (presentes no solo) aparecem em algumas fases (`D_J_009`,
+`H_J_010`); os de vagas 0x21/0x41/0x81 (fases `C_*`) e 0xd/0x19 (fases `M_*`) são dos modos de
+vários jogadores.
+
+## Colisão entre objetos
+
+`0x00436caf` move um objeto (m) contra cada outro (o) da lista. O outro só conta se:
+
+1. sinalizadores de o & 0x80003 = 0x80001 (bit 0 ligado, bit 1 desligado; 0x80000 é ligado pelo
+   leitor em todos, `0x0043460e`);
+2. presente no modo (acima); se for vaga de jogador, com jogador atribuído;
+3. mesma camada (`+0x17c`, `fields[4]`);
+4. o par não é excluído: m e o com 0x2000; m e o com 0x4000 (personagens não se barram); m com
+   0x10000, o sem 0x10000 e com 0x4000 (e o simétrico); m com 0x40000 e o com 0x4000 (e o
+   simétrico); m e o com 0x40000 → sorteio (`0x00460a74`).
+
+Com 0x20 no outro, é só contato (itens do `OGF`, sinalizadores 0x2b/0x2f): registra um contato
+de tipo 5 em `+0x220` e não barra. Senão, as formas dos dois se cruzam, a rotina de evento de m
+(`+0x1d4`) pode vetar (evento 9; a do Jake, `0x00407774`, não veta) e a velocidade é cortada.
+
+As formas do BRD do objeto (`+0x208`, carregado de `names[1]`) ficam relativas à posição do
+objeto (`+0x14c`, `+0x150`), em px da fase: o `OPL.BRD` tem uma caixa 18 × 5 a 3 px do topo
+de uma peça de 17 px de largura.
+
+Sinalizadores típicos: Jake 0x94801; peças `OPL` e plataformas `OPO` 0x80089 (sólidas para o
+Jake); sentinelas `OHS` e minas `OHM` 0x80801 (sólidas); inimigos com 0x4000 (`OSE`, `OSR`,
+`OBR`, `ODG`, Minotauro…), que o Jake atravessa.
+
 ## Tipo 6: itens genéricos
 
 `OGF.ANM` tem um rótulo só cobrindo os 256 quadros de `OGF00.BMP` (216 deles são marcadores de

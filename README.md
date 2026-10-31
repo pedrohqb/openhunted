@@ -11,12 +11,13 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
-**M3a: o Jake corre, pula e cai.** **M2 concluída: visualizador de fase.** **M1 concluída: formatos.** A biblioteca `openhunted-formats` lê os dados do CD (pasta ou
+**M3b: objetos sólidos.** **M3a: o Jake corre, pula e cai.** **M2 concluída: visualizador de fase.** **M1 concluída: formatos.** A biblioteca `openhunted-formats` lê os dados do CD (pasta ou
 imagem `.iso`): bitmaps, paletas, sons, textos, animações, cenários, interfaces, fontes, o
 arquivo de fases e o cabeçalho das fases. O estado de cada formato está em
 [`docs/formats/`](docs/formats/README.md). Na fase, o Jake já corre, pula (pulos médio, longo e
-estendido), cai e colide com o cenário, com as constantes do original; ainda não há armas,
-inimigos, escadas nem furtividade.
+estendido), cai e colide com o cenário e com os objetos sólidos (plataformas, peças), com as
+constantes e as regras do original. A cena mostra só os objetos do modo solo. Os objetos ainda
+ficam parados; não há armas, inimigos ativos, escadas nem furtividade.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
 reversa, em [`docs/re/`](docs/re/).
