@@ -167,3 +167,17 @@ fn object_scale_reference_matches_object_kind() {
         &bad[..bad.len().min(10)]
     );
 }
+
+/// O Jake controlável é o início do jogador no modo solo (na D_J_009 o primeiro objeto de
+/// tipo 1 é outro); numa fase de vários jogadores, sem início solo, é o primeiro tipo 1.
+#[test]
+fn player_start_is_jake() {
+    let Some((s, _)) = load("D_J_009.LEV") else {
+        return;
+    };
+    let j = s.jake.as_ref().unwrap();
+    assert_eq!((j.body.x, j.body.y), (573, 581));
+    let (s, _) = load("C_J_006.LEV").unwrap();
+    let j = s.jake.as_ref().unwrap();
+    assert_eq!((j.body.x, j.body.y), (110, 709));
+}

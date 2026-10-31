@@ -6,6 +6,7 @@ pub mod anim;
 pub mod assets;
 pub mod input;
 pub mod jake;
+pub mod objects;
 pub mod physics;
 pub mod render;
 pub mod scene;

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use openhunted_formats::{Animation, Border, BorderBox, Level, LevelObject, Result};
 
+use crate::objects::{SOLO, is_player_start, present};
 use crate::physics::{Rect, World};
 use crate::{AnimPlayer, Assets, Framebuffer, Jake, draw_ops};
 
@@ -110,7 +111,8 @@ pub struct Scene {
     pub borders: Vec<(i32, i32, i32, BorderBox)>,
     /// Problemas encontrados ao montar a cena (recursos ausentes), um por linha.
     pub warnings: Vec<String>,
-    /// O Jake controlável (objeto de tipo 1), se a fase tiver um.
+    /// O Jake controlável: o início de jogador de tipo 1 no modo solo (ou, sem modo solo, o
+    /// primeiro objeto de tipo 1), se a fase tiver um.
     pub jake: Option<Jake>,
     /// Sprite do Jake (desenhado depois dos objetos).
     pub jake_sprite: Option<Sprite>,
@@ -210,7 +212,8 @@ impl Scene {
     }
 
     /// Monta a cena: células (128×128, x varia mais rápido), decorações (relativas à célula)
-    /// e objetos (coordenadas da fase), da lista global e das células.
+    /// e objetos (coordenadas da fase), da lista global e das células. Nas fases com início de
+    /// jogador solo, só entram os objetos presentes no modo solo (`objects::present`).
     pub fn build(level: &Level, assets: &mut Assets) -> Result<Self> {
         let (gx, gy) = (
             i32::from(level.grid_x).max(1),
@@ -297,6 +300,14 @@ impl Scene {
             }
             objects.extend(cell.objects.iter());
         }
+        // Modo solo quando a fase tem um início de jogador nele: só os objetos presentes no
+        // modo, e o Jake é esse início. Sem ele (fases de vários jogadores), tudo, e o Jake é o
+        // primeiro objeto de tipo 1.
+        let solo = objects.iter().any(|o| is_player_start(o, SOLO));
+        if solo {
+            objects.retain(|o| present(o, SOLO) || is_player_start(o, SOLO));
+        }
+        let is_jake = |o: &LevelObject| o.kind == JAKE && (!solo || is_player_start(o, SOLO));
         for o in objects {
             let marker = Marker {
                 kind: o.kind,
@@ -321,7 +332,7 @@ impl Scene {
                         .get(ref_frame)
                         .map_or((0, 0), |f| (i32::from(f.width), i32::from(f.height)));
                     let scale = object_scale(ta, tb, rw, rh);
-                    if o.kind == JAKE && s.jake.is_none() {
+                    if is_jake(o) && s.jake.is_none() {
                         let boxr = assets
                             .archive()
                             .get(&o.names[1])
