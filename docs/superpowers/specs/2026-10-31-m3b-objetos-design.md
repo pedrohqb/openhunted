@@ -58,6 +58,8 @@ px da fase (o `OPL.BRD` tem uma caixa 18 × 5 no topo de uma peça de 17 px de l
 - Objetos sólidos ficam **parados** onde a fase os põe: plataformas que sobem e descem,
   inimigos que andam etc. são da fatia de comportamento dos objetos.
 - Contatos (itens, gatilhos) são ignorados: nada é apanhado.
+- As plataformas `OPO` (tipos 68–72) não têm BRD (`names[1]` vazio) e não sustentam nesta
+  fatia; a forma delas vem do comportamento (revisão final).
 - Arestas de polígono (tipos 3/4) continuam ignoradas, nos objetos como nas células.
 - O sorteio da regra de par 0x40000 × 0x40000 não se aplica ao Jake (ele não tem 0x40000).
 - Só o modo solo; os modos de vários jogadores ficam sem filtro no visualizador.

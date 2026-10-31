@@ -63,7 +63,8 @@ objeto (`+0x14c`, `+0x150`), em px da fase: o `OPL.BRD` tem uma caixa 18 × 5 a 
 de uma peça de 17 px de largura.
 
 Sinalizadores típicos: Jake 0x94801; peças `OPL` e plataformas `OPO` 0x80089 (sólidas para o
-Jake); sentinelas `OHS` e minas `OHM` 0x80801 (sólidas); inimigos com 0x4000 (`OSE`, `OSR`,
+Jake, mas as 41 `OPO` dos dados não têm BRD: a forma delas vem do comportamento, não do
+arquivo); sentinelas `OHS` e minas `OHM` 0x80801 (sólidas); inimigos com 0x4000 (`OSE`, `OSR`,
 `OBR`, `ODG`, Minotauro…), que o Jake atravessa.
 
 ## Tipo 6: itens genéricos

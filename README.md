@@ -15,8 +15,11 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 imagem `.iso`): bitmaps, paletas, sons, textos, animações, cenários, interfaces, fontes, o
 arquivo de fases e o cabeçalho das fases. O estado de cada formato está em
 [`docs/formats/`](docs/formats/README.md). Na fase, o Jake já corre, pula (pulos médio, longo e
-estendido), cai e colide com o cenário e com os objetos sólidos (plataformas, peças), com as
-constantes e as regras do original. A cena mostra só os objetos do modo solo. Os objetos ainda
+estendido), cai e colide com o cenário e com os objetos sólidos (peças de pedra, paredes e tetos que são
+objetos), com as constantes e as regras do original. As plataformas móveis (`OPO`) ainda não
+sustentam: não têm caixa no arquivo e ganham forma do comportamento, que vem numa próxima
+etapa. A cena mostra só os objetos do modo solo; nas missões do Garathe ainda não há
+personagem controlável (as setas rolam a tela). Os objetos ainda
 ficam parados; não há armas, inimigos ativos, escadas nem furtividade.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
