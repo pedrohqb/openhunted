@@ -370,7 +370,8 @@ impl Scene {
                         let field = |i: usize| o.fields.get(i).copied().unwrap_or(0);
                         s.jake = Some(
                             Jake::new(o.x, o.y, boxr, label_lengths(&a))
-                                .with_health(field(14), field(15)),
+                                .with_health(field(14), field(15))
+                                .with_inventory(crate::jake::Inventory::from_points(&o.points)),
                         );
                         s.jake_sprite = Some(Sprite {
                             layer: Layer::Object,

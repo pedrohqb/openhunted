@@ -477,3 +477,12 @@ fn jake_state_labels_exist_in_the_real_animation() {
         .collect();
     assert!(missing.is_empty(), "rótulos ausentes: {missing:?}");
 }
+
+/// O Jake da T_J_001 começa com a pistola e 80 tiros (`points[2]`).
+#[test]
+fn tutorial_jake_starts_with_the_pistol() {
+    let Some((s, _)) = load("T_J_001.LEV") else {
+        return;
+    };
+    assert_eq!(s.jake.as_ref().unwrap().inventory.pistol_ammo(), 80);
+}

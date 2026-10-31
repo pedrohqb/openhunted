@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use crate::damage::{Health, Pending, apply};
-use crate::input::{JUMP, LEFT, RIGHT};
+use crate::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
 use crate::physics::{Body, Rect, SUB, World, step};
 
 /// Correr: 12 px/tique (`0x00478928`).
@@ -51,6 +51,129 @@ pub enum State {
     Dead,
     /// Entrando na porta de saída (estado 13, `0x00426820`); tiques desde a entrada.
     EnteringExit(u32),
+    /// Atirando com a pistola (`0x0043b50b`): mira e contador `t` (`+0x260`).
+    Fire {
+        aim: Aim,
+        t: u32,
+    },
+    /// Recuperação após a rajada (estado 22, `J022`).
+    Recover,
+    /// Arma pronta (estado 18, `J018`); tiques nela.
+    Ready(u32),
+    /// Guardando a arma (estado 19, `J019`).
+    Holster,
+}
+
+/// Mira da pistola (`0x0043ae4c`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Aim {
+    Forward,
+    Up,
+    DiagUp,
+    DiagDown,
+}
+
+impl Aim {
+    /// Pela direção apertada: nada, CIMA+BAIXO ou ESQ+DIR → frente; CIMA → cima; CIMA+lado →
+    /// diagonal cima; BAIXO(+lado) → diagonal baixo (o especial de BAIXO fica de fora).
+    pub fn from_input(bits: u32) -> Aim {
+        let (up, down) = (bits & UP != 0, bits & DOWN != 0);
+        let side = (bits & LEFT != 0) != (bits & RIGHT != 0);
+        match (up && !down, down && !up, side) {
+            (true, _, false) => Aim::Up,
+            (true, _, true) => Aim::DiagUp,
+            (_, true, _) => Aim::DiagDown,
+            _ => Aim::Forward,
+        }
+    }
+
+    /// Rótulo do `JAKE.ANM` (estado de tiro da pistola, descritor `0x47dfa8`).
+    pub fn label(self) -> u16 {
+        match self {
+            Aim::Forward => 23,
+            Aim::Up => 56,
+            Aim::DiagUp => 54,
+            Aim::DiagDown => 55,
+        }
+    }
+
+    /// Boca da arma relativa à posição do Jake (registro `0x43ac05`), olhando para o lado.
+    pub fn muzzle(self, right: bool) -> (i32, i32) {
+        match (self, right) {
+            (Aim::Forward, false) => (-25, 2),
+            (Aim::Forward, true) => (25, 2),
+            (Aim::Up, false) => (9, -35),
+            (Aim::Up, true) => (12, -35),
+            (Aim::DiagUp, false) => (-16, -23),
+            (Aim::DiagUp, true) => (24, -23),
+            (Aim::DiagDown, false) => (-23, 33),
+            (Aim::DiagDown, true) => (27, 33),
+        }
+    }
+
+    /// Velocidade da bala em px/tique.
+    pub fn velocity(self, right: bool) -> (i32, i32) {
+        let sx = if right { 20 } else { -20 };
+        match self {
+            Aim::Forward => (sx, 0),
+            Aim::Up => (0, -20),
+            Aim::DiagUp => (sx, -20),
+            Aim::DiagDown => (sx, 20),
+        }
+    }
+
+    /// Cápsula: posição relativa e velocidade (px/tique), para trás e para cima.
+    pub fn casing(right: bool) -> ((i32, i32), (i32, i32)) {
+        if right {
+            ((-4, 0), (-10, -10))
+        } else {
+            ((22, 0), (10, -10))
+        }
+    }
+}
+
+/// Uma bala (ou cápsula) saindo do cano: posição e velocidade em px/tique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shot {
+    pub x: i32,
+    pub y: i32,
+    pub vx: i32,
+    pub vy: i32,
+    /// `true` = cápsula (tipo 22); `false` = bala (tipo 19).
+    pub casing: bool,
+}
+
+/// Inventário: 30 pares (tem, munição), índice = número da arma (1 punhos, 2 pistola…).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Inventory {
+    pub slots: [(i32, i32); 30],
+}
+
+/// Número da pistola no inventário.
+pub const PISTOL: usize = 2;
+/// Som "troca de arma / sem munição".
+pub const SOUND_NO_AMMO: u16 = 3090;
+/// Ticks em "pronto" antes de guardar a arma (descritor da pistola, `+0x14`).
+const READY_TICKS: u32 = 10;
+
+impl Inventory {
+    /// De `points` do objeto do Jake; a inicialização força o par 1 a (1, 20) (`0x0042277e`).
+    pub fn from_points(p: &[(i32, i32)]) -> Self {
+        let mut slots = [(0, 0); 30];
+        for (s, &v) in slots.iter_mut().zip(p) {
+            *s = v;
+        }
+        slots[1] = (1, 20);
+        Self { slots }
+    }
+
+    pub fn pistol_ammo(&self) -> i32 {
+        if self.slots[PISTOL].0 != 0 {
+            self.slots[PISTOL].1
+        } else {
+            0
+        }
+    }
 }
 
 /// Rótulos das animações de morte (`docs/re/dano-vida.md`). O estado 177 do original toca o
@@ -60,7 +183,7 @@ pub const DIE_KNOCKED_RIGHT: u16 = 77;
 pub const DIE_KNOCKED_LEFT: u16 = 179;
 pub const DIE_POISON: u16 = 171;
 /// Todos os rótulos usados pelos estados (para conferir contra o `JAKE.ANM` real).
-pub const ALL_LABELS: [u16; 19] = [
+pub const ALL_LABELS: [u16; 26] = [
     1,
     10,
     100,
@@ -80,6 +203,13 @@ pub const ALL_LABELS: [u16; 19] = [
     DIE_DEFAULT,
     DIE_KNOCKED_RIGHT,
     DIE_KNOCKED_LEFT,
+    23,
+    56,
+    54,
+    55,
+    22,
+    18,
+    19,
 ];
 /// Tiques do choque elétrico.
 const SHOCK_TICKS: u32 = 10;
@@ -107,6 +237,10 @@ fn anim_of(s: State) -> (u16, u32) {
         State::Dying(label) => (label, 0),
         State::Dead => (0, 0),
         State::EnteringExit(_) => (12, 0),
+        State::Fire { aim, .. } => (aim.label(), 0),
+        State::Recover => (22, 0),
+        State::Ready(_) => (18, 0),
+        State::Holster => (19, 0),
     }
 }
 
@@ -129,6 +263,11 @@ pub struct Jake {
     death_label: u16,
     /// Numerador da escala ao entrar na porta (encolhe 1 por tique após 10 tiques).
     exit_scale: Option<i32>,
+    pub inventory: Inventory,
+    /// Balas e cápsulas disparadas neste tique (a cena drena).
+    pub shots: Vec<Shot>,
+    /// Apertou ATIRAR sem munição neste tique (a cena emite o som).
+    pub no_ammo: bool,
 }
 
 impl Jake {
@@ -148,7 +287,77 @@ impl Jake {
             pending: Pending::default(),
             death_label: DIE_DEFAULT,
             exit_scale: None,
+            inventory: Inventory::from_points(&[]),
+            shots: Vec::new(),
+            no_ammo: false,
         }
+    }
+
+    pub fn with_inventory(mut self, inv: Inventory) -> Self {
+        self.inventory = inv;
+        self
+    }
+
+    /// Começa (ou recomeça) uma rajada com a mira da entrada; sem munição, só avisa.
+    fn start_fire(&mut self, input: u32) {
+        if self.inventory.pistol_ammo() <= 0 {
+            self.no_ammo = true;
+            return;
+        }
+        self.body.vx = 0;
+        let aim = Aim::from_input(input);
+        self.state = State::Fire { aim, t: 0 };
+        self.ticks = 0;
+        self.label_changed = true;
+    }
+
+    /// Tique de um estado de tiro (`0x0043b50b`/`0x0043b1d0`).
+    fn tick_fire(&mut self, input: u32, world: &World, aim: Aim, t: u32) {
+        let pressed = |bit: u32| input & bit != 0;
+        let t = t + 1;
+        self.state = State::Fire { aim, t };
+        if (1..=3).contains(&t) && self.inventory.pistol_ammo() > 0 {
+            self.inventory.slots[PISTOL].1 -= 1;
+            let right = self.facing_right;
+            let (mx, my) = aim.muzzle(right);
+            let (vx, vy) = aim.velocity(right);
+            // 1ª e 3ª balas desviam 1 px/tique perpendicular (`0x0043bab7`): (−vy, vx)/|v|,
+            // negado olhando para a esquerda — na mira de frente a 1ª desce e a 3ª sobe
+            let sign = if right { 1 } else { -1 };
+            let (px, py) = (-vy / 20 * sign, vx / 20 * sign);
+            let (dx, dy) = match t {
+                1 => (px, py),
+                3 => (-px, -py),
+                _ => (0, 0),
+            };
+            self.shots.push(Shot {
+                x: self.body.x + mx,
+                y: self.body.y + my,
+                vx: vx + dx,
+                vy: vy + dy,
+                casing: false,
+            });
+            if t == 1 {
+                let ((cx, cy), (cvx, cvy)) = Aim::casing(right);
+                self.shots.push(Shot {
+                    x: self.body.x + cx,
+                    y: self.body.y + cy,
+                    vx: cvx,
+                    vy: cvy,
+                    casing: true,
+                });
+            }
+        }
+        let moving = pressed(LEFT) || pressed(RIGHT) || pressed(JUMP);
+        if t >= 7 && pressed(SHOOT) {
+            self.start_fire(input);
+        } else if t > 6 && moving && !pressed(SHOOT) {
+            self.set(State::Idle);
+        } else if t > 12 {
+            self.set(State::Recover);
+        }
+        step(&mut self.body, world, true);
+        self.finish_tick();
     }
 
     /// Vida e armadura iniciais (campos `fields[14]`/`[15]` do objeto).
@@ -191,6 +400,11 @@ impl Jake {
             State::EnteringExit(_) => self.exit_scale,
             _ => None,
         }
+    }
+
+    /// Está num estado de tiro (a cena emite o som 3040 quando o rótulo muda).
+    pub fn is_firing(&self) -> bool {
+        matches!(self.state, State::Fire { .. })
     }
 
     /// O cadáver não avança a animação.
@@ -344,6 +558,7 @@ impl Jake {
     /// Um tique (50 ms) com a máscara de entrada `input`.
     pub fn tick(&mut self, input: u32, world: &World) {
         self.label_changed = false;
+        self.no_ammo = false;
         if self.state == State::Dead {
             self.advance = false;
             return;
@@ -361,6 +576,42 @@ impl Jake {
             self.facing_right = right;
         }
         let moving = side.is_some();
+        let shooting = pressed(SHOOT) && self.body.on_ground;
+        match self.state {
+            State::Fire { aim, t } => {
+                self.tick_fire(input, world, aim, t);
+                self.prev_input = input;
+                return;
+            }
+            State::Recover | State::Ready(_) | State::Holster => {
+                if shooting {
+                    self.start_fire(input);
+                } else if moving || jump_edge {
+                    self.set(State::Idle);
+                } else {
+                    match self.state {
+                        State::Recover if self.anim_done() => self.set(State::Ready(0)),
+                        State::Ready(n) if n >= READY_TICKS => self.set(State::Holster),
+                        State::Ready(n) => self.state = State::Ready(n + 1),
+                        State::Holster if self.anim_done() => self.set(State::Idle),
+                        _ => {}
+                    }
+                }
+                self.body.vx = 0;
+                step(&mut self.body, world, true);
+                self.finish_tick();
+                self.prev_input = input;
+                return;
+            }
+            State::Idle | State::Run | State::Push | State::Land(_) if shooting => {
+                self.start_fire(input);
+                step(&mut self.body, world, true);
+                self.finish_tick();
+                self.prev_input = input;
+                return;
+            }
+            _ => {}
+        }
         match self.state {
             State::Idle | State::Run | State::Push => {
                 if jump_edge && self.body.on_ground {
@@ -516,7 +767,7 @@ impl Jake {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::{JUMP, LEFT, RIGHT};
+    use crate::input::{JUMP, LEFT, RIGHT, SHOOT};
     use crate::physics::Rect;
 
     fn lengths() -> HashMap<u16, usize> {
@@ -541,6 +792,13 @@ mod tests {
             (77, 13),
             (171, 16),
             (12, 20),
+            (23, 6),
+            (56, 6),
+            (54, 6),
+            (55, 6),
+            (22, 4),
+            (18, 3),
+            (19, 9),
         ]
         .into_iter()
         .collect()
@@ -852,6 +1110,113 @@ mod tests {
             j.tick(LEFT, &w);
         }
         assert_eq!(j.body.x, x);
+    }
+
+    fn pistol() -> Inventory {
+        Inventory::from_points(&[(0, 0), (1, 20), (1, 80)])
+    }
+
+    #[test]
+    fn aim_from_input_bits() {
+        use crate::input::{DOWN, UP};
+        assert_eq!(Aim::from_input(0), Aim::Forward);
+        assert_eq!(Aim::from_input(UP | DOWN), Aim::Forward);
+        assert_eq!(Aim::from_input(LEFT | RIGHT), Aim::Forward);
+        assert_eq!(Aim::from_input(UP), Aim::Up);
+        assert_eq!(Aim::from_input(UP | LEFT | RIGHT), Aim::Up);
+        assert_eq!(Aim::from_input(RIGHT), Aim::Forward);
+        assert_eq!(Aim::from_input(UP | RIGHT), Aim::DiagUp);
+        assert_eq!(Aim::from_input(DOWN | LEFT), Aim::DiagDown);
+        assert_eq!(Aim::from_input(DOWN), Aim::DiagDown);
+        assert_eq!(Aim::Forward.muzzle(true), (25, 2));
+        assert_eq!(Aim::Up.velocity(false), (0, -20));
+    }
+
+    #[test]
+    fn burst_of_three_then_repeat_every_six_ticks() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0).with_inventory(pistol());
+        assert_eq!(j.inventory.pistol_ammo(), 80);
+        let mut fired = vec![];
+        for t in 0..20 {
+            j.tick(SHOOT, &w);
+            let bullets = j.shots.iter().filter(|s| !s.casing).count();
+            if bullets > 0 {
+                fired.push((t, bullets, j.shots.iter().any(|s| s.casing)));
+            }
+            j.shots.clear();
+        }
+        // tique 0 entra no estado (t = 0); dispara em t = 1, 2, 3; recomeça em t = 7
+        assert_eq!(
+            fired,
+            vec![
+                (1, 1, true),
+                (2, 1, false),
+                (3, 1, false),
+                (8, 1, true),
+                (9, 1, false),
+                (10, 1, false),
+                (15, 1, true),
+                (16, 1, false),
+                (17, 1, false),
+            ]
+        );
+        assert_eq!(j.inventory.pistol_ammo(), 71);
+        assert!(j.is_firing());
+        assert_eq!(j.label(), 23);
+    }
+
+    #[test]
+    fn shots_carry_muzzle_velocity_and_spread() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0).with_inventory(pistol());
+        j.tick(RIGHT, &w); // olha para a direita
+        j.tick(SHOOT, &w);
+        let (x, y) = (j.body.x, j.body.y);
+        let mut rounds = vec![];
+        for _ in 0..3 {
+            j.tick(SHOOT, &w);
+            rounds.extend(j.shots.drain(..).filter(|s| !s.casing));
+        }
+        assert_eq!(rounds.len(), 3);
+        assert_eq!((rounds[0].x, rounds[0].y), (x + 25, y + 2));
+        assert_eq!((rounds[0].vx, rounds[0].vy), (20, 1)); // 1ª desce
+        assert_eq!((rounds[1].vx, rounds[1].vy), (20, 0));
+        assert_eq!((rounds[2].vx, rounds[2].vy), (20, -1)); // 3ª sobe
+    }
+
+    #[test]
+    fn release_recovers_then_ready_then_holsters() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0).with_inventory(pistol());
+        j.tick(SHOOT, &w);
+        let mut labels = vec![j.label()];
+        for _ in 0..40 {
+            j.tick(0, &w);
+            if labels.last() != Some(&j.label()) {
+                labels.push(j.label());
+            }
+        }
+        assert_eq!(labels, vec![23, 22, 18, 19, 1]);
+        assert_eq!(j.state(), State::Idle);
+    }
+
+    #[test]
+    fn running_stops_to_shoot_and_no_ammo_does_not_fire() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0).with_inventory(pistol());
+        j.tick(RIGHT, &w);
+        j.tick(RIGHT, &w);
+        assert_eq!(j.state(), State::Run);
+        let x = j.body.x;
+        j.tick(RIGHT | SHOOT, &w);
+        assert!(j.is_firing());
+        j.tick(RIGHT | SHOOT, &w);
+        assert_eq!(j.body.x, x, "parou para atirar");
+        // sem munição: nada sai, só o aviso
+        let mut empty = jake_on(&w, 0).with_inventory(Inventory::from_points(&[]));
+        empty.tick(SHOOT, &w);
+        assert!(empty.no_ammo && !empty.is_firing() && empty.shots.is_empty());
     }
 
     #[test]
