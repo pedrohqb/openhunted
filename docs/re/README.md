@@ -38,3 +38,9 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`tiro-jake.md`](tiro-jake.md): controles, estados de tiro, mira, cadência e soco (M4).
 - [`projeteis.md`](projeteis.md): criação de projéteis, bala da pistola, cápsula, impacto (M4).
 - [`som.md`](som.md): ids e recursos de som, som posicional, canais, `SOUND.TBL` (M4).
+- [`menu.md`](menu.md): abertura, máquina de telas, menu principal, lista de missões e "New Game".
+- [`interface-itf.md`](interface-itf.md): controles das `.ITF`, botões, desenho, despacho e teclado.
+- [`briefing.md`](briefing.md): briefing da missão (`SLEVD.ITF`).
+- [`fim-de-missao.md`](fim-de-missao.md): anúncio, tela de resultado (`SMISS.ITF`), pontuação e próxima missão.
+- [`pausa.md`](pausa.md): pausa, Esc e o menu da janela durante o jogo.
+- [`hud.md`](hud.md): barra de estado (`INVBAR01.BMP`) embaixo da vista.
