@@ -29,3 +29,8 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`cenario.md`](cenario.md): cenário, transparência e ritmo (M2).
 - [`objetos.md`](objetos.md): objetos das fases e tabela de tipos (M2).
 - Cenários e interfaces: endereços em [`executavel.md`](executavel.md); formato em `docs/formats/brd.md` e `itf.md`.
+- [`logica-fase.md`](logica-fase.md): gatilhos, zonas de proximidade, saída e veredito da missão (M3).
+- [`dicas.md`](dicas.md): dicas do tutorial (tipo 30, `WIZARD.RES`) (M3).
+- [`minas.md`](minas.md): minas flutuantes (tipo 102) (M3).
+- [`itens.md`](itens.md): itens genéricos e coleta de vida/armadura (M3).
+- [`dano-vida.md`](dano-vida.md): vida, armadura, `DAMAGE.TBL`, explosões e morte do Jake (M3).
