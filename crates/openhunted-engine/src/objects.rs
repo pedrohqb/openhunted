@@ -32,7 +32,11 @@ pub fn is_player_start(o: &LevelObject, mode: i32) -> bool {
 /// exclusão. O sorteio do par 0x40000 × 0x40000 conta como "não barra". Presença e camada são
 /// verificadas por quem chama.
 pub fn blocks(mover: i32, other: &LevelObject) -> bool {
-    let o = flags(other);
+    blocks_flags(mover, flags(other))
+}
+
+/// `blocks` sobre os sinalizadores do outro.
+pub fn blocks_flags(mover: i32, o: i32) -> bool {
     let m = mover;
     let both = |bit: i32| m & bit != 0 && o & bit != 0;
     let (actor, ghost, phase) = (0x4000, 0x10000, 0x40000);

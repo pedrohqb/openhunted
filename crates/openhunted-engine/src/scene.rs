@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 use openhunted_formats::{Animation, Border, BorderBox, Level, LevelObject, Result};
 
-use crate::objects::{SOLO, blocks, flags, is_player_start, present};
+use crate::entity::{BOX, Entity, from_object, object_scale, object_start};
+use crate::objects::{SOLO, flags, is_player_start, present};
 use crate::physics::{Rect, World};
 use crate::{AnimPlayer, Assets, Framebuffer, Jake, draw_ops};
 
@@ -45,51 +46,10 @@ pub struct Sprite {
     pub mirror: bool,
 }
 
-/// Tipo de objeto cuja animação (`OGF.ANM`) é uma folha de itens num rótulo só: cada objeto
-/// mostra um quadro fixo, escolhido por um campo ainda não decifrado. Provisório (M2): parado
-/// no quadro `values[0]` quando válido, senão no 0. Ver `docs/re/objetos.md`.
-const GENERIC_ITEM: u32 = 6;
-
-/// Escala de desenho de um objeto (`0x00434655`): os dois últimos campos do objeto (A, B)
-/// são o tamanho-alvo; se A ≥ B, escala = A / largura do quadro de referência, senão
-/// B / altura. Valores ausentes ou inválidos dão escala 1.
-pub fn object_scale(a: i32, b: i32, ref_w: i32, ref_h: i32) -> (i32, i32) {
-    if a > 0 && ref_w > 0 && a >= b {
-        (a, ref_w)
-    } else if b > 0 && ref_h > 0 && b > a {
-        (b, ref_h)
-    } else {
-        (1, 1)
-    }
-}
-
-/// Quadro de referência da escala de um objeto e o jogador da animação que ele mostra
-/// (`0x004358b3`): com rótulo inicial (`start_label`), o primeiro quadro desse rótulo (o
-/// original devolve o quadro 0 se o rótulo não existe); sem ele, o quadro 0. Os itens de tipo
-/// 6 (`GENERIC_ITEM`) ficam parados no quadro `values[0]` (provisório, ver M2), mas a escala
-/// continua a do quadro 0.
-fn object_start(o: &LevelObject, a: &Animation) -> (usize, AnimPlayer, bool) {
-    let n = a.frames.len();
-    if let Some(id) = o.start_label.and_then(|l| u16::try_from(l).ok()) {
-        if let Some(p) = AnimPlayer::at_label(a, id) {
-            let f = a
-                .labels
-                .iter()
-                .find(|l| l.id == id)
-                .map_or(0, |l| l.frame as usize);
-            return (if f < n { f } else { 0 }, p, false);
-        }
-    }
-    if o.kind == GENERIC_ITEM {
-        let f = o
-            .values
-            .first()
-            .map(|&v| v.max(0) as usize)
-            .filter(|&f| f < n)
-            .unwrap_or(0);
-        return (0, AnimPlayer::from_frame(a, f), true);
-    }
-    (0, AnimPlayer::from_frame(a, 0), false)
+/// A entidade barra o Jake (`objects::blocks` sobre os sinalizadores dela; só caixas do BRD
+/// ou própria, e só o que ainda está em jogo).
+fn blocks_entity(jake_flags: i32, e: &Entity) -> bool {
+    e.alive && e.solid_shapes && crate::objects::blocks_flags(jake_flags, e.flags)
 }
 
 /// Objeto sem animação (lógica) ou com animação ausente: mostrado só no overlay.
@@ -121,6 +81,8 @@ pub struct Scene {
     pub world: World,
     /// Caixas dos objetos sólidos para o Jake (em px da fase), para o overlay.
     pub object_solids: Vec<Rect>,
+    /// Os objetos da fase em jogo (sem o Jake), em ordem de desenho.
+    pub entities: Vec<Entity>,
 }
 
 /// Tipo de objeto do Jake.
@@ -132,8 +94,6 @@ const JAKE_BOX: Rect = Rect {
     w: 18,
     h: 44,
 };
-/// Tipo de forma "caixa" nos BRD.
-const BOX: u16 = 2;
 
 /// Caixa envolvente das formas de tipo caixa de um BRD.
 fn border_bounds(b: &Border) -> Option<Rect> {
@@ -212,6 +172,7 @@ impl Scene {
             jake_sprite: None,
             world: World::default(),
             object_solids: Vec::new(),
+            entities: Vec::new(),
         }
     }
 
@@ -234,9 +195,10 @@ impl Scene {
             jake_sprite: None,
             world: World::default(),
             object_solids: Vec::new(),
+            entities: Vec::new(),
         };
         let mut jake_layer = 0;
-        let mut jake_obj: Option<&LevelObject> = None;
+        let mut jake_flags = 0;
         let mut objects: Vec<&LevelObject> = level.objects.iter().collect();
         for (i, cell) in level.cells.iter().enumerate() {
             let Some(cell) = cell else { continue };
@@ -314,32 +276,22 @@ impl Scene {
             objects.retain(|o| present(o, SOLO) || is_player_start(o, SOLO));
         }
         let is_jake = |o: &LevelObject| o.kind == JAKE && (!solo || is_player_start(o, SOLO));
-        let all = objects.clone();
         for o in objects {
-            let marker = Marker {
-                kind: o.kind,
-                x: o.x,
-                y: o.y,
-            };
-            if o.names[0].is_empty() {
-                s.markers.push(marker);
-                continue;
-            }
-            match assets.animation(&o.names[0]) {
-                Ok(a) => {
-                    let n = o.fields.len();
-                    let (ta, tb) = if n >= 2 {
-                        (o.fields[n - 2], o.fields[n - 1])
-                    } else {
-                        (0, 0)
-                    };
-                    let (ref_frame, player, frozen) = object_start(o, &a);
-                    let (rw, rh) = a
-                        .frames
-                        .get(ref_frame)
-                        .map_or((0, 0), |f| (i32::from(f.width), i32::from(f.height)));
-                    let scale = object_scale(ta, tb, rw, rh);
-                    if is_jake(o) && s.jake.is_none() {
+            if is_jake(o) && s.jake.is_none() {
+                match assets.animation(&o.names[0]) {
+                    Ok(a) => {
+                        let n = o.fields.len();
+                        let (ta, tb) = if n >= 2 {
+                            (o.fields[n - 2], o.fields[n - 1])
+                        } else {
+                            (0, 0)
+                        };
+                        let (ref_frame, player, _) = object_start(o, &a);
+                        let (rw, rh) = a
+                            .frames
+                            .get(ref_frame)
+                            .map_or((0, 0), |f| (i32::from(f.width), i32::from(f.height)));
+                        let scale = object_scale(ta, tb, rw, rh);
                         let boxr = assets
                             .archive()
                             .get(&o.names[1])
@@ -348,7 +300,7 @@ impl Scene {
                             .and_then(|b| border_bounds(&b))
                             .unwrap_or(JAKE_BOX);
                         jake_layer = o.fields.get(4).copied().unwrap_or(0);
-                        jake_obj = Some(o);
+                        jake_flags = flags(o);
                         let player = AnimPlayer::at_label(&a, 1).unwrap_or(player);
                         s.jake = Some(Jake::new(o.x, o.y, boxr, label_lengths(&a)));
                         s.jake_sprite = Some(Sprite {
@@ -363,23 +315,21 @@ impl Scene {
                         });
                         continue;
                     }
-                    s.sprites.push(Sprite {
-                        layer: Layer::Object,
-                        anim: a,
-                        player,
-                        x: o.x,
-                        y: o.y,
-                        frozen,
-                        scale,
-                        mirror: false,
-                    });
-                }
-                Err(e) => {
-                    s.warnings
-                        .push(format!("objeto tipo {} ({}): {e}", o.kind, o.names[0]));
-                    s.markers.push(marker);
+                    Err(e) => {
+                        s.warnings
+                            .push(format!("objeto tipo {} ({}): {e}", o.kind, o.names[0]));
+                    }
                 }
             }
+            let e = from_object(o, assets, &mut s.warnings);
+            if e.sprite.is_none() {
+                s.markers.push(Marker {
+                    kind: o.kind,
+                    x: o.x,
+                    y: o.y,
+                });
+            }
+            s.entities.push(e);
         }
         s.sprites.sort_by_key(|p| p.layer);
         let mut solids: Vec<Rect> = s
@@ -394,27 +344,17 @@ impl Scene {
             })
             .collect();
         let cell_solids = solids.len();
-        if let Some(j) = jake_obj {
-            let jf = flags(j);
-            for o in all {
-                let same_layer = o.fields.get(4).copied().unwrap_or(0) == jake_layer;
-                if std::ptr::eq(o, j) || !same_layer || !blocks(jf, o) || o.names[1].is_empty() {
+        if s.jake.is_some() {
+            // Formas do objeto: relativas à posição dele, já em px da fase.
+            for e in s.entities.iter().filter(|e| e.layer == jake_layer) {
+                if !blocks_entity(jake_flags, e) {
                     continue;
                 }
-                match assets.archive().get(&o.names[1]).and_then(Border::parse) {
-                    // Formas do objeto: relativas à posição dele, já em px da fase.
-                    Ok(b) => {
-                        solids.extend(b.boxes.iter().filter(|b| b.kind == BOX).map(|b| Rect {
-                            x: o.x.saturating_add(i32::from(b.x)),
-                            y: o.y.saturating_add(i32::from(b.y)),
-                            w: i32::from(b.width),
-                            h: i32::from(b.height),
-                        }))
-                    }
-                    Err(e) => s
-                        .warnings
-                        .push(format!("objeto tipo {} ({}): {e}", o.kind, o.names[1])),
-                }
+                solids.extend(e.boxes.iter().map(|b| Rect {
+                    x: e.x.saturating_add(b.x),
+                    y: e.y.saturating_add(b.y),
+                    ..*b
+                }));
             }
         }
         s.object_solids = solids[cell_solids..].to_vec();
@@ -434,6 +374,11 @@ impl Scene {
     ) {
         for sp in &self.sprites {
             draw_sprite(sp, assets, fb, camera);
+        }
+        for e in &self.entities {
+            if let (true, Some(sp)) = (e.alive, &e.sprite) {
+                draw_sprite(sp, assets, fb, camera);
+            }
         }
         if let Some(j) = &self.jake_sprite {
             draw_sprite(j, assets, fb, camera);
@@ -499,6 +444,15 @@ impl Scene {
             }
         }
         for sp in self.sprites.iter_mut().filter(|sp| !sp.frozen) {
+            let anim = sp.anim.clone();
+            sp.player.tick(&anim);
+        }
+        for sp in self
+            .entities
+            .iter_mut()
+            .filter_map(|e| e.sprite.as_mut())
+            .filter(|sp| !sp.frozen)
+        {
             let anim = sp.anim.clone();
             sp.player.tick(&anim);
         }
@@ -639,13 +593,9 @@ mod tests {
             .collect();
         assert_eq!(scenery.len(), 1);
         assert_eq!((scenery[0].x, scenery[0].y), (128, 0));
-        let objs: Vec<_> = s
-            .sprites
-            .iter()
-            .filter(|p| p.layer == Layer::Object)
-            .collect();
-        assert_eq!(objs.len(), 2);
-        assert!(objs.iter().any(|p| (p.x, p.y) == (200, 30)));
+        let objs: Vec<_> = s.entities.iter().filter(|e| e.sprite.is_some()).collect();
+        assert_eq!((objs.len(), s.entities.len()), (2, 3));
+        assert!(objs.iter().any(|e| (e.x, e.y) == (200, 30)));
         assert_eq!(
             s.markers,
             vec![Marker {
@@ -725,7 +675,7 @@ mod tests {
         o.start_label = Some(999);
         assert_eq!(object_start(&o, &a).0, 0);
         // item de tipo 6: mostra values[0], mas a escala é a do quadro 0
-        let mut item = object(GENERIC_ITEM, 0, 0, "OGF.ANM");
+        let mut item = object(crate::entity::GENERIC_ITEM, 0, 0, "OGF.ANM");
         item.values = vec![1];
         let (ref_frame, player, frozen) = object_start(&item, &a);
         assert_eq!((ref_frame, player.frame(), frozen), (0, 1, true));

@@ -4,6 +4,8 @@
 
 pub mod anim;
 pub mod assets;
+pub mod behaviour;
+pub mod entity;
 pub mod input;
 pub mod jake;
 pub mod objects;
@@ -15,6 +17,7 @@ pub mod triggers;
 
 pub use anim::{AnimPlayer, DrawOp, draw_ops};
 pub use assets::Assets;
+pub use entity::{Behaviour, Entity};
 pub use jake::{Jake, JumpKind, State};
 pub use physics::{Body, Rect, SUB, World, step};
 pub use render::{

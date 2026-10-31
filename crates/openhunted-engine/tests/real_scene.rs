@@ -29,12 +29,10 @@ fn tutorial_scene_has_all_cells_and_objects() {
         14
     );
     assert_eq!(
-        s.sprites
-            .iter()
-            .filter(|p| p.layer == Layer::Object)
-            .count(),
+        s.entities.iter().filter(|e| e.sprite.is_some()).count(),
         10 // 8 globais (o Jake fica à parte) + 2 de células
     );
+    assert_eq!(s.entities.len(), 14); // + 2 zonas e 2 dicas (sem sprite)
     assert!(s.jake.is_some() && s.jake_sprite.is_some());
     assert_eq!(s.markers.len(), 4);
     assert!(s.warnings.is_empty(), "{:?}", s.warnings);
@@ -70,7 +68,8 @@ fn tutorial_render_matches_reference() {
     assert_eq!(h, REFERENCE);
 }
 
-const REFERENCE: u64 = 0x88f1_d9d8_c9b1_e7f4;
+/// Atualizado na M4a: a saída mostra o rótulo 8 (`osw08`, o portão "EXIT").
+const REFERENCE: u64 = 0x6d24_9829_bdba_056f;
 
 /// Camadas z ≥ 1 usam o índice 0 como transparência: nada de índice 0 pode chegar à tela.
 #[test]
@@ -93,8 +92,9 @@ fn generic_item_objects_do_not_cycle() {
         return;
     };
     let frames = |s: &openhunted_engine::Scene| -> Vec<usize> {
-        s.sprites
+        s.entities
             .iter()
+            .filter_map(|e| e.sprite.as_ref())
             .filter(|p| p.anim.frames.len() == 256)
             .map(|p| p.player.frame())
             .collect()
@@ -153,7 +153,7 @@ fn object_scale_reference_matches_object_kind() {
     for m in &missions {
         let l = Level::parse(&la.get(&m.file).unwrap()).unwrap();
         let s = Scene::build(&l, &mut a).unwrap();
-        for sp in s.sprites.iter().filter(|p| p.layer == Layer::Object) {
+        for sp in s.entities.iter().filter_map(|e| e.sprite.as_ref()) {
             let (num, den) = sp.scale;
             if num > 2 * den {
                 bad.push(format!("{} {}x{} {:?}", m.file, sp.x, sp.y, sp.scale));
