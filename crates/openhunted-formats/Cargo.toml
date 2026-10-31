@@ -1,0 +1,11 @@
+[package]
+name = "openhunted-formats"
+description = "Leitura dos formatos de dados do Hunter Hunted (1996)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
