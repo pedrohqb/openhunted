@@ -421,3 +421,44 @@ fn tutorial_mines_explode_on_jake() {
             .any(|e| !e.alive)
     );
 }
+
+/// A T_J_001 de ponta a ponta: correr para a esquerda até a saída (pulando quando bate em
+/// algo), parar e apertar CIMA; 40 tiques depois é vitória, com o Jake vivo.
+#[test]
+fn t_j_001_can_be_won() {
+    use openhunted_engine::input::{JUMP, LEFT, UP};
+    let Some((mut s, _)) = load("T_J_001.LEV") else {
+        return;
+    };
+    let mut t = 0;
+    loop {
+        let j = s.jake.as_ref().unwrap();
+        assert!(!j.is_dead(), "o Jake morreu no tique {t} em x={}", j.body.x);
+        assert!(t < 900, "não chegou à saída: x={}", j.body.x);
+        if j.body.x < 100 {
+            break;
+        }
+        let input = if j.body.hit_wall && t % 10 == 0 {
+            LEFT | JUMP
+        } else {
+            LEFT
+        };
+        s.tick(input);
+        t += 1;
+    }
+    for _ in 0..5 {
+        s.tick(0);
+    }
+    let j = s.jake.as_ref().unwrap();
+    assert!(j.can_use_exit(), "{:?}", j.state());
+    s.tick(UP);
+    assert!(
+        s.entities.iter().any(|e| e.kind == 5 && e.on),
+        "a saída não ligou"
+    );
+    for _ in 0..60 {
+        s.tick(0);
+    }
+    assert_eq!(s.outcome, Some(openhunted_engine::Outcome::Victory));
+    assert!(s.jake.as_ref().unwrap().health.hp > 0);
+}
