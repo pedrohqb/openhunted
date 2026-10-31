@@ -163,3 +163,40 @@ fn name13(name: &str) -> [u8; 13] {
     n[..b.len().min(12)].copy_from_slice(&b[..b.len().min(12)]);
     n
 }
+
+/// Monta um recurso `BMP:` com quadros crus `(largura, altura, pixels)`.
+pub fn mkbmp(frames: &[(u16, u16, Vec<u8>)]) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&1000u16.to_le_bytes());
+    body.extend_from_slice(&(frames.len() as u16).to_le_bytes());
+    body.extend(std::iter::repeat_n(0u8, 4 * frames.len()));
+    for (w, h, px) in frames {
+        body.extend_from_slice(&w.to_le_bytes());
+        body.extend_from_slice(&h.to_le_bytes());
+        body.push(0);
+        body.extend_from_slice(&(px.len() as u32).to_le_bytes());
+        body.extend_from_slice(px);
+    }
+    let mut v = b"BMP:".to_vec();
+    v.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    v.extend(body);
+    v
+}
+
+/// Monta uma paleta RIFF `PAL ` em tons de cinza (cor i = (i, i, i)).
+pub fn mkpal() -> Vec<u8> {
+    let mut entries = Vec::new();
+    entries.extend_from_slice(&0x0300u16.to_le_bytes());
+    entries.extend_from_slice(&256u16.to_le_bytes());
+    for i in 0..=255u8 {
+        entries.extend_from_slice(&[i, i, i, 0]);
+    }
+    let mut data = b"data".to_vec();
+    data.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    data.extend(entries);
+    let mut v = b"RIFF".to_vec();
+    v.extend_from_slice(&((data.len() + 4) as u32).to_le_bytes());
+    v.extend_from_slice(b"PAL ");
+    v.extend(data);
+    v
+}

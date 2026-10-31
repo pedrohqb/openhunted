@@ -1,0 +1,18 @@
+[package]
+name = "ohtool"
+description = "Ferramenta de linha de comando para inspecionar e extrair os dados do Hunter Hunted"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+openhunted-formats = { path = "../openhunted-formats" }
+clap = { version = "4.6", features = ["derive"] }
+png = "0.18"
+
+[dev-dependencies]
+openhunted-formats = { path = "../openhunted-formats", features = ["test-support"] }
+assert_cmd = "2.2"
+tempfile = "3.27"
