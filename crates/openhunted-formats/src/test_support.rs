@@ -129,3 +129,32 @@ fn record(name: &[u8], lba: usize, size: usize, is_dir: bool) -> Vec<u8> {
 fn put(img: &mut [u8], off: usize, data: &[u8]) {
     img[off..off + data.len()].copy_from_slice(data);
 }
+
+/// Monta um mapa e volumes sintéticos no formato da Dynamix.
+/// Devolve `(mapa, [(nome do volume, bytes)])`.
+pub fn mkarchive(volumes: &[(&str, &[(&str, &[u8])])]) -> (Vec<u8>, Vec<(String, Vec<u8>)>) {
+    let mut map = vec![1, 2, 3, 5];
+    map.extend_from_slice(&(volumes.len() as u16).to_le_bytes());
+    let mut out = Vec::new();
+    for (vname, files) in volumes {
+        map.extend_from_slice(&name13(vname));
+        map.extend_from_slice(&(files.len() as u16).to_le_bytes());
+        let mut vol = Vec::new();
+        for (fname, data) in files.iter() {
+            map.extend_from_slice(&0u32.to_le_bytes());
+            map.extend_from_slice(&(vol.len() as u32).to_le_bytes());
+            vol.extend_from_slice(&name13(fname));
+            vol.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            vol.extend_from_slice(data);
+        }
+        out.push((vname.to_string(), vol));
+    }
+    (map, out)
+}
+
+fn name13(name: &str) -> [u8; 13] {
+    let mut n = [0u8; 13];
+    let b = name.as_bytes();
+    n[..b.len().min(12)].copy_from_slice(&b[..b.len().min(12)]);
+    n
+}
