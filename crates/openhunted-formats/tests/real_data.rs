@@ -265,3 +265,40 @@ fn real_levels() {
     assert_eq!((t.grid_x, t.grid_y, t.grid_z), (14, 1, 1));
     assert_eq!(t.palette, "WORLD.PAL");
 }
+
+#[test]
+fn every_resource_parses_by_type() {
+    use openhunted_formats::{Animation, Bitmap, Border, Font, Interface, Palette, Sound};
+    let path = data_or_skip!();
+    let ar = open_real_archive(&path);
+    let mut undecoded = BTreeMap::new();
+    for e in ar.entries() {
+        let data = ar.get(&e.name).unwrap();
+        let ext = e
+            .name
+            .rsplit_once('.')
+            .map(|(_, x)| x.to_uppercase())
+            .unwrap_or_default();
+        let ok = match ext.as_str() {
+            "BMP" => Bitmap::parse(data).map(|_| ()),
+            "PAL" => Palette::parse(data).map(|_| ()),
+            "WAV" => Sound::parse(data).map(|_| ()),
+            "ANM" => Animation::parse(data).map(|_| ()),
+            "BRD" => Border::parse(data).map(|_| ()),
+            "ITF" => Interface::parse(data).map(|_| ()),
+            "PFT" => Font::parse(data).map(|_| ()),
+            "RES" => Ok(()),
+            other => {
+                *undecoded.entry(other.to_string()).or_insert(0) += 1;
+                Ok(())
+            }
+        };
+        ok.unwrap_or_else(|err| panic!("{}: {err}", e.name));
+    }
+    // Pendentes para as próximas etapas (listados em docs/formats/README.md).
+    let expected: BTreeMap<String, i32> = [("SKE", 2), ("TBL", 3), ("VCR", 1)]
+        .iter()
+        .map(|(k, v)| (k.to_string(), *v))
+        .collect();
+    assert_eq!(undecoded, expected);
+}

@@ -11,8 +11,35 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
-M1: formatos em andamento. Ainda não há nada jogável. O plano e o design estão em
-[`docs/superpowers/`](docs/superpowers/).
+**M1 concluída: formatos.** A biblioteca `openhunted-formats` lê os dados do CD (pasta ou
+imagem `.iso`): bitmaps, paletas, sons, textos, animações, cenários, interfaces, fontes, o
+arquivo de fases e o cabeçalho das fases. O estado de cada formato está em
+[`docs/formats/`](docs/formats/README.md). Ainda não há nada jogável: a próxima etapa (M2) é um
+visualizador de fase, começando pelo corpo das fases.
+
+O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
+reversa, em [`docs/re/`](docs/re/).
+
+## ohtool
+
+Ferramenta de linha de comando para inspecionar e extrair os dados:
+
+```sh
+# listar os recursos (NOME, VOLUME, TAMANHO)
+cargo run -p ohtool -- --data /caminho/Hunter_Hunted.iso list --type BMP
+
+# ver um recurso (blocos, quadros; animações, cenários e interfaces em JSON)
+cargo run -p ohtool -- --data /caminho/Hunter_Hunted.iso info SABOUT.ANM
+
+# extrair: bitmaps em PNG com a paleta escolhida, fontes como folha de glifos,
+# formatos estruturados em JSON, o resto como está
+cargo run -p ohtool -- --data /caminho/Hunter_Hunted.iso extract --out extraido --palette SMAIN.PAL
+
+# listar as missões do hunter.hls (e gravar o cabeçalho de cada fase em JSON)
+cargo run -p ohtool -- --data /caminho/Hunter_Hunted.iso levels --out fases
+```
+
+`--data` aceita a raiz do CD montado, a pasta `Hunter/`, o `RESOURCE.MAP` ou a imagem `.iso`.
 
 ## Compilar
 
