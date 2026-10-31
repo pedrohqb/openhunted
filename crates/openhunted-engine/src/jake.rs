@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use crate::damage::{Health, Pending, apply};
 use crate::input::{JUMP, LEFT, RIGHT};
 use crate::physics::{Body, Rect, SUB, World, step};
 
@@ -38,7 +39,29 @@ pub enum State {
     Fall,
     /// Aterrissagem; `true` se veio de uma queda.
     Land(bool),
+    /// Empurrado (estado 168, `0x00423366`).
+    Pushed,
+    /// Derrubado em voo (estados 81/82, `0x004235fc`); `true` = jogado para a direita.
+    KnockedDown(bool),
+    /// Choque elétrico (estado 15, `0x00423577`); tiques restantes.
+    Shocked(u32),
+    /// Morrendo (`0x004236b9`): rótulo da animação da causa.
+    Dying(u16),
+    /// Cadáver (`0x004268ac`): último quadro, sem colisão com objetos.
+    Dead,
+    /// Entrando na porta de saída (estado 13, `0x00426820`); tiques desde a entrada.
+    EnteringExit(u32),
 }
+
+/// Rótulos das animações de morte (`docs/re/dano-vida.md`).
+pub const DIE_DEFAULT: u16 = 173;
+pub const DIE_KNOCKED_RIGHT: u16 = 177;
+pub const DIE_KNOCKED_LEFT: u16 = 179;
+pub const DIE_POISON: u16 = 171;
+/// Tiques do choque elétrico.
+const SHOCK_TICKS: u32 = 10;
+/// Escala mínima ao entrar na porta (numerador sobre a altura do quadro de referência).
+const EXIT_MIN_SCALE: i32 = 30;
 
 /// Rótulo do `JAKE.ANM` e campo c (avança um quadro a cada c+1 tiques) de cada estado.
 fn anim_of(s: State) -> (u16, u32) {
@@ -54,6 +77,13 @@ fn anim_of(s: State) -> (u16, u32) {
         State::Fall => (25, 0),
         State::Land(true) => (26, 0),
         State::Land(false) => (35, 0),
+        State::Pushed => (168, 0),
+        State::KnockedDown(true) => (81, 0),
+        State::KnockedDown(false) => (82, 0),
+        State::Shocked(_) => (15, 0),
+        State::Dying(label) => (label, 0),
+        State::Dead => (0, 0),
+        State::EnteringExit(_) => (12, 0),
     }
 }
 
@@ -70,6 +100,12 @@ pub struct Jake {
     lengths: HashMap<u16, usize>,
     label_changed: bool,
     advance: bool,
+    pub health: Health,
+    pending: Pending,
+    /// Rótulo em que morreu (o cadáver fica no último quadro dele).
+    death_label: u16,
+    /// Numerador da escala ao entrar na porta (encolhe 1 por tique após 10 tiques).
+    exit_scale: Option<i32>,
 }
 
 impl Jake {
@@ -85,14 +121,107 @@ impl Jake {
             lengths,
             label_changed: true,
             advance: false,
+            health: Health { hp: 100, armor: 0 },
+            pending: Pending::default(),
+            death_label: DIE_DEFAULT,
+            exit_scale: None,
         }
+    }
+
+    /// Vida e armadura iniciais (campos `fields[14]`/`[15]` do objeto).
+    pub fn with_health(mut self, hp: i32, armor: i32) -> Self {
+        self.health = Health { hp, armor };
+        self
+    }
+
+    pub fn is_dead(&self) -> bool {
+        matches!(self.state, State::Dying(_) | State::Dead) || self.health.is_dead()
+    }
+
+    /// Vivo e no jogo (não morrendo nem saindo pela porta).
+    pub fn is_active(&self) -> bool {
+        !self.is_dead() && !matches!(self.state, State::EnteringExit(_))
+    }
+
+    /// Parado em pé, podendo usar a saída.
+    pub fn can_use_exit(&self) -> bool {
+        self.state == State::Idle && self.body.on_ground
+    }
+
+    /// Soma dano pendente, aplicado no próximo tique.
+    pub fn hurt(&mut self, p: Pending) {
+        self.pending.add(&p);
+    }
+
+    /// Entra na porta de saída: estado 13, sem colisão; encolhe depois de 10 tiques.
+    /// `scale_num` é o numerador atual da escala do sprite.
+    pub fn enter_exit(&mut self, scale_num: i32) {
+        self.body.vx = 0;
+        self.body.vy = 0;
+        self.exit_scale = Some(scale_num);
+        self.set(State::EnteringExit(0));
+    }
+
+    /// Numerador da escala do sprite enquanto entra na porta.
+    pub fn scale_override(&self) -> Option<i32> {
+        match self.state {
+            State::EnteringExit(_) => self.exit_scale,
+            _ => None,
+        }
+    }
+
+    /// O cadáver não avança a animação.
+    fn controllable(&self) -> bool {
+        !matches!(
+            self.state,
+            State::Pushed
+                | State::KnockedDown(_)
+                | State::Shocked(_)
+                | State::Dying(_)
+                | State::Dead
+                | State::EnteringExit(_)
+        )
+    }
+
+    /// Reações ao dano pendente (`0x004231f9`) e aplicação; devolve `true` se morreu agora.
+    fn take_damage(&mut self, tick: u32) -> bool {
+        let p = std::mem::take(&mut self.pending);
+        if p.is_empty() || self.is_dead() || matches!(self.state, State::EnteringExit(_)) {
+            return false;
+        }
+        if p.knockdown {
+            let right = p.push.0 >= 0;
+            self.body.vx = p.push.0 * SUB;
+            self.body.vy = p.push.1 * SUB;
+            self.set(State::KnockedDown(right));
+        } else if p.shove && matches!(self.state, State::Idle | State::Run | State::Push) {
+            self.body.vx = p.push.0 * SUB;
+            self.set(State::Pushed);
+        } else if p.electric && !matches!(self.state, State::Shocked(_)) {
+            self.body.vx = 0;
+            self.set(State::Shocked(SHOCK_TICKS));
+        }
+        if apply(&mut self.health, &p, tick) == 0 {
+            self.death_label = match self.state {
+                State::KnockedDown(true) => DIE_KNOCKED_RIGHT,
+                State::KnockedDown(false) => DIE_KNOCKED_LEFT,
+                _ if p.poison => DIE_POISON,
+                _ => DIE_DEFAULT,
+            };
+            self.set(State::Dying(self.death_label));
+            return true;
+        }
+        false
     }
 
     pub fn state(&self) -> State {
         self.state
     }
     pub fn label(&self) -> u16 {
-        anim_of(self.state).0
+        match self.state {
+            State::Dead => self.death_label,
+            _ => anim_of(self.state).0,
+        }
     }
     pub fn facing_right(&self) -> bool {
         self.facing_right
@@ -189,6 +318,15 @@ impl Jake {
     /// Um tique (50 ms) com a máscara de entrada `input`.
     pub fn tick(&mut self, input: u32, world: &World) {
         self.label_changed = false;
+        if self.state == State::Dead {
+            self.advance = false;
+            return;
+        }
+        self.take_damage(self.ticks);
+        if !self.controllable() {
+            self.tick_passive(world);
+            return;
+        }
         let pressed = |bit: u32| input & bit != 0;
         let jump_edge = pressed(JUMP) && self.prev_input & JUMP == 0;
         let side = self.wanted_side(input);
@@ -253,6 +391,7 @@ impl Jake {
                     self.set(State::Idle);
                 }
             }
+            _ => unreachable!("estado passivo tratado em tick_passive"),
         }
         if matches!(self.state, State::Run | State::Push) {
             // −1 px por tique enquanto corre (sobe degraus pequenos), se houver espaço.
@@ -280,10 +419,71 @@ impl Jake {
             }
             _ => {}
         }
+        self.finish_tick();
+        self.prev_input = input;
+    }
+
+    fn finish_tick(&mut self) {
         let c = anim_of(self.state).1;
         self.advance = !self.label_changed && self.ticks % (c + 1) == 0;
         self.ticks = self.ticks.saturating_add(1);
-        self.prev_input = input;
+    }
+
+    /// Tique dos estados sem entrada do jogador.
+    fn tick_passive(&mut self, world: &World) {
+        match self.state {
+            State::EnteringExit(n) => {
+                if n >= 10 {
+                    if let Some(sc) = self.exit_scale.as_mut() {
+                        *sc = (*sc - 1).max(EXIT_MIN_SCALE);
+                    }
+                }
+                self.state = State::EnteringExit(n + 1);
+                self.finish_tick();
+                return;
+            }
+            State::Shocked(n) => {
+                self.body.vx = 0;
+                step(&mut self.body, world, true);
+                if n <= 1 {
+                    self.set(State::Idle);
+                } else {
+                    self.state = State::Shocked(n - 1);
+                }
+            }
+            State::Pushed => {
+                step(&mut self.body, world, true);
+                if self.anim_done() {
+                    self.body.vx = 0;
+                    self.set(State::Idle);
+                }
+            }
+            State::KnockedDown(_) => {
+                let was_rising = self.body.vy < 0;
+                step(&mut self.body, world, true);
+                if self.body.on_ground && !was_rising {
+                    self.body.vx = 0;
+                    self.body.vy = 0;
+                    self.set(State::Land(true));
+                }
+            }
+            State::Dying(_) => {
+                step(&mut self.body, world, true);
+                if self.body.on_ground {
+                    self.body.vx = 0;
+                }
+                if self.body.on_ground && self.anim_done() {
+                    self.set(State::Dead);
+                }
+            }
+            _ => {}
+        }
+        self.finish_tick();
+    }
+
+    /// Rótulo em que o cadáver ficou.
+    pub fn death_label(&self) -> u16 {
+        self.death_label
     }
 }
 
@@ -307,6 +507,14 @@ mod tests {
             (25, 1),
             (26, 11),
             (100, 6),
+            (168, 8),
+            (81, 10),
+            (82, 10),
+            (15, 4),
+            (173, 16),
+            (177, 13),
+            (171, 16),
+            (12, 20),
         ]
         .into_iter()
         .collect()
@@ -533,6 +741,89 @@ mod tests {
         assert_eq!((j.body.x, j.body.y, j.body.vy), (100, 53, 0));
         assert_eq!(j.state(), State::Idle);
         assert!(!j.respawn_if_outside((2000, 300)));
+    }
+
+    #[test]
+    fn damage_reactions_and_death() {
+        let w = long_floor();
+        // choque: 10 tiques parado, sem entrada
+        let mut j = jake_on(&w, 0).with_health(50, 0);
+        j.hurt(Pending {
+            amount: 20,
+            electric: true,
+            ..Default::default()
+        });
+        j.tick(RIGHT, &w);
+        assert_eq!(
+            (j.state(), j.label(), j.health.hp),
+            (State::Shocked(9), 15, 30)
+        );
+        let x = j.body.x;
+        for _ in 0..8 {
+            j.tick(RIGHT, &w);
+        }
+        assert_eq!(j.state(), State::Shocked(1));
+        j.tick(0, &w);
+        assert_eq!((j.state(), j.body.x), (State::Idle, x));
+        // derrubada para a direita: voa e aterrissa
+        j.hurt(Pending {
+            amount: 5,
+            explosion: true,
+            push: (8, -8),
+            knockdown: true,
+            ..Default::default()
+        });
+        j.tick(0, &w);
+        assert_eq!((j.state(), j.label()), (State::KnockedDown(true), 81));
+        assert!(j.body.x > x && j.body.vy < 0);
+        for _ in 0..40 {
+            j.tick(0, &w);
+        }
+        assert_eq!(j.state(), State::Idle);
+        assert_eq!(j.health.hp, 25);
+        // morte: animação, depois cadáver que ignora a entrada
+        j.hurt(Pending {
+            amount: 99,
+            ..Default::default()
+        });
+        j.tick(LEFT, &w);
+        assert_eq!((j.state(), j.label()), (State::Dying(173), 173));
+        assert!(j.is_dead());
+        let x = j.body.x;
+        for _ in 0..40 {
+            j.tick(LEFT, &w);
+        }
+        assert_eq!((j.state(), j.label(), j.body.x), (State::Dead, 173, x));
+        assert!(!j.advance());
+        // derrubado e morto na mesma pancada: rótulo 177/179 pelo lado
+        let mut j = jake_on(&w, 0).with_health(1, 0);
+        j.hurt(Pending {
+            amount: 9,
+            push: (-8, -8),
+            knockdown: true,
+            ..Default::default()
+        });
+        j.tick(0, &w);
+        assert_eq!(j.state(), State::Dying(DIE_KNOCKED_LEFT));
+    }
+
+    #[test]
+    fn entering_the_exit_shrinks_after_ten_ticks() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0);
+        j.enter_exit(47);
+        assert_eq!((j.state(), j.label()), (State::EnteringExit(0), 12));
+        for _ in 0..10 {
+            j.tick(LEFT, &w);
+        }
+        assert_eq!(j.scale_override(), Some(47));
+        j.tick(0, &w);
+        assert_eq!(j.scale_override(), Some(46));
+        for _ in 0..100 {
+            j.tick(0, &w);
+        }
+        assert_eq!(j.scale_override(), Some(30));
+        assert!(!j.is_active());
     }
 
     #[test]

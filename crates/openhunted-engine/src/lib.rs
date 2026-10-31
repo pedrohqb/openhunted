@@ -5,6 +5,7 @@
 pub mod anim;
 pub mod assets;
 pub mod behaviour;
+pub mod damage;
 pub mod entity;
 pub mod input;
 pub mod jake;

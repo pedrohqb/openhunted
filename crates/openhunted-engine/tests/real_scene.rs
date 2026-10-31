@@ -276,3 +276,13 @@ fn jake_can_move_in_every_level() {
         assert!(moved, "{level}: o Jake não sai do lugar");
     }
 }
+
+/// O Jake da T_J_001 começa com vida 50 e armadura 0 (campos do objeto).
+#[test]
+fn jake_health_comes_from_level() {
+    let Some((s, _)) = load("T_J_001.LEV") else {
+        return;
+    };
+    let h = s.jake.as_ref().unwrap().health;
+    assert_eq!((h.hp, h.armor), (50, 0));
+}

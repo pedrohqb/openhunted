@@ -302,7 +302,11 @@ impl Scene {
                         jake_layer = o.fields.get(4).copied().unwrap_or(0);
                         jake_flags = flags(o);
                         let player = AnimPlayer::at_label(&a, 1).unwrap_or(player);
-                        s.jake = Some(Jake::new(o.x, o.y, boxr, label_lengths(&a)));
+                        let field = |i: usize| o.fields.get(i).copied().unwrap_or(0);
+                        s.jake = Some(
+                            Jake::new(o.x, o.y, boxr, label_lengths(&a))
+                                .with_health(field(14), field(15)),
+                        );
                         s.jake_sprite = Some(Sprite {
                             layer: Layer::Object,
                             anim: a,
@@ -434,6 +438,9 @@ impl Scene {
             sp.y = j.body.y;
             // A arte do Jake olha para a esquerda: espelha quando ele olha para a direita.
             sp.mirror = j.facing_right();
+            if let Some(num) = j.scale_override() {
+                sp.scale.0 = num;
+            }
             if j.label_changed() {
                 if let Some(p) = AnimPlayer::at_label(&sp.anim, j.label()) {
                     sp.player = p;
