@@ -69,7 +69,7 @@ fn tutorial_render_matches_reference() {
     assert_eq!(h, REFERENCE);
 }
 
-const REFERENCE: u64 = 0x319f_3c56_50cc_fc02;
+const REFERENCE: u64 = 0x7e77_5156_d3bd_e667;
 
 /// Camadas z ≥ 1 usam o índice 0 como transparência: nada de índice 0 pode chegar à tela.
 #[test]
@@ -104,4 +104,18 @@ fn generic_item_objects_do_not_cycle() {
         s.tick();
     }
     assert_eq!(frames(&s), before);
+}
+
+/// O Jake da T_J_001 é desenhado a 47/88 (tamanho-alvo 22×47 nos campos do objeto).
+#[test]
+fn jake_is_drawn_scaled() {
+    let Some((s, _)) = load("T_J_001.LEV") else {
+        return;
+    };
+    let jake = s
+        .sprites
+        .iter()
+        .find(|p| p.anim.frames.len() == 918)
+        .unwrap();
+    assert_eq!(jake.scale, (47, 88));
 }

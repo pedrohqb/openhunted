@@ -56,6 +56,48 @@ impl Framebuffer {
         }
     }
 
+    /// Como `blit`, com escala `num/den` (vizinho mais próximo) e espelhamento horizontal.
+    /// Escala inválida (zero ou negativa) vale 1; o tamanho de destino é limitado a 4096.
+    pub fn blit_scaled(
+        &mut self,
+        frame: &Frame,
+        x: i32,
+        y: i32,
+        scale: (i32, i32),
+        mirror: bool,
+        transparent: bool,
+    ) {
+        let (num, den) = if scale.0 > 0 && scale.1 > 0 {
+            (i64::from(scale.0), i64::from(scale.1))
+        } else {
+            (1, 1)
+        };
+        if num == den && !mirror {
+            return self.blit(frame, x, y, transparent);
+        }
+        let (fw, fh) = (i64::from(frame.width), i64::from(frame.height));
+        if frame.pixels.len() < (fw * fh) as usize || fw == 0 || fh == 0 {
+            return;
+        }
+        let dw = (fw * num / den).clamp(1, 4096);
+        let dh = (fh * num / den).clamp(1, 4096);
+        let (x, y) = (i64::from(x), i64::from(y));
+        let (w, h) = (self.width as i64, self.height as i64);
+        for dy in y.max(0)..(y + dh).min(h) {
+            let sy = ((dy - y) * den / num).min(fh - 1);
+            for dx in x.max(0)..(x + dw).min(w) {
+                let mut sx = ((dx - x) * den / num).min(fw - 1);
+                if mirror {
+                    sx = fw - 1 - sx;
+                }
+                let p = frame.pixels[(sy * fw + sx) as usize];
+                if !transparent || p != 0 {
+                    self.pixels[(dy * w + dx) as usize] = p;
+                }
+            }
+        }
+    }
+
     fn put(&mut self, x: i64, y: i64, color: u8) {
         if x >= 0 && y >= 0 && (x as usize) < self.width && (y as usize) < self.height {
             self.pixels[y as usize * self.width + x as usize] = color;
@@ -148,6 +190,60 @@ mod tests {
         fb.rect(-1, -1, 3, 3, 1);
         assert_eq!(fb.pixels, vec![0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0]);
         fb.rect(2, 1, 100, 100, 2);
+    }
+
+    #[test]
+    fn scaled_blit_halves_and_doubles() {
+        // 4×2 → metade (2×1): pega os pixels 0 e 2 da primeira linha
+        let f = Frame {
+            width: 4,
+            height: 2,
+            pixels: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+        let mut fb = Framebuffer::new(4, 2);
+        fb.blit_scaled(&f, 0, 0, (1, 2), false, false);
+        assert_eq!(&fb.pixels[..2], &[1, 3]);
+        assert_eq!(fb.pixels[4], 0);
+        let g = Frame {
+            width: 2,
+            height: 1,
+            pixels: vec![1, 2],
+        };
+        let mut fb = Framebuffer::new(4, 2);
+        fb.blit_scaled(&g, 0, 0, (2, 1), false, false);
+        assert_eq!(fb.pixels, vec![1, 1, 2, 2, 1, 1, 2, 2]);
+    }
+
+    #[test]
+    fn mirrored_blit_flips_horizontally() {
+        let g = Frame {
+            width: 3,
+            height: 1,
+            pixels: vec![1, 0, 3],
+        };
+        let mut fb = Framebuffer::new(3, 1);
+        fb.clear(9);
+        fb.blit_scaled(&g, 0, 0, (1, 1), true, true);
+        assert_eq!(fb.pixels, vec![3, 9, 1]);
+    }
+
+    #[test]
+    fn scaled_blit_survives_extremes() {
+        let g = Frame {
+            width: 3,
+            height: 2,
+            pixels: vec![1; 6],
+        };
+        let mut fb = Framebuffer::new(4, 3);
+        for (x, y, sc) in [
+            (i32::MIN, 0, (1, 1)),
+            (0, i32::MAX, (3, 1)),
+            (-2, -1, (0, 1)),
+            (1, 1, (1, 0)),
+            (0, 0, (1000, 1)),
+        ] {
+            fb.blit_scaled(&g, x, y, sc, true, true);
+        }
     }
 
     #[test]

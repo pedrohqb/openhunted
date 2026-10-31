@@ -34,12 +34,29 @@ pub struct Sprite {
     pub y: i32,
     /// Não avança com `tick` (ver `GENERIC_ITEM`).
     pub frozen: bool,
+    /// Escala de desenho (numerador, denominador); ver `object_scale`.
+    pub scale: (i32, i32),
+    /// Espelhado na horizontal (a arte dos personagens olha para a esquerda).
+    pub mirror: bool,
 }
 
 /// Tipo de objeto cuja animação (`OGF.ANM`) é uma folha de itens num rótulo só: cada objeto
 /// mostra um quadro fixo, escolhido por um campo ainda não decifrado. Provisório (M2): parado
 /// no quadro `values[0]` quando válido, senão no 0. Ver `docs/re/objetos.md`.
 const GENERIC_ITEM: u32 = 6;
+
+/// Escala de desenho de um objeto (`0x00434655`): os dois últimos campos do objeto (A, B)
+/// são o tamanho-alvo; se A ≥ B, escala = A / largura do quadro de referência, senão
+/// B / altura. Valores ausentes ou inválidos dão escala 1.
+pub fn object_scale(a: i32, b: i32, ref_w: i32, ref_h: i32) -> (i32, i32) {
+    if a > 0 && ref_w > 0 && a >= b {
+        (a, ref_w)
+    } else if b > 0 && ref_h > 0 && b > a {
+        (b, ref_h)
+    } else {
+        (1, 1)
+    }
+}
 
 /// Objeto sem animação (lógica) ou com animação ausente: mostrado só no overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +114,8 @@ impl Scene {
                             x: cx,
                             y: cy,
                             frozen: false,
+                            scale: (1, 1),
+                            mirror: false,
                         }),
                         None => s.warnings.push(format!(
                             "{}: rótulo {} inexistente",
@@ -129,6 +148,8 @@ impl Scene {
                             x: cx.saturating_add(d.x),
                             y: cy.saturating_add(d.y),
                             frozen: false,
+                            scale: (1, 1),
+                            mirror: false,
                         });
                     }
                     Err(e) => s.warnings.push(format!("{}: {e}", d.animation)),
@@ -159,6 +180,17 @@ impl Scene {
                         0
                     };
                     let player = AnimPlayer::from_frame(&a, start);
+                    let n = o.fields.len();
+                    let (ta, tb) = if n >= 2 {
+                        (o.fields[n - 2], o.fields[n - 1])
+                    } else {
+                        (0, 0)
+                    };
+                    let (rw, rh) = a
+                        .frames
+                        .first()
+                        .map_or((0, 0), |f| (i32::from(f.width), i32::from(f.height)));
+                    let scale = object_scale(ta, tb, rw, rh);
                     s.sprites.push(Sprite {
                         layer: Layer::Object,
                         anim: a,
@@ -166,6 +198,8 @@ impl Scene {
                         x: o.x,
                         y: o.y,
                         frozen,
+                        scale,
+                        mirror: false,
                     });
                 }
                 Err(e) => {
@@ -197,11 +231,19 @@ impl Scene {
                 let Some(frame) = bmp.frames.get(op.frame as usize) else {
                     continue;
                 };
-                let x = sp.x.saturating_add(op.x).saturating_sub(camera.0);
-                let y = sp.y.saturating_add(op.y).saturating_sub(camera.1);
+                let (num, den) = sp.scale;
+                let sc = |v: i32| (i64::from(v) * i64::from(num) / i64::from(den.max(1))) as i32;
+                let mut ox = sc(op.x);
+                if sp.mirror {
+                    // espelha em torno do quadro de referência (quadro 0 da animação)
+                    let rw = sp.anim.frames.first().map_or(0, |f| i32::from(f.width));
+                    ox = sc(rw) - ox - sc(i32::from(frame.width));
+                }
+                let x = sp.x.saturating_add(ox).saturating_sub(camera.0);
+                let y = sp.y.saturating_add(sc(op.y)).saturating_sub(camera.1);
                 // Índice 0 é transparente em todas as camadas: os blocos de z = 0 não o usam, e os
                 // das camadas de cima o usam como área vazada.
-                fb.blit(frame, x, y, true);
+                fb.blit_scaled(frame, x, y, sp.scale, sp.mirror, true);
             }
         }
         if overlay {
@@ -349,6 +391,16 @@ mod tests {
         assert_eq!(fb.pixels[(37 - 20) * 64 + (198 - 190) - 1], 0);
         let mut empty = crate::Framebuffer::new(64, 64);
         s.draw(&mut a, &mut empty, (10_000, 10_000), true);
+    }
+
+    #[test]
+    fn object_scale_rule() {
+        // Jake: alvo (22, 47) sobre quadro de referência 42×88 → 47/88
+        assert_eq!(object_scale(22, 47, 42, 88), (47, 88));
+        assert_eq!(object_scale(30, 10, 60, 20), (30, 60));
+        assert_eq!(object_scale(0, 0, 42, 88), (1, 1));
+        assert_eq!(object_scale(22, 47, 42, 0), (1, 1));
+        assert_eq!(object_scale(-5, -3, 42, 88), (1, 1));
     }
 
     #[test]
