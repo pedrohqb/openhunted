@@ -123,6 +123,62 @@ impl Framebuffer {
     }
 }
 
+/// Largura e altura de `text` na fonte: soma das larguras dos glifos com 1 px entre eles;
+/// caracteres sem glifo valem a largura do espaço (ou 4 px).
+pub fn measure_text(font: &openhunted_formats::Font, text: &str) -> (i32, i32) {
+    let mut w = 0;
+    for (i, c) in text.chars().enumerate() {
+        if i > 0 {
+            w += 1;
+        }
+        w += glyph_width(font, c);
+    }
+    (w, i32::from(font.height))
+}
+
+fn glyph_width(font: &openhunted_formats::Font, c: char) -> i32 {
+    let glyph = |ch: char| {
+        Some(u32::from(ch))
+            .filter(|&n| n < 256)
+            .and_then(|n| font.glyphs.get(n as usize))
+            .and_then(|g| g.as_ref())
+    };
+    glyph(c)
+        .or_else(|| glyph(' '))
+        .map_or(4, |g| i32::from(g.width))
+}
+
+/// Desenha `text` com o canto superior esquerdo em (x, y); o índice 0 dos glifos é
+/// transparente e `color`, se dado, recolore os demais.
+pub fn draw_text(
+    fb: &mut Framebuffer,
+    font: &openhunted_formats::Font,
+    x: i32,
+    y: i32,
+    text: &str,
+    color: Option<u8>,
+) {
+    let mut cx = x;
+    for c in text.chars() {
+        let n = Some(u32::from(c)).filter(|&n| n < 256).map(|n| n as usize);
+        if let Some(g) = n.and_then(|n| font.glyphs.get(n)).and_then(|g| g.as_ref()) {
+            let mut pixels = g.pixels.clone();
+            if let Some(col) = color {
+                for p in pixels.iter_mut().filter(|p| **p != 0) {
+                    *p = col;
+                }
+            }
+            let frame = Frame {
+                width: g.width,
+                height: font.height,
+                pixels,
+            };
+            fb.blit(&frame, cx, y, true);
+        }
+        cx += glyph_width(font, c) + 1;
+    }
+}
+
 /// As 20 cores estáticas do Windows de 256 cores (índices 0–9 e 246–255).
 const WINDOWS_STATIC: [(u8, [u8; 3]); 20] = [
     (0, [0, 0, 0]),
@@ -178,6 +234,25 @@ pub fn clamp_camera(scene: (i32, i32), view: (i32, i32), cam: (i32, i32)) -> (i3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn draw_text_blits_glyphs() {
+        use openhunted_formats::test_support::mkpft;
+        // 'A' = 2×2 cheio de 5, 'B' = 3×2 cheio de 6 (altura 2 em mkpft)
+        let font = openhunted_formats::Font::parse(&mkpft(
+            'A' as u32,
+            &[(2, vec![5; 4]), (3, vec![6; 6])],
+        ))
+        .unwrap();
+        assert_eq!(measure_text(&font, "AB"), (6, 2));
+        let mut fb = Framebuffer::new(10, 4);
+        draw_text(&mut fb, &font, 1, 1, "AB", Some(9));
+        assert_eq!(fb.pixels[10 + 1], 9); // A em x=1..3
+        assert_eq!(fb.pixels[10 + 3], 0); // 1 px de espaço
+        assert_eq!(fb.pixels[10 + 4], 9); // B em x=4..7
+        assert_eq!(fb.pixels[2 * 10 + 6], 9);
+        assert_eq!(fb.pixels[10 + 7], 0);
+    }
 
     #[test]
     fn display_palette_replaces_system_ranges_only() {

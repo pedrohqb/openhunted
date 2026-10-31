@@ -9,13 +9,16 @@ pub mod jake;
 pub mod objects;
 pub mod physics;
 pub mod render;
+pub mod rng;
 pub mod scene;
+pub mod triggers;
 
 pub use anim::{AnimPlayer, DrawOp, draw_ops};
 pub use assets::Assets;
 pub use jake::{Jake, JumpKind, State};
 pub use physics::{Body, Rect, SUB, World, step};
 pub use render::{
-    Framebuffer, SCREEN_H, SCREEN_W, background_index, clamp_camera, display_palette,
+    Framebuffer, SCREEN_H, SCREEN_W, background_index, clamp_camera, display_palette, draw_text,
+    measure_text,
 };
 pub use scene::{Layer, Marker, Scene, Sprite, TICK_MS};

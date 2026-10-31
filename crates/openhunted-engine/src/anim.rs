@@ -95,6 +95,29 @@ impl AnimPlayer {
         self.frame
     }
 
+    /// Está no último quadro da sequência.
+    pub fn is_last(&self) -> bool {
+        self.frame + 1 >= self.end
+    }
+
+    /// Avança um quadro sem voltar ao início; devolve `true` se já estava no fim.
+    pub fn tick_once(&mut self) -> bool {
+        if self.is_last() {
+            return true;
+        }
+        self.frame += 1;
+        false
+    }
+
+    /// Volta um quadro sem passar do início; devolve `true` se já estava no início.
+    pub fn tick_back(&mut self) -> bool {
+        if self.frame <= self.start {
+            return true;
+        }
+        self.frame -= 1;
+        false
+    }
+
     /// Avança um quadro, voltando ao início da sequência no fim.
     pub fn tick(&mut self, _anim: &Animation) {
         self.frame = if self.frame + 1 >= self.end {
@@ -109,6 +132,32 @@ impl AnimPlayer {
 mod tests {
     use super::*;
     use openhunted_formats::{AnimFrame, AnimLabel, Animation, Instruction};
+
+    #[test]
+    fn tick_once_stops_at_end() {
+        let anim = Animation {
+            version: 1004,
+            width: 4,
+            height: 4,
+            extra: [0; 3],
+            table_a: vec![],
+            frames: vec![frame(0), frame(0), frame(0)],
+            labels: vec![],
+            script: vec![],
+            bitmaps: vec![],
+            palette: None,
+        };
+        let mut p = AnimPlayer::from_frame(&anim, 0);
+        assert!(!p.tick_once());
+        assert!(!p.tick_once());
+        assert!(p.is_last());
+        assert!(p.tick_once());
+        assert_eq!(p.frame(), 2);
+        assert!(!p.tick_back());
+        assert!(!p.tick_back());
+        assert!(p.tick_back());
+        assert_eq!(p.frame(), 0);
+    }
 
     fn frame(off: u16) -> AnimFrame {
         AnimFrame {
