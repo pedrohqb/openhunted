@@ -168,3 +168,31 @@ fn real_animations() {
     assert_eq!(missing, expected);
     assert_eq!(n, 87);
 }
+
+#[test]
+fn real_borders_and_interfaces() {
+    use openhunted_formats::{Border, Interface};
+    let path = data_or_skip!();
+    let ar = open_real_archive(&path);
+    let b = Border::parse(ar.get("C1A38A0.BRD").unwrap()).unwrap();
+    assert!(b.name.starts_with("Climber"));
+    assert_eq!(b.boxes.len(), 3);
+    let (mut brd, mut itf) = (0, 0);
+    for e in ar.entries() {
+        let up = e.name.to_uppercase();
+        let data = ar.get(&e.name).unwrap();
+        if up.ends_with(".BRD") {
+            Border::parse(data).unwrap_or_else(|err| panic!("{}: {err}", e.name));
+            brd += 1;
+        } else if up.ends_with(".ITF") {
+            let i = Interface::parse(data).unwrap_or_else(|err| panic!("{}: {err}", e.name));
+            assert!(ar.get(&i.animation).is_ok(), "{}: {}", e.name, i.animation);
+            itf += 1;
+        }
+    }
+    assert_eq!((brd, itf), (225, 16));
+    let about = Interface::parse(ar.get("SABOUT.ITF").unwrap()).unwrap();
+    assert_eq!(about.controls.len(), 3);
+    assert_eq!(about.controls[1].name.as_deref(), Some("AB_DONE"));
+    assert_eq!(about.controls[1].label, Some(2));
+}

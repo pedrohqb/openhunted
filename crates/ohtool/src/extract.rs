@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use openhunted_formats::{Animation, Bitmap, Palette, ResourceArchive};
+use openhunted_formats::{Animation, Bitmap, Border, Interface, Palette, ResourceArchive};
 
 /// Nome de arquivo seguro para um recurso: troca todo caractere fora de
 /// `[A-Za-z0-9._-]` e os pontos iniciais por `_`; nome vazio ou só com pontos vira `_`.
@@ -68,7 +68,7 @@ pub fn extract(
     Ok(written)
 }
 
-/// JSON dos formatos estruturados (ANM…); `None` para os demais.
+/// JSON dos formatos estruturados (ANM, BRD, ITF…); `None` para os demais.
 pub fn structured_json(
     name: &str,
     data: &[u8],
@@ -80,6 +80,8 @@ pub fn structured_json(
     }
     match extension(name).as_str() {
         "ANM" => Some(to_json(Animation::parse(data))),
+        "BRD" => Some(to_json(Border::parse(data))),
+        "ITF" => Some(to_json(Interface::parse(data))),
         _ => None,
     }
 }

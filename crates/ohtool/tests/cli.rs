@@ -231,3 +231,29 @@ fn anm_exports_json() {
     let json = std::fs::read_to_string(out.path().join("OAN.ANM.json")).unwrap();
     assert!(json.contains("oan00.bmp"), "{json}");
 }
+
+#[test]
+fn brd_and_itf_export_json() {
+    use openhunted_formats::test_support::{mkbrd, mkitf};
+    let brd = mkbrd(&[(2, 0, 0, 128, 12)]);
+    let itf = mkitf();
+    let (map, vols) = mkarchive(&[(
+        "RESOURCE.001",
+        &[("A.BRD", brd.as_slice()), ("B.ITF", itf.as_slice())],
+    )]);
+    let cd = tempfile::tempdir().unwrap();
+    std::fs::write(cd.path().join("RESOURCE.MAP"), map).unwrap();
+    std::fs::write(cd.path().join("RESOURCE.001"), &vols[0].1).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    ohtool()
+        .arg("--data")
+        .arg(cd.path())
+        .args(["extract", "--out"])
+        .arg(out.path())
+        .assert()
+        .success();
+    let brd_json = std::fs::read_to_string(out.path().join("A.BRD.json")).unwrap();
+    assert!(brd_json.contains("\"boxes\""), "{brd_json}");
+    let itf_json = std::fs::read_to_string(out.path().join("B.ITF.json")).unwrap();
+    assert!(itf_json.contains("T_NOME"), "{itf_json}");
+}

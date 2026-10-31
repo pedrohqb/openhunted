@@ -239,3 +239,46 @@ pub fn mkanm() -> Vec<u8> {
     v.extend(block(b"LAB:", &lab));
     v
 }
+
+fn tagged(tag: &[u8; 4], data: &[u8]) -> Vec<u8> {
+    let mut v = tag.to_vec();
+    v.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    v.extend_from_slice(data);
+    v
+}
+
+fn le16(ws: &[i32]) -> Vec<u8> {
+    ws.iter().flat_map(|&w| (w as u16).to_le_bytes()).collect()
+}
+
+/// Monta um cenário `.BRD` com as caixas `(tipo, x, y, largura, altura)`.
+pub fn mkbrd(boxes: &[(u16, i16, i16, u16, u16)]) -> Vec<u8> {
+    let mut hed = b"Climber Border File\0".to_vec();
+    hed.extend(le16(&[0, boxes.len() as i32]));
+    let mut bdr = Vec::new();
+    for &(k, x, y, w, h) in boxes {
+        bdr.extend(le16(&[k as i32, x as i32, y as i32, w as i32, h as i32]));
+    }
+    let mut v = tagged(b"HED:", &hed);
+    v.extend(tagged(b"BDR:", &bdr));
+    v
+}
+
+/// Monta uma interface `.ITF` (versão 1103) com dois controles: um tipo 0 sem rótulo e um
+/// tipo 4 (campo de edição, com 18 bytes extras) ligado ao rótulo 2 da animação.
+pub fn mkitf() -> Vec<u8> {
+    let mut itf = b"TB".to_vec();
+    itf.extend(le16(&[1103]));
+    itf.extend_from_slice(b"teste.ANM\0");
+    itf.extend(le16(&[2, 0, 4]));
+    itf.extend(le16(&[0, 0x80e8, 0, 10, 20, 100, 28, 1, 0xffff, -10, -20]));
+    itf.extend(le16(&[4, 0x80e9, 0, 30, 40, 50, 60, 1, 2, -30, -40]));
+    itf.extend_from_slice(&[0xaa; 18]);
+    let mut tag = le16(&[2, 0x80e8]);
+    tag.extend_from_slice(b"T_FUNDO\0");
+    tag.extend(le16(&[0x80e9]));
+    tag.extend_from_slice(b"T_NOME\0");
+    let mut v = tagged(b"ITF:", &itf);
+    v.extend(tagged(b"TAG:", &tag));
+    v
+}
