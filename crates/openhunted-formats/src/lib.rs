@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Leitura dos formatos de dados do Hunter Hunted (Sierra/Dynamix, 1996).
 
+pub mod bitmap;
 mod bytes;
 pub mod chunk;
 pub mod compress;
@@ -15,6 +16,7 @@ pub mod test_support;
 pub mod text;
 pub mod volume;
 
+pub use bitmap::{Bitmap, Frame};
 pub use chunk::{Chunk, chunks, find_chunk};
 pub use compress::{decompress, unpack_block};
 pub use error::{FormatError, Result};

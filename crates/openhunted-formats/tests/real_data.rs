@@ -83,3 +83,43 @@ fn sabout_decompresses_to_320x256() {
     let (pixels, _) = openhunted_formats::unpack_block(&bmp[20..]).unwrap();
     assert_eq!(pixels.len(), 320 * 256);
 }
+
+#[test]
+fn real_bitmaps() {
+    use openhunted_formats::Bitmap;
+    let path = data_or_skip!();
+    let ar = open_real_archive(&path);
+    let bmp = |n: &str| Bitmap::parse(ar.get(n).unwrap()).unwrap();
+    let itf = bmp("ITF.BMP");
+    assert_eq!(itf.frames.len(), 7);
+    assert_eq!((itf.frames[0].width, itf.frames[0].height), (124, 25));
+    assert_eq!(itf.frames[0].pixels[0], 0x89);
+    let but = bmp("SABOTBUT.BMP");
+    assert_eq!(but.frames.len(), 6);
+    assert_eq!((but.frames[0].width, but.frames[0].height), (36, 32));
+    let bak = bmp("SEGOCBAK.BMP");
+    assert_eq!(
+        (bak.frames.len(), bak.frames[0].width, bak.frames[0].height),
+        (1, 640, 480)
+    );
+    assert_eq!(bmp("SEGOCBUT.BMP").frames.len(), 63);
+    let mut n = 0;
+    for e in ar
+        .entries()
+        .iter()
+        .filter(|e| e.name.to_uppercase().ends_with(".BMP"))
+    {
+        let b = Bitmap::parse(ar.get(&e.name).unwrap())
+            .unwrap_or_else(|err| panic!("{}: {err}", e.name));
+        for f in &b.frames {
+            assert_eq!(
+                f.pixels.len(),
+                f.width as usize * f.height as usize,
+                "{}",
+                e.name
+            );
+        }
+        n += 1;
+    }
+    assert_eq!(n, 1654);
+}
