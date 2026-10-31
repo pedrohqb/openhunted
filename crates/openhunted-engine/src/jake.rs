@@ -122,6 +122,21 @@ impl Jake {
         if self.facing_right { 1 } else { -1 }
     }
 
+    /// Lado pedido pelas setas (`true` = direita): só uma delas, ou, com as duas, a apertada
+    /// por último (segurar as duas mantém o lado atual). `None` sem nenhuma.
+    fn wanted_side(&self, input: u32) -> Option<bool> {
+        let (l, r) = (input & LEFT != 0, input & RIGHT != 0);
+        let fresh = |bit: u32| input & bit != 0 && self.prev_input & bit == 0;
+        match (l, r) {
+            (true, false) => Some(false),
+            (false, true) => Some(true),
+            (true, true) if fresh(RIGHT) && !fresh(LEFT) => Some(true),
+            (true, true) if fresh(LEFT) && !fresh(RIGHT) => Some(false),
+            (true, true) => Some(self.facing_right),
+            (false, false) => None,
+        }
+    }
+
     fn choose_jump(&self, world: &World) -> JumpKind {
         let b = self.body.bounds();
         let ahead = |d: i32| {
@@ -160,15 +175,12 @@ impl Jake {
         self.label_changed = false;
         let pressed = |bit: u32| input & bit != 0;
         let jump_edge = pressed(JUMP) && self.prev_input & JUMP == 0;
+        let side = self.wanted_side(input);
         let airborne = matches!(self.state, State::Jump(_) | State::Fall);
-        if !airborne {
-            if pressed(LEFT) {
-                self.facing_right = false;
-            } else if pressed(RIGHT) {
-                self.facing_right = true;
-            }
+        if let (false, Some(right)) = (airborne, side) {
+            self.facing_right = right;
         }
-        let moving = pressed(LEFT) || pressed(RIGHT);
+        let moving = side.is_some();
         match self.state {
             State::Idle | State::Run | State::Push => {
                 if jump_edge && self.body.on_ground {
@@ -201,15 +213,19 @@ impl Jake {
                 }
             }
             State::RunUp => {
-                self.body.vx = RUN * self.dir();
+                // Impulso no lugar: o pulo sai do ponto onde o chão adiante foi sondado (o
+                // deslocamento do esqueleto, SKE, ainda não é aplicado).
+                self.body.vx = 0;
                 if self.anim_done() {
                     self.launch(JumpKind::Extended);
                 }
             }
             State::Jump(_) | State::Fall => {
                 // No ar, o lado oposto inverte a velocidade horizontal.
-                let opposite =
-                    (pressed(LEFT) && self.body.vx > 0) || (pressed(RIGHT) && self.body.vx < 0);
+                let opposite = match side {
+                    Some(right) => (right && self.body.vx < 0) || (!right && self.body.vx > 0),
+                    None => false,
+                };
                 if opposite {
                     self.body.vx = -self.body.vx;
                     self.facing_right = self.body.vx > 0;
@@ -222,7 +238,7 @@ impl Jake {
                 }
             }
         }
-        if matches!(self.state, State::Run | State::Push | State::RunUp) {
+        if matches!(self.state, State::Run | State::Push) {
             // −1 px por tique enquanto corre (sobe degraus pequenos), se houver espaço.
             let up = Rect {
                 y: self.body.bounds().y.saturating_sub(1),
@@ -241,7 +257,7 @@ impl Jake {
                 let from_fall = self.state == State::Fall;
                 self.set(State::Land(from_fall));
             }
-            State::Idle | State::Run | State::Push
+            State::Idle | State::Run | State::Push | State::RunUp
                 if !self.body.on_ground && self.body.vy >= FALL_SPEED =>
             {
                 self.set(State::Fall)
@@ -409,6 +425,84 @@ mod tests {
         assert!(fell);
         j.tick(0, &w);
         assert_eq!(j.label(), 26);
+    }
+
+    #[test]
+    fn extended_run_up_stays_on_the_ledge_and_clears_the_gap() {
+        // chão até 50 px, buraco até 200 px (fundo em y = 400), chão adiante: só o pulo
+        // estendido (255 px) acha onde pousar
+        let w = World::new(vec![
+            Rect {
+                x: -1000,
+                y: 100,
+                w: 1050,
+                h: 20,
+            },
+            Rect {
+                x: 200,
+                y: 100,
+                w: 2000,
+                h: 20,
+            },
+            Rect {
+                x: -1000,
+                y: 400,
+                w: 4000,
+                h: 20,
+            },
+        ]);
+        let mut j = jake_on(&w, 0);
+        let x0 = j.body.x;
+        j.tick(RIGHT | JUMP, &w);
+        assert_eq!(j.state(), State::RunUp);
+        while j.state() == State::RunUp {
+            assert!(
+                j.body.on_ground,
+                "saiu da beirada no impulso em x={}",
+                j.body.x
+            );
+            j.tick(RIGHT, &w);
+        }
+        assert_eq!(j.state(), State::Jump(JumpKind::Extended));
+        // lança de onde sondou: só o primeiro tique de voo (17 px) desde o início
+        assert_eq!(j.body.x - x0, 17);
+        for _ in 0..40 {
+            j.tick(RIGHT, &w);
+            if matches!(j.state(), State::Land(_)) {
+                break;
+            }
+        }
+        assert!(matches!(j.state(), State::Land(_)));
+        assert!(j.body.y < 100, "pousou no buraco: y={}", j.body.y);
+        assert!(j.body.x >= 200);
+    }
+
+    #[test]
+    fn both_arrows_held_in_air_do_not_jitter() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0);
+        j.tick(RIGHT, &w);
+        j.tick(RIGHT | JUMP, &w);
+        let vx = j.body.vx;
+        for _ in 0..4 {
+            j.tick(LEFT | RIGHT, &w);
+        }
+        // a seta esquerda apertada por último inverte uma vez só
+        assert_eq!(j.body.vx, -vx);
+        assert!(!j.facing_right());
+    }
+
+    #[test]
+    fn newest_arrow_wins_on_the_ground() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0);
+        j.tick(LEFT, &w);
+        assert!(!j.facing_right());
+        j.tick(LEFT | RIGHT, &w);
+        assert!(j.facing_right());
+        assert!(j.body.vx > 0);
+        j.tick(LEFT | RIGHT, &w);
+        assert!(j.facing_right(), "segurar as duas mantém o lado");
     }
 
     #[test]
