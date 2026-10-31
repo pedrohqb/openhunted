@@ -16,6 +16,7 @@ pub const TICK_MS: u32 = 50;
 /// Cores do overlay (índices da paleta).
 const OVERLAY_BORDER: u8 = 255;
 const OVERLAY_MARKER: u8 = 254;
+const OVERLAY_OBJECT: u8 = 253;
 /// Lado de uma célula da grade, em pixels.
 pub const CELL: i32 = 128;
 
@@ -118,6 +119,8 @@ pub struct Scene {
     pub jake_sprite: Option<Sprite>,
     /// Geometria sólida da camada do Jake.
     pub world: World,
+    /// Caixas dos objetos sólidos para o Jake (em px da fase), para o overlay.
+    pub object_solids: Vec<Rect>,
 }
 
 /// Tipo de objeto do Jake.
@@ -208,6 +211,7 @@ impl Scene {
             jake: None,
             jake_sprite: None,
             world: World::default(),
+            object_solids: Vec::new(),
         }
     }
 
@@ -229,6 +233,7 @@ impl Scene {
             jake: None,
             jake_sprite: None,
             world: World::default(),
+            object_solids: Vec::new(),
         };
         let mut jake_layer = 0;
         let mut jake_obj: Option<&LevelObject> = None;
@@ -388,6 +393,7 @@ impl Scene {
                 h: i32::from(b.height),
             })
             .collect();
+        let cell_solids = solids.len();
         if let Some(j) = jake_obj {
             let jf = flags(j);
             for o in all {
@@ -411,6 +417,7 @@ impl Scene {
                 }
             }
         }
+        s.object_solids = solids[cell_solids..].to_vec();
         s.world = World::new(solids);
         Ok(s)
     }
@@ -441,6 +448,15 @@ impl Scene {
                     i32::from(b.width),
                     i32::from(b.height),
                     OVERLAY_BORDER,
+                );
+            }
+            for r in &self.object_solids {
+                fb.rect(
+                    r.x.saturating_sub(camera.0),
+                    r.y.saturating_sub(camera.1),
+                    r.w,
+                    r.h,
+                    OVERLAY_OBJECT,
                 );
             }
             for m in &self.markers {
@@ -590,6 +606,17 @@ mod tests {
         let b = settle(&l, a);
         assert!(b.on_ground);
         assert_eq!(b.y, 60 - 47); // pés (caixa de reserva: y 3 + 44) no topo da peça
+        let (l, mut a) = platform_level(0, 0x80089);
+        let sc = Scene::build(&l, &mut a).unwrap();
+        assert_eq!(
+            sc.object_solids,
+            vec![Rect {
+                x: 40,
+                y: 60,
+                w: 60,
+                h: 10
+            }]
+        );
         let (l, a) = platform_level(1, 0x80089);
         assert!(settle(&l, a).y > 60, "outra camada não sustenta");
         let (l, a) = platform_level(0, 0x800a9);
