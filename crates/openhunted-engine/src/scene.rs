@@ -12,6 +12,7 @@ use crate::entity::{BOX, Behaviour, Entity, from_object, object_scale, object_st
 use crate::objects::{SOLO, flags, is_player_start, present};
 use crate::physics::{Rect, World};
 use crate::rng::Rng;
+use crate::verdict::{self, Streak};
 use crate::{AnimPlayer, Assets, Framebuffer, Jake, draw_ops};
 
 /// Duração de um tick de animação, em milissegundos (provisório: `docs/re/cenario.md`).
@@ -94,6 +95,10 @@ pub struct Scene {
     cell_world: World,
     /// `OEX.ANM`, se existir nos dados.
     explosion_anim: Option<Rc<Animation>>,
+    /// Zonas PR de tipo 0x40 (diante das saídas): (camada, retângulo em px da fase).
+    exit_zones: Vec<(i32, Rect)>,
+    streak: Streak,
+    prev_input: u32,
     /// Linhas do `WIZARD.RES` (dicas), se houver.
     pub hints: Vec<String>,
     /// Eventos do último tique (quem mostra a cena esvazia).
@@ -197,6 +202,9 @@ impl Scene {
             cell_solids: Vec::new(),
             cell_world: World::default(),
             explosion_anim: None,
+            exit_zones: Vec::new(),
+            streak: Streak::default(),
+            prev_input: 0,
             hints: Vec::new(),
             events: Vec::new(),
             outcome: None,
@@ -230,6 +238,9 @@ impl Scene {
             cell_solids: Vec::new(),
             cell_world: World::default(),
             explosion_anim: None,
+            exit_zones: Vec::new(),
+            streak: Streak::default(),
+            prev_input: 0,
             hints: Vec::new(),
             events: Vec::new(),
             outcome: None,
@@ -304,6 +315,21 @@ impl Scene {
                     }
                     Err(e) => s.warnings.push(format!("{}: {e}", d.animation)),
                 }
+            }
+            for pr in cell
+                .props
+                .iter()
+                .filter(|p| p.kind == behaviour::exit::EXIT_PROP)
+            {
+                s.exit_zones.push((
+                    cz,
+                    Rect {
+                        x: cx.saturating_add(pr.rect[0]),
+                        y: cy.saturating_add(pr.rect[1]),
+                        w: pr.rect[2],
+                        h: pr.rect[3],
+                    },
+                ));
             }
             objects.extend(cell.objects.iter());
         }
@@ -470,8 +496,18 @@ impl Scene {
             sp.y = j.body.y;
         }
         if self.outcome.is_none() {
+            let up_edge = input & crate::input::UP != 0 && self.prev_input & crate::input::UP == 0;
+            if up_edge {
+                self.try_exit();
+            }
             self.tick_entities();
+            let result = verdict::evaluate(&self.entities, self.jake.as_ref());
+            if let Some(o) = self.streak.push(result) {
+                self.outcome = Some(o);
+                self.events.push(Event::Outcome(o));
+            }
         }
+        self.prev_input = input;
         if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
             sp.x = j.body.x;
             sp.y = j.body.y;
@@ -506,6 +542,56 @@ impl Scene {
             }
         }
         self.tick_count = self.tick_count.saturating_add(1);
+    }
+
+    /// CIMA (`0x00423b8e`): o Jake parado sobre uma zona PR 0x40 e tocando a caixa de uma
+    /// saída aciona-a (`0x0040e4dd`): objetivos cumpridos → a saída liga e ele entra na porta;
+    /// senão, choque de 20 e os dois sons.
+    fn try_exit(&mut self) {
+        let Some(j) = self.jake.as_ref().filter(|j| j.can_use_exit()) else {
+            return;
+        };
+        let jb = j.body.bounds();
+        let in_zone = self
+            .exit_zones
+            .iter()
+            .any(|(z, r)| *z == self.jake_layer && r.overlaps(&jb));
+        if !in_zone {
+            return;
+        }
+        let touching = |e: &Entity| {
+            matches!(e.behaviour, Behaviour::Exit(_))
+                && e.alive
+                && e.layer == self.jake_layer
+                && e.bounds().is_some_and(|b| {
+                    // desigualdades não estritas (`0x0040e4dd`)
+                    jb.x <= b.x + b.w
+                        && jb.x + jb.w >= b.x
+                        && jb.y <= b.y + b.h
+                        && jb.y + jb.h >= b.y
+                })
+        };
+        let Some(i) = self.entities.iter().position(touching) else {
+            return;
+        };
+        if verdict::objectives_met(&self.entities, self.jake.as_ref()) {
+            self.entities[i].on = true;
+            let num = self.jake_sprite.as_ref().map_or(1, |sp| sp.scale.0);
+            if let Some(j) = self.jake.as_mut() {
+                j.enter_exit(num);
+            }
+        } else {
+            if let Some(j) = self.jake.as_mut() {
+                j.hurt(crate::damage::Pending {
+                    amount: behaviour::exit::ZAP_DAMAGE,
+                    electric: true,
+                    ..Default::default()
+                });
+            }
+            self.events
+                .push(Event::Sound(behaviour::exit::SOUND_OBJECTIVES));
+            self.events.push(Event::Sound(behaviour::exit::SOUND_ZAP));
+        }
     }
 
     /// Entidade visual de uma explosão: `OEX.ANM`, rótulo sorteado 1–4, com o sprite medindo
@@ -605,6 +691,7 @@ impl Scene {
                     Behaviour::Pickup => behaviour::pickup::tick(e, &ctx, &mut out),
                     Behaviour::Mine(_) => behaviour::mine::tick(e, &mut ctx, &mut out),
                     Behaviour::Explosion(_) => behaviour::explosion::tick(e),
+                    Behaviour::Exit(_) => behaviour::exit::tick(e),
                     _ => {}
                 }
             }
@@ -647,6 +734,7 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::State;
     use openhunted_formats::test_support::{mkanm, mkarchive, mkbmp};
     use openhunted_formats::{Cell, Level, LevelObject, ResourceArchive};
 
@@ -812,6 +900,116 @@ mod tests {
         );
         let j = s.jake.as_ref().unwrap();
         assert!(j.health.hp < 50 && j.health.hp > 0, "vida {}", j.health.hp);
+    }
+
+    /// Fase sintética com o Jake, uma saída (OAN.ANM como animação, rótulo 1) à esquerda
+    /// dele e uma zona PR 0x40 diante dela.
+    fn exit_level(zone: bool) -> (Level, Assets) {
+        let mut jake = object(JAKE, 50, 0, "OAN.ANM");
+        jake.fields = vec![0, 0, 0, 0x94801, 0];
+        jake.fields.resize(16, 0);
+        jake.fields[14] = 50;
+        let mut exit = object(crate::entity::EXIT, 40, 10, "OAN.ANM");
+        exit.fields = vec![0, 0, 0, 0x80029, 0];
+        exit.fields.resize(21, 0); // os dois últimos campos são o tamanho (0 = escala 1)
+        exit.fields[16] = 2;
+        let (mut l, a) = platform_level(0, 0x80089);
+        l.objects[0] = jake; // mantém a peça que sustenta o Jake
+        l.objects.push(exit);
+        if zone {
+            let cell = l.cells[0].get_or_insert_with(|| Cell {
+                version: 1010,
+                animation: String::new(),
+                border: String::new(),
+                index: 0,
+                mirrored: false,
+                fields: vec![],
+                triggers: vec![],
+                objects: vec![],
+                props: vec![],
+                decorations: vec![],
+            });
+            cell.props.push(openhunted_formats::Prop {
+                kind: 0x40,
+                rect: [30, 0, 60, 60],
+            });
+        }
+        (l, a)
+    }
+
+    fn settle_scene(l: &Level, mut a: Assets) -> Scene {
+        let mut s = Scene::build(l, &mut a).unwrap();
+        for _ in 0..30 {
+            s.tick(0);
+        }
+        s
+    }
+
+    #[test]
+    fn up_at_the_exit_wins_after_forty_ticks() {
+        use crate::input::UP;
+        let (l, a) = exit_level(true);
+        let mut s = settle_scene(&l, a);
+        let j = s.jake.as_ref().unwrap();
+        assert!(
+            j.can_use_exit(),
+            "{:?} y={} chão={}",
+            j.state(),
+            j.body.y,
+            j.body.on_ground
+        );
+        s.tick(UP);
+        let exit = s.entities.iter().find(|e| e.kind == 5).unwrap();
+        assert!(exit.on);
+        assert_eq!(s.jake.as_ref().unwrap().state(), State::EnteringExit(0));
+        // o tique do CIMA já conta: vitória no 40º tique com a saída ligada
+        for t in 1..39 {
+            s.tick(0);
+            assert_eq!(s.outcome, None, "tique {t}");
+        }
+        s.tick(0);
+        assert_eq!(s.outcome, Some(Outcome::Victory));
+        assert!(s.events.contains(&Event::Outcome(Outcome::Victory)));
+        // sem a zona PR, CIMA não faz nada
+        let (l, a) = exit_level(false);
+        let mut s = settle_scene(&l, a);
+        s.tick(UP);
+        assert!(!s.entities.iter().find(|e| e.kind == 5).unwrap().on);
+        assert_eq!(s.jake.as_ref().unwrap().state(), State::Idle);
+    }
+
+    #[test]
+    fn exit_refused_without_objectives_zaps_and_death_defeats() {
+        use crate::input::UP;
+        let (mut l, a) = exit_level(true);
+        // um alvo a destruir, vivo
+        let mut target = object(9, 400, 0, "OAN.ANM");
+        target.fields = vec![0, 0, 0, 0x80001, 0];
+        target.fields.resize(21, 0);
+        target.fields[14] = 5;
+        target.fields[16] = 4;
+        l.objects.push(target);
+        let mut s = settle_scene(&l, a);
+        s.tick(UP);
+        s.tick(0);
+        let j = s.jake.as_ref().unwrap();
+        assert_eq!(j.health.hp, 30);
+        assert_eq!(j.state(), State::Shocked(9));
+        assert!(s.events.contains(&Event::Sound(3772)));
+        // morte → derrota 40 tiques depois (mesmo que a saída ligue no meio)
+        if let Some(j) = s.jake.as_mut() {
+            j.hurt(crate::damage::Pending {
+                amount: 99,
+                ..Default::default()
+            });
+        }
+        s.tick(0);
+        assert!(s.jake.as_ref().unwrap().is_dead());
+        s.entities.iter_mut().find(|e| e.kind == 5).unwrap().on = true;
+        for _ in 0..39 {
+            s.tick(0);
+        }
+        assert_eq!(s.outcome, Some(Outcome::Defeat));
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub mod render;
 pub mod rng;
 pub mod scene;
 pub mod triggers;
+pub mod verdict;
 
 pub use anim::{AnimPlayer, DrawOp, draw_ops};
 pub use assets::Assets;
