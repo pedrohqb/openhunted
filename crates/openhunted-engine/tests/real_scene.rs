@@ -181,3 +181,44 @@ fn player_start_is_jake() {
     let j = s.jake.as_ref().unwrap();
     assert_eq!((j.body.x, j.body.y), (110, 709));
 }
+
+/// Na T_J_007 o Jake nasce sobre peças OPL (objetos): parado, fica de pé.
+#[test]
+fn jake_stands_on_objects_in_t_j_007() {
+    let Some((mut s, _)) = load("T_J_007.LEV") else {
+        return;
+    };
+    let y0 = s.jake.as_ref().unwrap().body.y;
+    for _ in 0..40 {
+        s.tick(0);
+    }
+    let j = s.jake.as_ref().unwrap();
+    assert!(j.body.y - y0 <= 16, "caiu {} px", j.body.y - y0);
+    assert!(j.body.on_ground);
+}
+
+/// Entradas aleatórias (LCG fixa) nunca deixam o Jake dentro de um sólido (célula ou objeto).
+#[test]
+fn random_input_never_ends_inside_solids() {
+    use openhunted_engine::input::{JUMP, LEFT, RIGHT};
+    for level in ["T_J_007.LEV", "D_J_009.LEV", "H_J_001.LEV", "I_J_101.LEV"] {
+        let Some((mut s, _)) = load(level) else {
+            return;
+        };
+        let mut seed: u32 = 0x1234_5678;
+        let mut input = 0;
+        for t in 0..2000 {
+            if t % 7 == 0 {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                input =
+                    [0, LEFT, RIGHT, LEFT | JUMP, RIGHT | JUMP, JUMP][(seed >> 16) as usize % 6];
+            }
+            s.tick(input);
+            let b = s.jake.as_ref().unwrap().body.bounds();
+            assert!(
+                !s.world.blocked(&b),
+                "{level}: dentro de sólido no tique {t}: {b:?}"
+            );
+        }
+    }
+}

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use openhunted_formats::{Animation, Border, BorderBox, Level, LevelObject, Result};
 
-use crate::objects::{SOLO, is_player_start, present};
+use crate::objects::{SOLO, blocks, flags, is_player_start, present};
 use crate::physics::{Rect, World};
 use crate::{AnimPlayer, Assets, Framebuffer, Jake, draw_ops};
 
@@ -231,6 +231,7 @@ impl Scene {
             world: World::default(),
         };
         let mut jake_layer = 0;
+        let mut jake_obj: Option<&LevelObject> = None;
         let mut objects: Vec<&LevelObject> = level.objects.iter().collect();
         for (i, cell) in level.cells.iter().enumerate() {
             let Some(cell) = cell else { continue };
@@ -308,6 +309,7 @@ impl Scene {
             objects.retain(|o| present(o, SOLO) || is_player_start(o, SOLO));
         }
         let is_jake = |o: &LevelObject| o.kind == JAKE && (!solo || is_player_start(o, SOLO));
+        let all = objects.clone();
         for o in objects {
             let marker = Marker {
                 kind: o.kind,
@@ -341,6 +343,7 @@ impl Scene {
                             .and_then(|b| border_bounds(&b))
                             .unwrap_or(JAKE_BOX);
                         jake_layer = o.fields.get(4).copied().unwrap_or(0);
+                        jake_obj = Some(o);
                         let player = AnimPlayer::at_label(&a, 1).unwrap_or(player);
                         s.jake = Some(Jake::new(o.x, o.y, boxr, label_lengths(&a)));
                         s.jake_sprite = Some(Sprite {
@@ -374,18 +377,41 @@ impl Scene {
             }
         }
         s.sprites.sort_by_key(|p| p.layer);
-        s.world = World::new(
-            s.borders
-                .iter()
-                .filter(|(_, _, z, b)| *z == jake_layer && b.kind == BOX)
-                .map(|(cx, cy, _, b)| Rect {
-                    x: cx.saturating_add(i32::from(b.x)),
-                    y: cy.saturating_add(i32::from(b.y)),
-                    w: i32::from(b.width),
-                    h: i32::from(b.height),
-                })
-                .collect(),
-        );
+        let mut solids: Vec<Rect> = s
+            .borders
+            .iter()
+            .filter(|(_, _, z, b)| *z == jake_layer && b.kind == BOX)
+            .map(|(cx, cy, _, b)| Rect {
+                x: cx.saturating_add(i32::from(b.x)),
+                y: cy.saturating_add(i32::from(b.y)),
+                w: i32::from(b.width),
+                h: i32::from(b.height),
+            })
+            .collect();
+        if let Some(j) = jake_obj {
+            let jf = flags(j);
+            for o in all {
+                let same_layer = o.fields.get(4).copied().unwrap_or(0) == jake_layer;
+                if std::ptr::eq(o, j) || !same_layer || !blocks(jf, o) || o.names[1].is_empty() {
+                    continue;
+                }
+                match assets.archive().get(&o.names[1]).and_then(Border::parse) {
+                    // Formas do objeto: relativas à posição dele, já em px da fase.
+                    Ok(b) => {
+                        solids.extend(b.boxes.iter().filter(|b| b.kind == BOX).map(|b| Rect {
+                            x: o.x.saturating_add(i32::from(b.x)),
+                            y: o.y.saturating_add(i32::from(b.y)),
+                            w: i32::from(b.width),
+                            h: i32::from(b.height),
+                        }))
+                    }
+                    Err(e) => s
+                        .warnings
+                        .push(format!("objeto tipo {} ({}): {e}", o.kind, o.names[1])),
+                }
+            }
+        }
+        s.world = World::new(solids);
         Ok(s)
     }
 
@@ -522,6 +548,55 @@ mod tests {
             &[("OAN00.BMP", bmp.as_slice()), ("OAN.ANM", anm.as_slice())],
         )]);
         Assets::new(ResourceArchive::from_map(&map, |_| Ok(vols[0].1.clone())).unwrap())
+    }
+
+    /// Fase sem células com o Jake em (50, 0) e uma peça sólida (0x80089, `PL.BRD`: caixa de
+    /// 60 × 10) em (40, 60) na camada `layer`.
+    fn platform_level(layer: i32, flags: i32) -> (Level, Assets) {
+        let mut jake = object(JAKE, 50, 0, "OAN.ANM");
+        jake.fields = vec![0, 0, 0, 0x94801, 0];
+        let mut piece = object(56, 40, 60, "OAN.ANM");
+        piece.fields = vec![0, 0, 0, flags, layer];
+        piece.names[1] = "PL.BRD".into();
+        let mut l = level();
+        l.cells = vec![None, None];
+        l.objects = vec![jake, piece];
+        let bmp = mkbmp(&[(20, 20, vec![1; 400])]);
+        let anm = mkanm();
+        let brd = openhunted_formats::test_support::mkbrd(&[(2, 0, 0, 60, 10)]);
+        let (map, vols) = mkarchive(&[(
+            "RESOURCE.001",
+            &[
+                ("OAN00.BMP", bmp.as_slice()),
+                ("OAN.ANM", anm.as_slice()),
+                ("PL.BRD", brd.as_slice()),
+            ],
+        )]);
+        let a = Assets::new(ResourceArchive::from_map(&map, |_| Ok(vols[0].1.clone())).unwrap());
+        (l, a)
+    }
+
+    fn settle(l: &Level, mut a: Assets) -> crate::Body {
+        let mut s = Scene::build(l, &mut a).unwrap();
+        for _ in 0..20 {
+            s.tick(0);
+        }
+        s.jake.unwrap().body
+    }
+
+    #[test]
+    fn solid_object_holds_jake_on_his_layer_only() {
+        let (l, a) = platform_level(0, 0x80089);
+        let b = settle(&l, a);
+        assert!(b.on_ground);
+        assert_eq!(b.y, 60 - 47); // pés (caixa de reserva: y 3 + 44) no topo da peça
+        let (l, a) = platform_level(1, 0x80089);
+        assert!(settle(&l, a).y > 60, "outra camada não sustenta");
+        let (l, a) = platform_level(0, 0x800a9);
+        assert!(
+            settle(&l, a).y > 60,
+            "objeto de contato (0x20) não sustenta"
+        );
     }
 
     #[test]
