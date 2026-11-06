@@ -515,6 +515,7 @@ fn tutorial_shooting_kills_the_nearest_mine() {
     let Some((mut s, _)) = load("T_J_001.LEV") else {
         return;
     };
+    assert_eq!(s.mines_at_start, 7, "as 7 minas da T_J_001");
     for _ in 0..20 {
         s.tick(0);
     }

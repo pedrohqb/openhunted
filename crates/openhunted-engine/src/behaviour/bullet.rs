@@ -24,6 +24,9 @@ pub struct BulletState {
     /// Bateu no cenário neste tique: a cena ainda testa o acerto em objetos encostados na
     /// parede (o olho-laser no teto) antes de virar faísca.
     pub spent: bool,
+    /// Disparada pelo jogador (as mortes que ela causa entram nas estatísticas). Quando os
+    /// inimigos atirarem, as balas deles nascem com `false`.
+    pub player_shot: bool,
 }
 
 /// Caixa varrida pela bala no último tique (união da caixa anterior com a atual), para o

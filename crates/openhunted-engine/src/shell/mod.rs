@@ -62,19 +62,24 @@ pub fn solo_missions(list: &[MissionInfo]) -> Vec<MissionInfo> {
 }
 
 /// Próxima missão (`0x440e95`): índice + 1, voltando a 0 no fim; se ainda há missões sem
-/// recorde, pula as que já têm um.
-pub fn next_mission(current: usize, records: &[i32]) -> usize {
+/// recorde, pula as que já têm um. Decisão do port: pula também as missões marcadas como não
+/// jogáveis em `playable` (as do Garathe, enquanto ele não existe); índice fora de
+/// `playable` conta como jogável. `None` se nenhuma é jogável.
+pub fn next_mission(current: usize, records: &[i32], playable: &[bool]) -> Option<usize> {
     let n = records.len();
-    if n == 0 {
-        return 0;
+    let ok = |i: usize| playable.get(i).copied().unwrap_or(true);
+    if !(0..n).any(ok) {
+        return None;
     }
-    let mut i = (current + 1) % n;
-    if records.contains(&0) {
-        while records[i] != 0 {
-            i = (i + 1) % n;
+    let unplayed = (0..n).any(|i| ok(i) && records[i] == 0);
+    let mut i = current;
+    for _ in 0..n {
+        i = (i + 1) % n;
+        if ok(i) && (!unplayed || records[i] == 0) {
+            return Some(i);
         }
     }
-    i
+    None
 }
 
 #[cfg(test)]
@@ -100,15 +105,33 @@ mod tests {
 
     #[test]
     fn next_skips_missions_with_records_while_some_remain() {
-        assert_eq!(next_mission(0, &[0, 0, 0]), 1);
-        assert_eq!(next_mission(2, &[0, 0, 0]), 0, "volta ao início");
-        assert_eq!(next_mission(0, &[500, 300, 0]), 2);
-        assert_eq!(next_mission(2, &[0, 300, 0]), 0);
+        let all = [true; 3];
+        assert_eq!(next_mission(0, &[0, 0, 0], &all), Some(1));
         assert_eq!(
-            next_mission(1, &[5, 5, 5]),
-            2,
+            next_mission(2, &[0, 0, 0], &all),
+            Some(0),
+            "volta ao início"
+        );
+        assert_eq!(next_mission(0, &[500, 300, 0], &all), Some(2));
+        assert_eq!(next_mission(2, &[0, 300, 0], &all), Some(0));
+        assert_eq!(
+            next_mission(1, &[5, 5, 5], &all),
+            Some(2),
             "todas com recorde: só avança"
         );
-        assert_eq!(next_mission(0, &[]), 0);
+        assert_eq!(next_mission(0, &[], &[]), None);
+    }
+
+    #[test]
+    fn next_skips_missions_without_a_controllable_character() {
+        let p = [true, false, true, false];
+        assert_eq!(next_mission(0, &[9, 0, 0, 0], &p), Some(2));
+        assert_eq!(
+            next_mission(2, &[9, 0, 9, 0], &p),
+            Some(0),
+            "todas jogadas: só avança"
+        );
+        assert_eq!(next_mission(0, &[0, 0], &[false, false]), None);
+        assert_eq!(next_mission(0, &[5, 0], &[true, false]), Some(0), "só ela");
     }
 }

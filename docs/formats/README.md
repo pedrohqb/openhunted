@@ -20,7 +20,7 @@ tipo na versão 1.00 passam pelo leitor nos testes com os dados reais.
 | Lista de missões | `ENGLEVEL.TXT` | lido (100 missões) | [`lev.md`](lev.md) |
 | Fases `.LEV` | `hunter.hls` | lido (100): cabeçalho, objetos, células, listas PR e DC; significado de parte dos campos pendente | [`lev.md`](lev.md) |
 | Tabelas `.TBL` | `DAMAGE.TBL`, `DLS.TBL`, `SOUND.TBL` | **pendente** | — |
-| Esqueletos `.SKE` | `JAKE.SKE`, `MINOTAUR.SKE` | **pendente** | — |
+| Esqueletos `.SKE` | `JAKE.SKE`, `MINOTAUR.SKE` | decodificado | [`ske.md`](ske.md) |
 | `PLAY.VCR` | arquivo de recursos | **pendente** | — |
 | Vídeos | `Movies/*.AVI` (Indeo 3.2) | fora da primeira entrega | — |
 | Música | faixas de áudio do CD | fora da primeira entrega | — |

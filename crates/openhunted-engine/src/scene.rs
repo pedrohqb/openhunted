@@ -129,6 +129,8 @@ pub struct Scene {
     pub rng: Rng,
     /// Inimigos (por ora, minas) destruídos pelo jogador (`0x497348`).
     pub kills: i32,
+    /// Inimigos presentes no início da partida (minas e olhos-laser, por ora).
+    pub mines_at_start: i32,
     /// Cronômetro em tiques (`0x4972fc` = campo 1004 × 20; decrementado a cada tique).
     pub timer: i32,
     /// Limite de tempo da fase em segundos (campo 1004; 0 = sem limite).
@@ -140,6 +142,21 @@ pub const TIMER_TICKS_PER_SECOND: i32 = 20;
 
 /// Tipo de objeto do Jake.
 const JAKE: u32 = 1;
+
+/// A fase tem o Jake controlável no modo solo (como em `Scene::build`): um início de jogador
+/// de tipo 1 no modo solo ou, sem modo solo, algum objeto de tipo 1. Nas fases do Garathe
+/// (ainda sem personagem controlável) é `false`.
+pub fn has_controllable_jake(level: &Level) -> bool {
+    let objects: Vec<&LevelObject> = level
+        .objects
+        .iter()
+        .chain(level.cells.iter().flatten().flat_map(|c| c.objects.iter()))
+        .collect();
+    let solo = objects.iter().any(|o| is_player_start(o, SOLO));
+    objects
+        .iter()
+        .any(|o| o.kind == JAKE && (!solo || is_player_start(o, SOLO)))
+}
 /// Caixa de colisão de reserva do Jake (envolvente do `JK_DEFLT.BRD`).
 const JAKE_BOX: Rect = Rect {
     x: 2,
@@ -288,6 +305,7 @@ impl Scene {
             tick_count: 0,
             rng: Rng::new(0x4a4b_4531),
             kills: 0,
+            mines_at_start: 0,
             timer: 0,
             time_limit: 0,
         }
@@ -329,6 +347,7 @@ impl Scene {
             tick_count: 0,
             rng: Rng::new(0x4a4b_4531),
             kills: 0,
+            mines_at_start: 0,
             timer: 0,
             time_limit: 0,
         };
@@ -518,6 +537,13 @@ impl Scene {
                 s.projectile_borders.insert(name.to_string(), b);
             }
         }
+        s.mines_at_start = s
+            .entities
+            .iter()
+            .filter(|e| {
+                e.alive && matches!(e.behaviour, Behaviour::Mine(_) | Behaviour::LaserEye(_))
+            })
+            .count() as i32;
         Ok(s)
     }
 
@@ -796,6 +822,8 @@ impl Scene {
                 vy: s.vy * SUB,
                 prev: None,
                 spent: false,
+                // `spawn_shots` só cria as balas do Jake
+                player_shot: true,
             }),
         )
     }
@@ -879,8 +907,15 @@ impl Scene {
             // só quem trata a própria morte perde vida (minas, olhos-laser, barris); os
             // demais só param a bala. Contam para o jogador as minas e os olhos que a bala
             // dele mata.
+            let by_player = matches!(
+                self.entities[bi].behaviour,
+                Behaviour::Bullet(behaviour::bullet::BulletState {
+                    player_shot: true,
+                    ..
+                })
+            );
             if let Behaviour::Mine(_) = self.entities[vi].behaviour {
-                if self.entities[vi].health > 0 {
+                if self.entities[vi].health > 0 && by_player {
                     self.kills += 1;
                 }
                 self.entities[vi].health -= behaviour::bullet::DAMAGE;
@@ -893,7 +928,7 @@ impl Scene {
                     explosion: true,
                     ..Default::default()
                 };
-                if behaviour::interact::hurt(&mut self.entities[vi], &p) && fresh {
+                if behaviour::interact::hurt(&mut self.entities[vi], &p) && fresh && by_player {
                     self.kills += 1;
                 }
             }
@@ -1542,6 +1577,7 @@ mod tests {
             behaviour: Behaviour::Mine(MineState::new(0)),
         };
         mine.values = vec![0];
+        let mine2 = mine.clone();
         s.entities.push(mine);
         s.tick(SHOOT);
         for _ in 0..20 {
@@ -1553,6 +1589,28 @@ mod tests {
                 .any(|e| e.alive && e.kind == crate::entity::MINE)
         );
         assert_eq!(s.kills, 1, "mina morta pela bala conta para o jogador");
+        // bala que não é do jogador (inimigos atirando, no futuro): mata, mas não conta
+        s.entities.push(mine2);
+        let not_mine = |s: &mut Scene| {
+            for e in s.entities.iter_mut() {
+                if let Behaviour::Bullet(b) = &mut e.behaviour {
+                    b.player_shot = false;
+                }
+            }
+        };
+        for _ in 0..30 {
+            s.tick(SHOOT);
+            not_mine(&mut s);
+        }
+        for _ in 0..20 {
+            s.tick(0);
+        }
+        assert!(
+            !s.entities
+                .iter()
+                .any(|e| e.alive && e.kind == crate::entity::MINE)
+        );
+        assert_eq!(s.kills, 1);
         // (a animação sintética só tem o rótulo 1: a faísca `oex15` fica para o teste real)
         assert!(
             s.events

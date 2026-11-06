@@ -23,9 +23,10 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use openhunted_engine::{SCREEN_H, SCREEN_W};
-use sdl3::event::Event;
+use sdl3::event::{Event, WindowEvent};
 use sdl3::keyboard::{Keycode, Scancode};
 use sdl3::messagebox::{MessageBoxFlag, show_simple_message_box};
+use sdl3::mouse::MouseButton;
 use sdl3::pixels::PixelFormat;
 
 use shell::{App, Held, Key};
@@ -139,6 +140,11 @@ fn run() -> Result<(), String> {
         for ev in events.poll_iter() {
             match ev {
                 Event::Quit { .. } => break 'main,
+                // sem foco: solta o mouse e pausa o jogo
+                Event::Window {
+                    win_event: WindowEvent::FocusLost,
+                    ..
+                } => app.focus_lost(),
                 Event::KeyUp { .. } => app.key_up(),
                 Event::KeyDown {
                     keycode: Some(k),
@@ -149,7 +155,19 @@ fn run() -> Result<(), String> {
                     let (lx, ly) = to_logical(&canvas, x, y);
                     app.pointer_move(lx, ly);
                 }
-                Event::MouseButtonDown { x, y, .. } | Event::MouseButtonUp { x, y, .. } => {
+                // só o botão esquerdo clica
+                Event::MouseButtonDown {
+                    x,
+                    y,
+                    mouse_btn: MouseButton::Left,
+                    ..
+                }
+                | Event::MouseButtonUp {
+                    x,
+                    y,
+                    mouse_btn: MouseButton::Left,
+                    ..
+                } => {
                     let (lx, ly) = to_logical(&canvas, x, y);
                     app.pointer_move(lx, ly);
                     app.pointer_button(matches!(ev, Event::MouseButtonDown { .. }));

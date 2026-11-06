@@ -90,7 +90,8 @@ impl Mixer {
         Self {
             rate: rate.max(1),
             voices: Vec::with_capacity(CHANNELS),
-            acc: Vec::new(),
+            // 16 K quadros: cabe qualquer pedido do SDL sem alocar na thread de áudio
+            acc: Vec::with_capacity(16 * 1024),
         }
     }
 
@@ -253,9 +254,18 @@ impl sdl3::audio::AudioCallback<i16> for Feed {
     fn callback(&mut self, stream: &mut sdl3::audio::AudioStream, requested: i32) {
         // `requested` conta amostras (os dois canais): arredonda para quadros inteiros
         let n = (requested.max(0) as usize).div_ceil(2) * 2;
-        self.buf.resize(n, 0);
+        self.buf.resize(n, 0); // já reservado em `open`: não aloca no callback
         self.mixer.mix(&mut self.buf);
         let _ = stream.put_data_i16(&self.buf);
+    }
+}
+
+impl Drop for SdlOut {
+    /// O sdl3 0.20 libera o callback antes de destruir o fluxo; pausar e tomar o lock espera
+    /// um callback em curso e evita que a thread de áudio toque memória liberada.
+    fn drop(&mut self) {
+        let _ = self.stream.pause();
+        drop(self.stream.lock());
     }
 }
 
@@ -268,7 +278,7 @@ impl SdlOut {
         let spec = AudioSpec::new(Some(OUT_RATE as i32), Some(2), Some(AudioFormat::s16_sys()));
         let feed = Feed {
             mixer: Mixer::new(OUT_RATE),
-            buf: Vec::new(),
+            buf: Vec::with_capacity(32 * 1024),
         };
         let stream = device
             .open_playback_stream_with_callback::<Feed, i16>(&spec, feed)
