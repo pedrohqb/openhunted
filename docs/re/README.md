@@ -44,3 +44,12 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`fim-de-missao.md`](fim-de-missao.md): anúncio, tela de resultado (`SMISS.ITF`), pontuação e próxima missão.
 - [`pausa.md`](pausa.md): pausa, Esc e o menu da janela durante o jogo.
 - [`hud.md`](hud.md): barra de estado (`INVBAR01.BMP`) embaixo da vista.
+- [`olho-laser.md`](olho-laser.md): olho-laser (tipo 104) e raio laser (tipo 36).
+- [`barril-fogo-cerca.md`](barril-fogo-cerca.md): barril explosivo (28), fogo (42) e cerca elétrica (40).
+- [`objetos-tutorial.md`](objetos-tutorial.md): grafite (6), peça do carro (9), teletransporte (46), portas `OH` (50–52), plataformas `OPL` (56) e coletáveis.
+- [`escada-camadas.md`](escada-camadas.md): escadas e redes (zona 4) e troca de camada (zonas 1/2) do Jake.
+- [`missoes-tutorial.md`](missoes-tutorial.md): o que as `T_J_003`, `T_J_005` e `T_J_007` exigem para terminar.
+- [`ske.md`](ske.md): esqueleto `.SKE` (formato em `docs/formats/ske.md`) e a "animação com deslocamento" (desenho e velocidade pelo esqueleto).
+- [`jake-movimentos.md`](jake-movimentos.md): tabela de estados do Jake, despacho, pulo parado/para cima, impulso, aterrissagens 34/35/26/77–79, agachar/engatinhar, empurrar.
+- [`jake-escalada.md`](jake-escalada.md): zonas PR, corda/escada (30/32) com velocidades, barra e teto (103–107).
+- [`furtividade.md`](furtividade.md): FURTIVO (andar, estado 2), esconder-se (164–166) e o teste dos inimigos, especial BAIXO+ATIRAR, caixa e acerto do soco.
