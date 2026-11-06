@@ -452,7 +452,9 @@ fn real_skeletons() {
         ("JAKE.SKE", "JAKE.ANM", 1, 197, (20, 57)),
         ("MINOTAUR.SKE", "MINOTAUR.ANM", 2, 164, (28, 50)),
     ] {
-        let s = Skeleton::parse(ar.get(name).unwrap()).unwrap();
+        let data = ar.get(name).unwrap();
+        let (s, used) = Skeleton::parse_with_len(data).unwrap();
+        assert_eq!(used, data.len(), "{name}: o arquivo é lido até o fim");
         assert_eq!((s.id, s.entries.len(), (s.width, s.height)), (id, n, size));
         let full: Vec<_> = s.entries.iter().filter(|e| e.frames() > 0).collect();
         assert!(full.iter().all(|e| e.joints_per_frame == 18), "{name}");

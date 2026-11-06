@@ -565,6 +565,7 @@ impl Jake {
         if moves::wants_special(input) && self.health.hp > moves::SPECIAL_MIN_HP {
             self.body.vx = 0;
             self.set(State::Special(0));
+            self.tick_special(input, world);
             return true;
         }
         let mut w = if input & PUNCH != 0 {
@@ -1082,7 +1083,7 @@ impl Jake {
         }
         self.take_damage(self.ticks);
         if !self.controllable() {
-            self.tick_passive(world);
+            self.tick_passive(input, env);
             return;
         }
         self.switch_pose = self.switch_pose.saturating_sub(1);
@@ -1108,15 +1109,12 @@ impl Jake {
                 | State::Recover(_)
                 | State::Ready(..)
                 | State::Holster(_)
-        ) || (matches!(
-            self.state,
-            State::Crouch
-                | State::Crawl
+                | State::Crouch
                 | State::StandUp
                 | State::Hide
                 | State::Hidden
                 | State::Unhide
-        ) && self.free_above(world, 30));
+        ) || (self.state == State::Crawl && self.free_above(world, 30));
         let fired = !matches!(self.state, State::Fire { .. })
             && can_fire
             && shooting
@@ -1172,6 +1170,8 @@ impl Jake {
             _ => self.tick_move(input, env, jump_edge, side),
         }
         self.door_push = self.state == State::Push && self.ticks + 1 == self.len_of(100) as u32;
+        // a caixa do estado vale já para a física deste tique (o BRD troca com o estado)
+        self.fit_box(world);
         if matches!(self.state, State::Run | State::Push) {
             // −1 px por tique enquanto corre (sobe degraus pequenos), se houver espaço.
             let up = Rect {
@@ -1232,7 +1232,9 @@ impl Jake {
     }
 
     /// Tique dos estados sem entrada do jogador.
-    fn tick_passive(&mut self, world: &World) {
+    fn tick_passive(&mut self, input: u32, env: &Env) {
+        let world = env.world;
+        self.fit_box(world);
         match self.state {
             State::EnteringExit(n) => {
                 if n >= 10 {
@@ -1277,6 +1279,13 @@ impl Jake {
                 }
             }
             State::KnockedDown(_) => {
+                // arremessado (81/82): agarra a corda como nos pulos (`jake-escalada.md`)
+                if self.try_grab_in_air(input, env) {
+                    self.fit_box(world);
+                    self.animate();
+                    self.finish_tick();
+                    return;
+                }
                 let was_rising = self.body.vy < 0;
                 step(&mut self.body, world, true);
                 if self.body.on_ground && !was_rising {
@@ -1296,6 +1305,7 @@ impl Jake {
             }
             _ => {}
         }
+        self.fit_box(world);
         self.animate();
         self.finish_tick();
     }

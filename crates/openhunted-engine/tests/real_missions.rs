@@ -151,9 +151,25 @@ impl Pilot {
     }
 
     /// Atira nas minas e olhos-laser vivos da camada a menos de `range` px até não sobrar nenhuma (ou
-    /// `max` tiques): mira pelo lado e pela altura delas.
+    /// `max` tiques): mira pelo lado e pela altura delas. Desiste do alvo inalcançável
+    /// (atrás de parede): `STUCK` tiques empurrando sem nada morrer.
     fn fight(&mut self, range: i32, max: u32) {
+        const STUCK: u32 = 30;
+        let alive = |s: &Scene| {
+            s.entities
+                .iter()
+                .filter(|e| e.alive && ((e.kind == 102 && e.health > 0) || e.kind == 104))
+                .count()
+        };
+        let (mut pushing, mut left) = (0, alive(&self.s));
         for _ in 0..max {
+            let now = alive(&self.s);
+            let push = self.s.jake.as_ref().unwrap().state() == openhunted_engine::State::Push;
+            pushing = if push && now == left { pushing + 1 } else { 0 };
+            left = now;
+            if pushing >= STUCK {
+                return;
+            }
             let c = self.center();
             let layer = self.s.jake_layer;
             let target = self
@@ -327,8 +343,8 @@ fn t_j_007_can_be_won() {
 }
 
 /// T_J_005: corredor da linha 1 (chão em y = 244) com três fossos; pula os dois primeiros,
-/// explode os barris (x = 959) de longe com a pistola, cruza o fosso de fogo no pulo
-/// estendido e sai.
+/// confere que os barris (x = 959) explodiram (em cadeia, por uma bala perdida; senão atira
+/// neles de longe), cruza o fosso de fogo no pulo estendido e sai.
 #[test]
 fn t_j_005_can_be_won() {
     let Some(s) = load("T_J_005.LEV") else {
@@ -348,8 +364,10 @@ fn t_j_005_can_be_won() {
         p.jump_right();
         assert_eq!(p.feet(), 244, "caiu no fosso de x {edge}: {:?}", p.center());
     }
-    // barris de longe (raio 96 da explosão); os tiros nas minas ao lado deles costumam já
-    // tê-los explodido em cadeia
+    // Barris: na prática já explodiram. Uma bala perdida da primeira luta (contra a mina
+    // de x ≈ 261) segue pelo corredor e acerta a mina de x ≈ 935 por volta do tique 60; a
+    // explosão leva os dois barris e a mina de x ≈ 1003 em cadeia. O laço abaixo é só a
+    // reserva (atirar de longe, fora do raio 144) se essa cadeia deixar de acontecer.
     p.go_x(790);
     for _ in 0..300 {
         if !p.s.entities.iter().any(|e| e.alive && e.kind == 28) {

@@ -44,8 +44,12 @@ pub const BAR_BOX: Rect = Rect {
 
 /// Vida mínima para o especial (`tiro-jake.md`: "vida > 25").
 pub const SPECIAL_MIN_HP: i32 = 25;
-/// O especial custa 3 de vida ao próprio Jake (`+0x24c = 3`).
+/// Cada tique do efeito do especial custa 3 de vida ao próprio Jake (`+0x24c = 3`).
 pub const SPECIAL_SELF_DAMAGE: i32 = 3;
+/// Último tique do especial (registro `0x47d7bc`: janela 0..5 e `+0x18 = 5`).
+pub const SPECIAL_LAST_TICK: u32 = 5;
+/// Dano do especial nos "demais" por tique (linha `(1, 0, 9)` do `DAMAGE.TBL`).
+pub const SPECIAL_DAMAGE: i32 = 15;
 /// Alcance do especial: distância entre centros < 70 px (`0x00427643`).
 pub const SPECIAL_RADIUS: i32 = 70;
 
@@ -115,6 +119,19 @@ impl SpecialBlast {
             1 | 2 => SpecialEffect::Knockdown,
             19..=21 | 25..=27 | 29 | 36 | 99 | 100 | 106 | 108 => SpecialEffect::Destroy,
             _ => SpecialEffect::Damage,
+        }
+    }
+
+    /// Dano aos "demais" (`0x0043d629(jake, alvo, 9)`): a linha `(1, 0, 9)` do `DAMAGE.TBL`
+    /// (natureza 0, reação 2, 15 de dano, empurrão fixo (2, 0) pelo lado). O módulo 20 do
+    /// empurrão (`+0x20`) não é modelado.
+    pub fn damage(&self, c: (i32, i32)) -> Pending {
+        let dir = if c.0 >= self.center.0 { 1 } else { -1 };
+        Pending {
+            amount: SPECIAL_DAMAGE,
+            shove: true,
+            push: (2 * dir, 0),
+            ..Default::default()
         }
     }
 
@@ -305,14 +322,29 @@ impl Jake {
         self.probe(world, 0, -1) == CONTACT_SCENERY
     }
 
-    /// Ajusta a caixa ao estado (BRD da coluna `+0x01`): engatinhando, `JK_CRAWL`; puxando
-    /// o corpo na barra, `JK_BARUP`; senão a padrão. Só cresce se couber.
-    pub(super) fn fit_box(&mut self, world: &World) {
-        let want = match self.state {
+    /// Caixa do estado (BRD da coluna `+0x01`): engatinhando, `JK_CRAWL`; puxando o corpo
+    /// na barra, `JK_BARUP`; senão a padrão.
+    fn state_box(&self) -> Rect {
+        match self.state {
             State::Crouch | State::Crawl | State::StandUp => self.box_crawl,
             State::BarPull | State::BarUp | State::BarDown => self.box_bar,
             _ => self.box_default,
-        };
+        }
+    }
+
+    /// A caixa corrente é a do estado, salvo no ar ou nos estados sem controle (lá a
+    /// caixa padrão espera caber; ver `fit_box`).
+    pub fn box_matches_state(&self) -> bool {
+        self.body.boxr == self.state_box() || !self.controllable() || !self.body.on_ground
+    }
+
+    /// Ajusta a caixa ao estado, antes da física (o original troca o BRD com o estado).
+    /// Só cresce se couber. Regra (Ruling) para manter "em pé ⇒ caixa padrão": num estado
+    /// controlável no chão em que a caixa padrão não cabe (sob um teto baixo), o Jake fica
+    /// engatinhando (86), como o original faz no 77/78/86 com teto baixo; no ar e nos
+    /// estados sem controle a caixa menor fica até a padrão caber (o pouso decide).
+    pub(super) fn fit_box(&mut self, world: &World) {
+        let want = self.state_box();
         if self.body.boxr == want {
             return;
         }
@@ -326,6 +358,10 @@ impl Jake {
             && new.y + new.h <= old.y + old.h;
         if inside || !world.blocked(&new) {
             self.body.boxr = want;
+        } else if self.body.boxr == self.box_crawl && self.controllable() && self.body.on_ground {
+            self.body.vx = 0;
+            self.ske_req = None;
+            self.set(State::Crawl);
         }
     }
 
@@ -558,10 +594,11 @@ impl Jake {
                 }
             }
             State::Land(Landing::Medium | Landing::Long) => {
-                // dois quadros por tique; a velocidade usa o Δ do último (k = 1, só x)
+                // dois quadros por tique; a velocidade usa o Δ do último (k = 1, só x). Se
+                // um dos dois `0x423835` passa do último quadro, parado (`0x425946`).
                 let n = self.len_of(anim_of(self.state).0);
                 let t = self.ticks as usize;
-                if t >= 2 && 2 * t - 3 >= n - 1 {
+                if t >= 1 && 2 * t > n {
                     self.body.vx = 0;
                     self.set(State::Idle);
                     return;
@@ -610,25 +647,7 @@ impl Jake {
                 }
             }
             State::Stealth => self.decide_or_idle(input, env, jump_edge, side),
-            State::Special(t) => {
-                self.body.vx = 0;
-                if t == 0 {
-                    let b = self.body.bounds();
-                    self.special = Some(SpecialBlast {
-                        center: (b.x + b.w / 2, b.y + b.h / 2),
-                        layer: self.layer,
-                    });
-                    self.hurt(Pending {
-                        amount: SPECIAL_SELF_DAMAGE,
-                        ..Default::default()
-                    });
-                }
-                if self.anim_done() {
-                    self.set(State::Idle);
-                } else {
-                    self.state = State::Special(t + 1);
-                }
-            }
+            State::Special(_) => self.tick_special(input, world),
             State::Grab => {
                 self.body.vx = 0;
                 if pressed(SHOOT) {
@@ -664,6 +683,40 @@ impl Jake {
         }
     }
 
+    /// Especial (`0x0043b895`): CIMA ou um lado só (`test [0x487a2c], 0xd`) voltam na hora
+    /// ao `0x0043b43e`; senão `t = +0x260 + 1` e, na janela 0..5 do registro `0x47d7bc`, o
+    /// efeito `0x00427643` a cada tique (3 de vida ao Jake por tique, alvos a cada tique);
+    /// com `t > 5` (`+0x18`) volta ao `0x0043b43e`, que com BAIXO+ATIRAR recomeça o 9 no
+    /// mesmo tique. As duas setas de lado juntas contam como nenhuma (como em
+    /// `wants_special`), senão o original recursaria sem fim.
+    pub(super) fn tick_special(&mut self, input: u32, world: &World) {
+        let State::Special(t) = self.state else {
+            return;
+        };
+        self.body.vx = 0;
+        let sides = input & (LEFT | RIGHT);
+        let one_side = sides == LEFT || sides == RIGHT;
+        let t = t + 1;
+        if input & UP != 0 || one_side || t > SPECIAL_LAST_TICK {
+            self.state = State::Special(t);
+            let shoot = input & SHOOT != 0 && self.body.on_ground;
+            if !(shoot && self.start_fire(input, world)) {
+                self.set(State::Idle);
+            }
+            return;
+        }
+        self.state = State::Special(t);
+        let b = self.body.bounds();
+        self.special = Some(SpecialBlast {
+            center: (b.x + b.w / 2, b.y + b.h / 2),
+            layer: self.layer,
+        });
+        self.hurt(Pending {
+            amount: SPECIAL_SELF_DAMAGE,
+            ..Default::default()
+        });
+    }
+
     /// Escalar (`0x0042710a`).
     fn tick_climb(&mut self, input: u32, env: &Env, side: Option<bool>) {
         let pressed = |bit: u32| input & bit != 0;
@@ -694,6 +747,7 @@ impl Jake {
         let d = pressed(DOWN) && free(self.probe(world, 0, 1));
         let l = pressed(LEFT) && free(self.probe(world, -1, 0));
         let r = pressed(RIGHT) && free(self.probe(world, 1, 0));
+        // Ruling: CIMA+BAIXO com um lado (máscara 7, fora da tabela) anda de lado (32)
         let lateral = match (l, r) {
             (true, false) => -1,
             (false, true) => 1,
@@ -739,7 +793,7 @@ impl Jake {
             State::Crouch => {
                 if pressed(UP) {
                     self.set(State::StandUp);
-                } else if head && jump_edge && self.decide(input, env, jump_edge, side) {
+                } else if jump_edge && self.decide(input, env, jump_edge, side) {
                 } else if self.anim_done() {
                     self.set(State::Crawl);
                 } else {
@@ -1189,20 +1243,22 @@ mod tests {
             xs.push((x0 - j.body.x, j.frame()));
         }
         assert_eq!(
-            xs[..6],
-            [(0, 0), (4, 1), (6, 3), (9, 5), (11, 7), (13, 8)],
-            "vx 4, 2, 3, 2 (e o último quadro)"
+            xs[..5],
+            [(0, 0), (4, 1), (6, 3), (9, 5), (11, 7)],
+            "vx 4, 2, 3, 2"
         );
+        // 5º tique: o segundo `0x423835` passa do último quadro → parado (11 px ao todo)
+        assert_eq!(xs[5].0, 11);
         assert_eq!(j.state(), State::Idle);
         let mut j = jake(&w, 0);
         j.set(State::Land(Landing::Medium));
         let x0 = j.body.x;
-        for _ in 0..3 {
+        for _ in 0..2 {
             j.tick(0, &w);
         }
-        assert_eq!(x0 - j.body.x, 10, "35: 5 px em dois tiques");
+        assert_eq!(x0 - j.body.x, 5, "35: 5 px no 1º tique");
         j.tick(0, &w);
-        assert_eq!(j.state(), State::Idle);
+        assert_eq!((x0 - j.body.x, j.state()), (5, State::Idle), "parado no 2º");
     }
 
     #[test]
@@ -1335,6 +1391,21 @@ mod tests {
         let y = j.body.y;
         j.tick_in(0, &env);
         assert_eq!(j.body.y, y, "parado na corda");
+        // Ruling: CIMA+BAIXO com um lado (máscara 7) anda de lado (32)
+        j.tick_in(UP | DOWN | RIGHT, &env);
+        assert_eq!(j.state(), State::Climb(Climb::Side));
+        // arremessado (81/82) também agarra
+        let mut j = Jake::new(0, -300, BOX, lengths()).with_skeleton(skeleton());
+        j.tick_in(0, &env);
+        j.hurt(Pending {
+            knockdown: true,
+            push: (0, -4),
+            ..Default::default()
+        });
+        j.tick_in(0, &env);
+        assert!(matches!(j.state(), State::KnockedDown(_)));
+        j.tick_in(DOWN, &env);
+        assert_eq!(j.state(), State::Climb(Climb::Vertical));
     }
 
     #[test]
@@ -1473,29 +1544,226 @@ mod tests {
         assert_eq!((j.state(), j.body.boxr), (State::Idle, BOX));
     }
 
+    /// Beiral com 35 px livres sobre o chão (23 < 35 < 44): engatinhando passa, em pé não.
+    fn overhang() -> World {
+        World::new(vec![
+            floor(100),
+            Rect {
+                x: 100,
+                y: 0,
+                w: 400,
+                h: 65,
+            },
+        ])
+    }
+
+    /// Em pé, a caixa é sempre a padrão e nunca cruza o beiral.
+    fn assert_box_ok(j: &Jake, w: &World, t: usize) {
+        assert!(
+            j.box_matches_state(),
+            "tique {t}: {:?} com {:?}",
+            j.state(),
+            j.body.boxr
+        );
+        if j.body.boxr == BOX {
+            assert!(!w.blocked(&j.body.bounds()), "tique {t}: {:?}", j.body);
+        }
+    }
+
+    #[test]
+    fn standing_never_keeps_the_crawl_box_under_an_overhang() {
+        let w = overhang();
+        let mut j = jake(&w, 0);
+        // correndo em pé, para no beiral
+        for t in 0..40 {
+            j.tick(RIGHT, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        assert!(j.body.bounds().x + j.body.bounds().w <= 100);
+        // agacha, solta BAIXO e segura DIR: levanta e corre, mas não passa por baixo
+        for t in 0..5 {
+            j.tick(DOWN, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        assert_eq!(j.state(), State::Crawl);
+        for t in 0..60 {
+            j.tick(RIGHT, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        assert!(
+            j.body.bounds().x + j.body.bounds().w <= 100,
+            "{:?} {:?}",
+            j.state(),
+            j.body
+        );
+        // engatinhando passa; sob o beiral, soltar BAIXO e segurar DIR não o põe em pé
+        for t in 0..5 {
+            j.tick(DOWN, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        for t in 0..20 {
+            j.tick(DOWN | RIGHT, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        assert!(j.body.bounds().x > 110, "passou engatinhando: {:?}", j.body);
+        for input in [RIGHT, UP, JUMP, SHOOT, UP | RIGHT, 0, LEFT] {
+            for t in 0..12 {
+                j.tick(input, &w);
+                assert_box_ok(&j, &w, t);
+            }
+        }
+        // Ruling: o 85 sob o beiral (posto à mão) não atira nem pula em pé: fica no 86
+        let mut j = j.with_inventory(crate::jake::Inventory::from_points(&[
+            (0, 0),
+            (1, 20),
+            (1, 9),
+        ]));
+        for input in [SHOOT, JUMP] {
+            j.set(State::Crouch);
+            j.tick(input, &w);
+            assert_eq!((j.state(), j.body.boxr), (State::Crawl, CRAWL_BOX));
+        }
+    }
+
+    /// Teto a 6 px da cabeça em pé: a caixa padrão cabe, mas não há 30 px livres acima da
+    /// de engatinhar. Só o 86 exige os 30 px (`jake-movimentos.md`); o 85 e o esconder
+    /// atiram e pulam como em pé.
+    #[test]
+    fn headroom_gate_only_while_crawling() {
+        let w = World::new(vec![
+            floor(100),
+            Rect {
+                x: -500,
+                y: 0,
+                w: 1000,
+                h: 50,
+            },
+        ]);
+        let armed = |j: Jake| {
+            j.with_inventory(crate::jake::Inventory::from_points(&[
+                (0, 0),
+                (1, 20),
+                (1, 9),
+            ]))
+        };
+        let mut j = armed(jake(&w, 0));
+        j.tick(DOWN, &w);
+        assert_eq!(j.state(), State::Crouch);
+        j.tick(SHOOT, &w);
+        assert!(j.is_firing(), "85 atira: {:?}", j.state());
+        assert_box_ok(&j, &w, 0);
+        let mut j = armed(jake(&w, 0));
+        j.tick(DOWN, &w);
+        j.tick(JUMP, &w);
+        assert_eq!(j.state(), State::StandJump, "85 pula");
+        let mut j = armed(jake(&w, 0));
+        j.tick(UP, &w);
+        assert_eq!(j.state(), State::Hide);
+        j.tick(UP | SHOOT, &w);
+        assert!(j.is_firing(), "164 atira: {:?}", j.state());
+        // no 86 sem 30 px não atira nem pula
+        let mut j = armed(jake(&w, 0));
+        for _ in 0..5 {
+            j.tick(DOWN, &w);
+        }
+        assert_eq!(j.state(), State::Crawl);
+        j.tick(DOWN | SHOOT, &w);
+        j.tick(DOWN | JUMP, &w);
+        assert_eq!(j.state(), State::Crawl);
+    }
+
+    #[test]
+    fn knockdown_under_an_overhang_keeps_crawling_and_in_the_open_stands() {
+        let w = overhang();
+        let mut j = jake(&w, 60);
+        for _ in 0..5 {
+            j.tick(DOWN, &w);
+        }
+        for _ in 0..30 {
+            j.tick(DOWN | RIGHT, &w);
+        }
+        assert!(j.body.bounds().x > 110);
+        j.hurt(Pending {
+            knockdown: true,
+            push: (4, -6),
+            ..Default::default()
+        });
+        for t in 0..60 {
+            j.tick(0, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        assert!(matches!(j.state(), State::Crawl), "{:?}", j.state());
+        // ao ar livre, a derrubada devolve a caixa padrão
+        let w = World::new(vec![floor(100)]);
+        let mut j = jake(&w, 0);
+        for _ in 0..5 {
+            j.tick(DOWN, &w);
+        }
+        assert_eq!(j.state(), State::Crawl);
+        j.hurt(Pending {
+            knockdown: true,
+            push: (4, -6),
+            ..Default::default()
+        });
+        j.tick(0, &w);
+        assert!(matches!(j.state(), State::KnockedDown(_)));
+        assert_eq!(j.body.boxr, BOX, "a derrubada usa a caixa padrão");
+    }
+
     #[test]
     fn down_shoot_special_hurts_jake_and_reaches_70_px() {
         let w = World::new(vec![floor(100)]);
         let mut j = jake(&w, 0);
         j.health = Health { hp: 50, armor: 0 };
+        // o tique da entrada já aplica o efeito (`0x43b43e` chama o `0x43b895`: t = 1)
         j.tick(DOWN | SHOOT, &w);
-        assert_eq!((j.state(), j.label()), (State::Special(0), 9));
-        j.tick(DOWN | SHOOT, &w);
+        assert_eq!((j.state(), j.label()), (State::Special(1), 9));
         let b = j.special.expect("especial");
         let jb = j.body.bounds();
         assert_eq!(b.center, (jb.x + jb.w / 2, jb.y + jb.h / 2));
         assert!(b.reaches((b.center.0 + 69, b.center.1)));
         assert!(!b.reaches((b.center.0 + 50, b.center.1 + 50)));
-        j.tick(0, &w);
-        assert_eq!(j.health.hp, 47, "custa 3 de vida");
-        assert!(j.special.is_none(), "uma vez só");
-        for _ in 0..8 {
+        // janela 0..5 do registro `0x47d7bc`: efeito em t = 1..5, mesmo soltando as teclas
+        for t in 2..=5 {
             j.tick(0, &w);
+            assert_eq!(j.state(), State::Special(t));
+            assert!(j.special.is_some(), "efeito no t = {t}");
         }
+        // t = 6 > 5 (`+0x18`): volta ao `0x43b43e`; sem ATIRAR, parado
+        j.tick(0, &w);
         assert_eq!(j.state(), State::Idle);
+        assert!(j.special.is_none());
+        j.tick(0, &w);
+        assert_eq!(
+            j.health.hp,
+            50 - 5 * SPECIAL_SELF_DAMAGE,
+            "3 de vida por tique"
+        );
+        // segurando BAIXO+ATIRAR repete enquanto a vida passar de 25
+        let mut j = jake(&w, 0);
+        j.health = Health { hp: 50, armor: 0 };
+        let mut hits = 0;
+        for _ in 0..20 {
+            j.tick(DOWN | SHOOT, &w);
+            hits += usize::from(j.special.is_some());
+        }
+        assert_eq!(hits, 10, "dois ciclos de 5: no 11º tique a vida é 20");
+        assert!(j.health.hp <= SPECIAL_MIN_HP);
+        // CIMA ou um lado interrompem na hora
+        for stop in [UP, RIGHT, LEFT] {
+            let mut j = jake(&w, 0);
+            j.health = Health { hp: 50, armor: 0 };
+            j.tick(DOWN | SHOOT, &w);
+            j.tick(stop, &w);
+            assert!(!matches!(j.state(), State::Special(_)), "{stop:#x}");
+            assert!(j.special.is_none());
+        }
         assert_eq!(SpecialBlast::effect(19), SpecialEffect::Destroy);
         assert_eq!(SpecialBlast::effect(1), SpecialEffect::Knockdown);
         assert_eq!(SpecialBlast::effect(102), SpecialEffect::Damage);
+        let d = b.damage((b.center.0 - 10, b.center.1));
+        assert_eq!((d.amount, d.shove, d.push), (SPECIAL_DAMAGE, true, (-2, 0)));
+        assert!(!d.explosion, "natureza 0: o barril não explode");
         // com vida ≤ 25 é o tiro para baixo comum
         let mut j = jake(&w, 0).with_inventory(crate::jake::Inventory::from_points(&[
             (0, 0),
