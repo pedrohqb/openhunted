@@ -90,7 +90,7 @@ queda descontrolada 76. `+0x178 &= ~0x4000` nos pulos (passa a colidir com perso
 
 | Vem de | Estado (quadros) | Comportamento |
 |---|---|---|
-| 29 (médio) | 35 (3) | zera o deslocamento; anima **dois quadros por tique**; vx do esqueleto k = 1: 5 px; 2 tiques; depois parado |
+| 29 (médio) | 35 (3) | zera o deslocamento; anima **dois quadros por tique**; vx do esqueleto k = 1: 5 px no tique 1; parado no 2º (`0x4259c6`: se um dos dois `0x423835` passa do fim → parado) |
 | 28 (longo) | 34 (9) | idem; vx 4, 2, 3, 2 px nos tiques 1–4; parado no 5º |
 | 25 (queda) | 26 (12) | `0x00424385`: primeiro a decisão em pé (interrompível), senão anima até o fim → parado; sem velocidade própria (só desenho) |
 | 80 / 76 (descontrolada) | 77 → 78 → 79 | 77: com 25 px livres acima (`0x0040718d(0, −25)` = 0), primeiro a decisão em pé; na entrada, beirada (`0x00407d09`: a caixa cruza a divisa de dois blocos de 128 px e o chão não a cobre toda) → 162; fim → teto baixo: engatinhar (86), senão 78. 78: teto baixo ou BAIXO → 86; decisão em pé; fim → com `rand & 3 = 0` toca o 79 e fica parado, senão parado |
@@ -112,6 +112,13 @@ Os dois quadros por tique vêm de chamar `0x00423835` duas vezes; a velocidade u
 
 O tiro agachado é o mesmo de pé (`0x0043b43e`); BAIXO+ATIRAR é o especial
 (`furtividade.md`).
+
+**Ruling (OpenHunted)**: a caixa do estado vale já na física do tique em que o estado muda
+(o original troca o BRD com o estado). Num estado controlável no chão que pede a caixa
+padrão (em pé, tiro, pulo, esconder) sem que ela caiba sob um teto baixo, o Jake fica no
+86 com a caixa `JK_CRAWL`, como o original faz com teto baixo no 77/78/86. Só o 86 tem a
+porta dos 30 px; o 85, o 87 e o esconder (164–166) atiram e pulam como em pé. No ar e nos
+estados sem controle (derrubada etc.) a caixa menor fica até a padrão caber.
 
 ## Empurrar (100, 101) [confirmado]
 

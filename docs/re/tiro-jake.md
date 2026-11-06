@@ -136,7 +136,7 @@ de 3 a cada **6 tiques**. Soltando, sem mexer, o Jake fica no quadro até `t > 1
 | BAIXO (com ou sem ESQ+DIR) | **especial** se `+0x0c ≠ 0` e vida > 25; senão baixo (`+0x40/+0x44`) | mantém |
 
 **Especial** (estado 9, `j009`, 8 quadros, `0x43b895`; efeito `0x427643` na janela 0..5 do
-registro `0x47d7bc`): custa **3 de vida** ao Jake, pisca, e atinge objetos a até 140 px com
+registro `0x47d7bc`): custa **3 de vida por tique** ao Jake (5 tiques por uso, `furtividade.md`), pisca, e atinge objetos a até 140 px com
 as linhas do atacante 1, variantes 8/9 do `DAMAGE.TBL`. Atenção: BAIXO+ATIRAR com vida > 25
 faz isto em vez de mirar para baixo.
 

@@ -64,6 +64,9 @@ A cada tique:
 | BAIXO+ESQ / BAIXO+DIR | 30 | ao contrário | vertical, e `vx = −vy` / `vx = vy` |
 | ESQ ou DIR | 32 (`MNCLIMB2`) | laço para a frente | horizontal do rótulo 32 (50 px por ciclo de 7) |
 
+**Ruling (OpenHunted)**: CIMA+BAIXO com um lado (máscara 7, que a tabela não cobre) conta
+como só o lado: 32.
+
 O lado `+0x288` segue ESQ/DIR (todo tique), por isso o 32 anda para o lado pressionado. Não
 há tiro nem troca de arma na corda.
 

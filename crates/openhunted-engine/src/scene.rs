@@ -478,12 +478,23 @@ impl Scene {
                             .map_or((0, 0), |f| (i32::from(f.width), i32::from(f.height)));
                         let scale = object_scale(ta, tb, rw, rh);
                         let sc = |v: i32| v * scale.0 / scale.1.max(1);
-                        let skel = assets
+                        // o esqueleto do Jake tem id 1 (o do Garathe, 2)
+                        let skel = match assets
                             .archive()
                             .get("JAKE.SKE")
                             .and_then(openhunted_formats::Skeleton::parse)
-                            .ok()
-                            .map(|k| Skel::new(Rc::new(k), (sc(rw), sc(rh))));
+                        {
+                            Ok(k) if k.id == 1 => Some(Skel::new(Rc::new(k), (sc(rw), sc(rh)))),
+                            Ok(k) => {
+                                s.warnings
+                                    .push(format!("JAKE.SKE: id {} (esperado 1)", k.id));
+                                None
+                            }
+                            Err(e) => {
+                                s.warnings.push(format!("JAKE.SKE: {e}"));
+                                None
+                            }
+                        };
                         let brd = |name: &str, fallback: Rect| {
                             assets
                                 .archive()
@@ -1173,7 +1184,7 @@ impl Scene {
     }
 
     /// Especial BAIXO+ATIRAR (`0x00427643`): objetos vivos da camada a menos de 70 px do
-    /// centro do Jake. Projéteis somem; os demais levam o dano (as minas morrem).
+    /// centro do Jake. Projéteis somem; os demais levam o dano da variante 9 (15 por tique).
     fn apply_special(&mut self, b: SpecialBlast) {
         for e in self.entities.iter_mut().filter(|e| {
             e.alive && e.layer == b.layer && e.flags & 0x80003 == 0x80001 && e.present()
@@ -1185,11 +1196,17 @@ impl Scene {
                 crate::jake::SpecialEffect::Destroy => e.alive = false,
                 crate::jake::SpecialEffect::Knockdown => {}
                 crate::jake::SpecialEffect::Damage => {
-                    if let Behaviour::Mine(_) = e.behaviour {
-                        if e.health > 0 {
-                            self.kills += 1;
-                        }
-                        e.health = 0;
+                    // pelo mesmo caminho das balas: mina (vida), barril (natureza 0: nada) e
+                    // olho-laser (qualquer dano mata); a cerca não trata dano (como antes)
+                    let before = e.health;
+                    let fresh = matches!(&e.behaviour,
+                        Behaviour::LaserEye(s) if s.hurt.is_empty());
+                    let eye = matches!(e.behaviour, Behaviour::LaserEye(_));
+                    let hit = behaviour::interact::hurt(e, &b.damage(e.center()));
+                    let mine_died =
+                        matches!(e.behaviour, Behaviour::Mine(_)) && before > 0 && e.health <= 0;
+                    if mine_died || (hit && eye && fresh) {
+                        self.kills += 1;
                     }
                 }
             }
@@ -1568,6 +1585,33 @@ mod tests {
         (l, a)
     }
 
+    /// O `JAKE.SKE` precisa ter id 1 (o do Garathe é 2): senão o Jake fica sem esqueleto e
+    /// a cena avisa.
+    #[test]
+    fn jake_skeleton_must_have_id_1() {
+        let (l, _) = platform_level(0, 0x80089);
+        for (id, warned) in [(1, false), (2, true)] {
+            let ske = openhunted_formats::test_support::mkske(id, (20, 57), &[]);
+            let bmp = mkbmp(&[(20, 20, vec![1; 400])]);
+            let anm = mkanm();
+            let brd = openhunted_formats::test_support::mkbrd(&[(2, 0, 0, 60, 10)]);
+            let (map, vols) = mkarchive(&[(
+                "RESOURCE.001",
+                &[
+                    ("OAN00.BMP", bmp.as_slice()),
+                    ("OAN.ANM", anm.as_slice()),
+                    ("PL.BRD", brd.as_slice()),
+                    ("JAKE.SKE", ske.as_slice()),
+                ],
+            )]);
+            let mut a =
+                Assets::new(ResourceArchive::from_map(&map, |_| Ok(vols[0].1.clone())).unwrap());
+            let s = Scene::build(&l, &mut a).unwrap();
+            let w = s.warnings.iter().any(|w| w.starts_with("JAKE.SKE"));
+            assert_eq!(w, warned, "id {id}: {:?}", s.warnings);
+        }
+    }
+
     fn settle(l: &Level, mut a: Assets) -> crate::Body {
         let mut s = Scene::build(l, &mut a).unwrap();
         for _ in 0..20 {
@@ -1682,7 +1726,7 @@ mod tests {
     }
 
     /// Especial BAIXO+ATIRAR: a mina a menos de 70 px do centro do Jake morre (conta como
-    /// abatida), a de longe não; o Jake perde 3 de vida.
+    /// abatida), a de longe não; o Jake perde 3 de vida por tique do efeito (5 tiques).
     #[test]
     fn down_shoot_special_kills_near_mines() {
         use crate::behaviour::mine::MineState;
@@ -1712,7 +1756,10 @@ mod tests {
             e.y = jc.1;
         }
         s.entities[1].x = jc.0 + 40;
+        s.entities[1].health = 20;
+        // linha (1, qualquer, 9) do `DAMAGE.TBL`: 15 por tique do efeito
         s.tick(DOWN | SHOOT);
+        assert_eq!(s.entities[1].health, 5);
         s.tick(DOWN | SHOOT);
         let alive: Vec<bool> = s
             .entities
@@ -1722,8 +1769,14 @@ mod tests {
             .collect();
         assert_eq!(alive, vec![false, true]);
         assert_eq!(s.kills, 1);
-        s.tick(0);
-        assert_eq!(s.jake.as_ref().unwrap().health.hp, hp - 3);
+        for _ in 0..5 {
+            s.tick(0);
+        }
+        assert_eq!(
+            s.jake.as_ref().unwrap().health.hp,
+            hp - 15,
+            "3 por tique, 5 tiques"
+        );
     }
 
     /// A camada da cena acompanha a do Jake: os sólidos das células passam a ser os da

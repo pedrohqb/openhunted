@@ -891,7 +891,8 @@ fn t_j_007_layer_doors() {
 /// Fuzz da M6b: em toda fase solo com Jake, entradas aleatórias com CIMA, BAIXO, FURTIVO,
 /// ATIRAR e combinações (corda, camadas, esconder, agachar, barra, especial) não causam
 /// pânico nem põem o Jake dentro de um sólido da camada corrente que ele ainda não
-/// intersectava (a troca de camada recomeça a conta).
+/// intersectava (a troca de camada recomeça a conta); no chão e com controle, a caixa é a
+/// do estado (em pé, a padrão).
 #[test]
 fn random_moves_never_enter_solids() {
     use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, STEALTH, UP};
@@ -935,6 +936,12 @@ fn random_moves_never_enter_solids() {
             s.tick(input);
             let j = s.jake.as_ref().unwrap();
             assert_eq!(j.layer(), s.jake_layer, "{level}: camada da cena");
+            assert!(
+                j.box_matches_state(),
+                "{level}: caixa errada no tique {t} ({:?}, {:?})",
+                j.state(),
+                j.body
+            );
             let now = overlapped(&s, &j.body.bounds());
             if s.jake_layer == layer {
                 assert!(
