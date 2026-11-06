@@ -283,6 +283,41 @@ pub fn mkitf() -> Vec<u8> {
     v
 }
 
+/// Controle de uma interface sintética: (tipo, id, x, y, largura, altura, campo F, rótulo).
+pub type SynthControl = (u16, u16, i16, i16, u16, u16, u16, u16);
+
+/// Monta uma interface `.ITF` (versão 1103) com a animação `anim` e os controles dados,
+/// com origem `(-x, -y)` (como nos dados) e sem bloco `TAG:`.
+pub fn mkitf_controls(anim: &str, controls: &[SynthControl]) -> Vec<u8> {
+    let mut itf = b"TB".to_vec();
+    itf.extend(le16(&[1103]));
+    itf.extend_from_slice(anim.as_bytes());
+    itf.push(0);
+    itf.extend(le16(&[controls.len() as i32]));
+    for c in controls {
+        itf.extend(le16(&[c.0 as i32]));
+    }
+    for &(kind, id, x, y, w, h, f, label) in controls {
+        itf.extend(le16(&[
+            kind as i32,
+            id as i32,
+            0,
+            x as i32,
+            y as i32,
+            w as i32,
+            h as i32,
+            f as i32,
+            label as i32,
+            -(x as i32),
+            -(y as i32),
+        ]));
+        if kind == 4 {
+            itf.extend_from_slice(&[0; 18]);
+        }
+    }
+    tagged(b"ITF:", &itf)
+}
+
 /// Monta uma fonte `.PFT` com altura 2 e os glifos dados `(largura, pixels sem
 /// preenchimento)`, começando no caractere `first_char`.
 pub fn mkpft(first_char: u32, glyphs: &[(u32, Vec<u8>)]) -> Vec<u8> {

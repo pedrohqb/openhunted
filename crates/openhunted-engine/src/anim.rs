@@ -95,6 +95,16 @@ impl AnimPlayer {
         self.frame
     }
 
+    /// Número de quadros da sequência.
+    pub fn len(&self) -> usize {
+        self.end - self.start
+    }
+
+    /// Sequência vazia (nunca: tem ao menos um quadro).
+    pub fn is_empty(&self) -> bool {
+        self.end <= self.start
+    }
+
     /// Está no último quadro da sequência.
     pub fn is_last(&self) -> bool {
         self.frame + 1 >= self.end

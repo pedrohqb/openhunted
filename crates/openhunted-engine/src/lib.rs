@@ -14,6 +14,7 @@ pub mod physics;
 pub mod render;
 pub mod rng;
 pub mod scene;
+pub mod shell;
 pub mod sound;
 pub mod triggers;
 pub mod verdict;
@@ -26,6 +27,6 @@ pub use jake::{Jake, JumpKind, State};
 pub use physics::{Body, Rect, SUB, World, step};
 pub use render::{
     Framebuffer, SCREEN_H, SCREEN_W, background_index, clamp_camera, display_palette, draw_text,
-    measure_text,
+    measure_text, wrap_text,
 };
 pub use scene::{Layer, Marker, Scene, Sprite, TICK_MS};

@@ -4,21 +4,26 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use openhunted_formats::{Animation, Bitmap, ResourceArchive, Result};
+use openhunted_formats::{Animation, Bitmap, Font, ResourceArchive, Result};
 
-/// Cache de recursos decodificados, por nome (sem diferenciar maiúsculas).
+/// Cache de recursos decodificados, por nome (sem diferenciar maiúsculas). Clonar é barato:
+/// o arquivo de recursos é compartilhado e os caches são copiados (os recursos, também
+/// compartilhados).
+#[derive(Clone)]
 pub struct Assets {
-    archive: ResourceArchive,
+    archive: Rc<ResourceArchive>,
     bitmaps: HashMap<String, Rc<Bitmap>>,
     animations: HashMap<String, Rc<Animation>>,
+    fonts: HashMap<String, Rc<Font>>,
 }
 
 impl Assets {
     pub fn new(archive: ResourceArchive) -> Self {
         Self {
-            archive,
+            archive: Rc::new(archive),
             bitmaps: HashMap::new(),
             animations: HashMap::new(),
+            fonts: HashMap::new(),
         }
     }
 
@@ -47,6 +52,17 @@ impl Assets {
         let a = Rc::new(Animation::parse(data).map_err(|e| e.in_resource(name))?);
         self.animations.insert(key, a.clone());
         Ok(a)
+    }
+
+    pub fn font(&mut self, name: &str) -> Result<Rc<Font>> {
+        let key = name.to_uppercase();
+        if let Some(f) = self.fonts.get(&key) {
+            return Ok(f.clone());
+        }
+        let data = self.archive.get(name)?;
+        let f = Rc::new(Font::parse(data).map_err(|e| e.in_resource(name))?);
+        self.fonts.insert(key, f.clone());
+        Ok(f)
     }
 }
 

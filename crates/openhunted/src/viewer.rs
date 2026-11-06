@@ -4,6 +4,9 @@
 
 use std::path::Path;
 
+use std::rc::Rc;
+
+use openhunted_engine::shell::hud::{self, Character, HudState, VIEW_H};
 use openhunted_engine::{
     Assets, Event, Framebuffer, Outcome, SCREEN_H, SCREEN_W, Scene, TICK_MS, background_index,
     clamp_camera, display_palette, draw_text, measure_text,
@@ -24,7 +27,7 @@ const MODAL_MIN_MS: u32 = 500;
 const MODAL_MAX_MS: u32 = 15_000;
 /// Cor de fundo da caixa da dica (`0x45ca44`).
 const MODAL_FILL: u8 = 211;
-/// Cor do HUD e das mensagens de fim (branco da paleta do Windows).
+/// Cor do HUD de texto (sem `INVBAR01.BMP`) e da moldura de reserva (branco do Windows).
 const TEXT_COLOR: u8 = 255;
 
 /// Pixels de rolagem por quadro com uma seta pressionada.
@@ -65,6 +68,8 @@ pub struct Viewer {
     queued: std::collections::VecDeque<Modal>,
     /// Efeitos sonoros (sem eles, o jogo corre mudo).
     sfx: Option<crate::audio::Sfx>,
+    /// `INVBAR01.BMP`: a barra de estado embaixo da vista.
+    bar: Option<Rc<Bitmap>>,
 }
 
 impl Viewer {
@@ -72,9 +77,13 @@ impl Viewer {
     pub fn load(data: &Path, level: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let gd = open_data(data)?;
         let lv = Level::parse(&gd.levels()?.get(level)?).map_err(|e| e.in_resource(level))?;
-        let mut assets = Assets::new(gd.resources()?);
+        Self::from_level(&lv, Assets::new(gd.resources()?))
+    }
+
+    /// Monta a cena de uma fase já lida, com os recursos dados.
+    pub fn from_level(lv: &Level, mut assets: Assets) -> Result<Self, Box<dyn std::error::Error>> {
         let palette = display_palette(&Palette::parse(assets.archive().get(&lv.palette)?)?);
-        let scene = Scene::build(&lv, &mut assets)?;
+        let scene = Scene::build(lv, &mut assets)?;
         for w in &scene.warnings {
             eprintln!("aviso: {w}");
         }
@@ -93,6 +102,7 @@ impl Viewer {
             .and_then(|d| Bitmap::parse(d).ok())
             .map(|b| b.frames)
             .unwrap_or_default();
+        v.bar = v.assets.bitmap("INVBAR01.BMP").ok();
         Ok(v)
     }
 
@@ -117,6 +127,52 @@ impl Viewer {
             modal: None,
             queued: std::collections::VecDeque::new(),
             sfx: None,
+            bar: None,
+        }
+    }
+
+    /// Põe a câmera no Jake (centrado na vista do jogo), se houver.
+    pub fn follow(&mut self) {
+        if let Some((fx, fy)) = self.scene.focus() {
+            let view = (SCREEN_W as i32, VIEW_H);
+            let want = (fx - view.0 / 2, fy - view.1 / 2);
+            self.camera = clamp_camera((self.scene.width, self.scene.height), view, want);
+        }
+    }
+
+    #[cfg(test)]
+    pub fn scene_mut(&mut self) -> &mut Scene {
+        &mut self.scene
+    }
+
+    pub fn scene(&self) -> &Scene {
+        &self.scene
+    }
+
+    /// O que a barra de estado mostra. Sem o Jake (fases do Garathe, ainda sem personagem
+    /// controlável), a barra do Garathe zerada.
+    pub fn hud_state(&self) -> HudState {
+        let (character, health, armor, slots, weapon) = match self.scene.jake.as_ref() {
+            Some(j) => {
+                let s = j.inventory.slots;
+                // arma corrente: a pistola, se ele a tem; senão os punhos
+                let w = if s[openhunted_engine::jake::PISTOL].0 != 0 {
+                    openhunted_engine::jake::PISTOL
+                } else {
+                    1
+                };
+                (Character::Jake, j.health.hp, j.health.armor, s, w)
+            }
+            None => (Character::Garathe, 0, 0, [(0, 0); 30], 1),
+        };
+        HudState {
+            character,
+            health,
+            armor,
+            face_alt: false,
+            slots,
+            weapon,
+            timer: self.scene.timer,
         }
     }
 
@@ -125,15 +181,20 @@ impl Viewer {
         self.sfx = Some(sfx);
     }
 
-    /// Toca os sons de um tique, ouvidos do centro da câmera na camada do Jake.
-    fn play_sounds(&mut self, cues: &[openhunted_engine::sound::Cue]) {
+    /// Devolve os efeitos sonoros (para passá-los à próxima fase).
+    pub fn take_sound(&mut self) -> Option<crate::audio::Sfx> {
+        self.sfx.take()
+    }
+
+    /// Toca os sons de um tique, ouvidos do centro da vista do jogo na camada do Jake.
+    pub fn play_sounds(&mut self, cues: &[openhunted_engine::sound::Cue]) {
         let Some(sfx) = self.sfx.as_mut() else { return };
         if cues.is_empty() {
             return;
         }
         let listener = (
             self.camera.0 + SCREEN_W as i32 / 2,
-            self.camera.1 + SCREEN_H as i32 / 2,
+            self.camera.1 + VIEW_H / 2,
         );
         sfx.tick(self.assets.archive(), cues, listener, self.scene.jake_layer);
     }
@@ -196,7 +257,7 @@ impl Viewer {
             Action::End => x = i32::MAX,
             Action::ToggleOverlay => self.overlay = !self.overlay,
         }
-        let view = (SCREEN_W as i32, SCREEN_H as i32);
+        let view = (SCREEN_W as i32, VIEW_H);
         self.camera = clamp_camera((self.scene.width, self.scene.height), view, (x, y));
     }
 
@@ -235,8 +296,8 @@ impl Viewer {
             self.taps = 0;
             done += 1;
             if let Some((fx, fy)) = self.scene.focus() {
-                // A câmera segue o Jake, centrado na tela.
-                let view = (SCREEN_W as i32, SCREEN_H as i32);
+                // A câmera segue o Jake, centrado na vista do jogo (640×405).
+                let view = (SCREEN_W as i32, VIEW_H);
                 let want = (fx - view.0 / 2, fy - view.1 / 2);
                 self.camera = clamp_camera((self.scene.width, self.scene.height), view, want);
             }
@@ -335,42 +396,47 @@ impl Viewer {
         self.fb.blit(br, x + w - bw, y + h - bh, true);
     }
 
-    /// Desenha a cena e converte para RGBA (640 × 480 × 4 bytes).
-    pub fn render_rgba(&mut self, out: &mut [u8]) {
+    /// Desenha a vista do jogo (640×405), a barra de estado embaixo e a dica aberta.
+    pub fn render(&mut self) -> &Framebuffer {
         self.fb.clear(self.background);
         self.scene
             .draw(&mut self.assets, &mut self.fb, self.camera, self.overlay);
-        if let Some(font) = self.font.clone() {
-            if let Some(hud) = self.hud_text() {
-                draw_text(&mut self.fb, &font, 8, 8, &hud, Some(TEXT_COLOR));
+        let font = self.font.clone();
+        match (self.bar.clone(), font.as_ref()) {
+            (Some(bar), _) => {
+                let w = SCREEN_W as i32;
+                self.fb.fill_rect(0, VIEW_H, w, SCREEN_H as i32 - VIEW_H, 0);
+                let state = self.hud_state();
+                hud::draw_hud(&mut self.fb, &bar, 0, VIEW_H, w, &state);
             }
-            if let Some(m) = self.modal.clone() {
-                let (x, y, w, h, lines) = self.modal_box(&font, &m.text);
-                self.draw_frame(x, y, w, h);
-                let th = i32::from(font.height) + 2;
-                for (i, line) in lines.iter().enumerate() {
-                    draw_text(
-                        &mut self.fb,
-                        &font,
-                        x + 8,
-                        y + 4 + th * i as i32,
-                        line,
-                        None,
-                    );
+            (None, Some(font)) => {
+                if let Some(hud) = self.hud_text() {
+                    draw_text(&mut self.fb, font, 8, 8, &hud, Some(TEXT_COLOR));
                 }
             }
-            if let Some(o) = self.scene.outcome {
-                let msg = match o {
-                    Outcome::Victory => "MISSAO CUMPRIDA",
-                    Outcome::Defeat => "JAKE MORREU",
-                };
-                let (tw, th) = measure_text(&font, msg);
-                let (x, y) = ((SCREEN_W as i32 - tw) / 2, (SCREEN_H as i32 - th) / 2);
-                self.fb
-                    .fill_rect(x - 12, y - 8, tw + 24, th + 16, MODAL_FILL);
-                draw_text(&mut self.fb, &font, x, y, msg, Some(TEXT_COLOR));
+            (None, None) => {}
+        }
+        if let (Some(font), Some(m)) = (font, self.modal.clone()) {
+            let (x, y, w, h, lines) = self.modal_box(&font, &m.text);
+            self.draw_frame(x, y, w, h);
+            let th = i32::from(font.height) + 2;
+            for (i, line) in lines.iter().enumerate() {
+                draw_text(
+                    &mut self.fb,
+                    &font,
+                    x + 8,
+                    y + 4 + th * i as i32,
+                    line,
+                    None,
+                );
             }
         }
+        &self.fb
+    }
+
+    /// Desenha e converte para RGBA (640 × 480 × 4 bytes).
+    pub fn render_rgba(&mut self, out: &mut [u8]) {
+        self.render();
         for (o, &p) in out.chunks_exact_mut(4).zip(&self.fb.pixels) {
             o.copy_from_slice(&self.lut[p as usize]);
         }
