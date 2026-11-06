@@ -53,3 +53,12 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`jake-movimentos.md`](jake-movimentos.md): tabela de estados do Jake, despacho, pulo parado/para cima, impulso, aterrissagens 34/35/26/77–79, agachar/engatinhar, empurrar.
 - [`jake-escalada.md`](jake-escalada.md): zonas PR, corda/escada (30/32) com velocidades, barra e teto (103–107).
 - [`furtividade.md`](furtividade.md): FURTIVO (andar, estado 2), esconder-se (164–166) e o teste dos inimigos, especial BAIXO+ATIRAR, caixa e acerto do soco.
+- [`robo-seguranca.md`](robo-seguranca.md): robô de segurança voador (tipo 8, `OSR`): variantes, flutuação, patrulha, perseguição, canhões laser, queda e explosões.
+- [`robo-sentinela.md`](robo-sentinela.md): "Sentinel Robot" (tipo 10, `OSE`): casulo que abre e dispara balas 106.
+- [`bruiser.md`](bruiser.md): Bruiser (tipo 7): ativação por gatilhos, estados, tiros (balas 100 e foguetes), fogo, terremoto, esmagar, morte em 30 explosões.
+- [`gerador-minas.md`](gerador-minas.md): gerador de minas flutuantes (tipo 103, `OHG`).
+- [`mina-saltadora.md`](mina-saltadora.md): "Mine" (tipo 11, `OHS`): pula e explode ao toque.
+- [`anticorpo-manta.md`](anticorpo-manta.md): Anticorpo (105) e Manta (89), voadores com o mesmo código.
+- [`inimigos-menores.md`](inimigos-menores.md): gerador de dardos (87) e dardo (29), catapulta (41), Entidade (107), Camaleão (4) e Morte (3).
+- [`itens-campanha.md`](itens-campanha.md): itens da campanha (nas células), chaves 62–67 e portas, bandeiras 80–85, pistão 39, interruptor 74, tipo 0.
+- [`armas-2.md`](armas-2.md): espingarda, foguetes, estrelas ninja e granadas do Jake: descritores, registros, projéteis e dano.

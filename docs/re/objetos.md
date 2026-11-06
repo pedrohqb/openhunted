@@ -63,7 +63,7 @@ objeto (`+0x14c`, `+0x150`), em px da fase: o `OPL.BRD` tem uma caixa 18 × 5 a 
 de uma peça de 17 px de largura.
 
 Sinalizadores típicos: Jake 0x94801; peças `OPL` 0x80089 (sólidas para o Jake); obstáculos
-`OPO` 0x80089 sem BRD (não barram nada: ver abaixo); sentinelas `OHS` e minas `OHM` 0x80801 (sólidas); inimigos com 0x4000 (`OSE`, `OSR`,
+`OPO` 0x80089 sem BRD (não barram nada: ver abaixo); minas saltadoras `OHS` (tipo 11, "Mine"; a sentinela é `OSE`, tipo 10 — ver `robo-sentinela.md`) e minas `OHM` 0x80801 (sólidas); inimigos com 0x4000 (`OSE`, `OSR`,
 `OBR`, `ODG`, Minotauro…), que o Jake atravessa.
 
 ## Tipos 68–72: obstáculos `OPO` (`0x0040f324`) [confirmado]
