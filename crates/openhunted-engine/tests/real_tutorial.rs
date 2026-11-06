@@ -323,3 +323,43 @@ fn i_j_104_teleporter_pair_does_not_ping_pong() {
     // uma célula acima (o id 2 está na célula de cima)
     assert!(j.body.y < 336 - 100, "não chegou ao id 2: y {}", j.body.y);
 }
+
+/// I_J_107: os objetivos "acionar" são as seis granadas; apanhadas todas, estão cumpridos.
+#[test]
+fn i_j_107_collecting_the_grenades_meets_the_objectives() {
+    let Some(mut s) = load("I_J_107.LEV") else {
+        return;
+    };
+    let goals: Vec<(i32, i32, i32)> = s
+        .entities
+        .iter()
+        .filter(|e| e.objective & verdict::OBJ_ACTIVATE != 0 && e.kind == 26)
+        .map(|e| (e.x, e.y, e.layer))
+        .collect();
+    assert_eq!(goals.len(), 6);
+    assert!(!verdict::objectives_met(&s.entities, s.jake.as_ref()));
+    for (x, y, layer) in goals {
+        s.jake.as_mut().unwrap().set_layer(layer);
+        s.set_jake_layer(layer);
+        place(&mut s, x - 4, y - 30, 3);
+    }
+    let left = s
+        .entities
+        .iter()
+        .filter(|e| e.kind == 26 && e.objective & verdict::OBJ_ACTIVATE != 0 && e.alive)
+        .count();
+    assert_eq!(left, 0, "granadas não apanhadas");
+    assert!(verdict::objectives_met(&s.entities, s.jake.as_ref()));
+}
+
+/// I_J_005: os objetos "acionar" são de tipos ainda estáticos; não impedem os objetivos.
+#[test]
+fn i_j_005_static_activate_objects_do_not_block_the_objectives() {
+    let Some(s) = load("I_J_005.LEV") else {
+        return;
+    };
+    assert!(s.entities.iter().any(|e| {
+        e.objective & verdict::OBJ_ACTIVATE != 0 && matches!(e.behaviour, Behaviour::Static)
+    }));
+    assert!(verdict::objectives_met(&s.entities, s.jake.as_ref()));
+}
