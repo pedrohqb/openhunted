@@ -960,15 +960,12 @@ impl Jake {
                 | State::Recover
                 | State::Ready(_)
                 | State::Holster
-        ) || (matches!(
-            self.state,
-            State::Crouch
-                | State::Crawl
+                | State::Crouch
                 | State::StandUp
                 | State::Hide
                 | State::Hidden
                 | State::Unhide
-        ) && self.free_above(world, 30));
+        ) || (self.state == State::Crawl && self.free_above(world, 30));
         let fired = !matches!(self.state, State::Fire { .. })
             && can_fire
             && shooting

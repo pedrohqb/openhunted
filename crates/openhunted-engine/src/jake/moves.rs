@@ -792,7 +792,7 @@ impl Jake {
             State::Crouch => {
                 if pressed(UP) {
                     self.set(State::StandUp);
-                } else if head && jump_edge && self.decide(input, env, jump_edge, side) {
+                } else if jump_edge && self.decide(input, env, jump_edge, side) {
                 } else if self.anim_done() {
                     self.set(State::Crawl);
                 } else {
@@ -1596,6 +1596,64 @@ mod tests {
                 assert_box_ok(&j, &w, t);
             }
         }
+        // Ruling: o 85 sob o beiral (posto à mão) não atira nem pula em pé: fica no 86
+        let mut j = j.with_inventory(crate::jake::Inventory::from_points(&[
+            (0, 0),
+            (1, 20),
+            (1, 9),
+        ]));
+        for input in [SHOOT, JUMP] {
+            j.set(State::Crouch);
+            j.tick(input, &w);
+            assert_eq!((j.state(), j.body.boxr), (State::Crawl, CRAWL_BOX));
+        }
+    }
+
+    /// Teto a 6 px da cabeça em pé: a caixa padrão cabe, mas não há 30 px livres acima da
+    /// de engatinhar. Só o 86 exige os 30 px (`jake-movimentos.md`); o 85 e o esconder
+    /// atiram e pulam como em pé.
+    #[test]
+    fn headroom_gate_only_while_crawling() {
+        let w = World::new(vec![
+            floor(100),
+            Rect {
+                x: -500,
+                y: 0,
+                w: 1000,
+                h: 50,
+            },
+        ]);
+        let armed = |j: Jake| {
+            j.with_inventory(crate::jake::Inventory::from_points(&[
+                (0, 0),
+                (1, 20),
+                (1, 9),
+            ]))
+        };
+        let mut j = armed(jake(&w, 0));
+        j.tick(DOWN, &w);
+        assert_eq!(j.state(), State::Crouch);
+        j.tick(SHOOT, &w);
+        assert!(j.is_firing(), "85 atira: {:?}", j.state());
+        assert_box_ok(&j, &w, 0);
+        let mut j = armed(jake(&w, 0));
+        j.tick(DOWN, &w);
+        j.tick(JUMP, &w);
+        assert_eq!(j.state(), State::StandJump, "85 pula");
+        let mut j = armed(jake(&w, 0));
+        j.tick(UP, &w);
+        assert_eq!(j.state(), State::Hide);
+        j.tick(UP | SHOOT, &w);
+        assert!(j.is_firing(), "164 atira: {:?}", j.state());
+        // no 86 sem 30 px não atira nem pula
+        let mut j = armed(jake(&w, 0));
+        for _ in 0..5 {
+            j.tick(DOWN, &w);
+        }
+        assert_eq!(j.state(), State::Crawl);
+        j.tick(DOWN | SHOOT, &w);
+        j.tick(DOWN | JUMP, &w);
+        assert_eq!(j.state(), State::Crawl);
     }
 
     #[test]

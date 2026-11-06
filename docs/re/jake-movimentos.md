@@ -113,6 +113,13 @@ Os dois quadros por tique vêm de chamar `0x00423835` duas vezes; a velocidade u
 O tiro agachado é o mesmo de pé (`0x0043b43e`); BAIXO+ATIRAR é o especial
 (`furtividade.md`).
 
+**Ruling (OpenHunted)**: a caixa do estado vale já na física do tique em que o estado muda
+(o original troca o BRD com o estado). Num estado controlável no chão que pede a caixa
+padrão (em pé, tiro, pulo, esconder) sem que ela caiba sob um teto baixo, o Jake fica no
+86 com a caixa `JK_CRAWL`, como o original faz com teto baixo no 77/78/86. Só o 86 tem a
+porta dos 30 px; o 85, o 87 e o esconder (164–166) atiram e pulam como em pé. No ar e nos
+estados sem controle (derrubada etc.) a caixa menor fica até a padrão caber.
+
 ## Empurrar (100, 101) [confirmado]
 
 100 (`PUSHSHLD`): ESQ/DIR contra parede; anima 100 até o fim → 101 (`0x00425d04`). Em 101:
