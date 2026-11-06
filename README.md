@@ -21,7 +21,8 @@ de uma camada à outra com CIMA/BAIXO, e o cenário sólido passa a ser o da cam
 sem zona esconde o Jake contra a parede; BAIXO agacha e engatinha (sob teto baixo não
 levanta); o pulo para cima contra um teto de cenário pendura na barra (mão ante mão, puxar o
 corpo). BAIXO+ATIRAR com vida acima de 25 é o especial: custa 3 de vida e destrói ou fere o
-que estiver a menos de 70 px.
+que estiver a menos de 70 px. Com os objetos da M6a, as missões tutoriais `T_J_003`, `T_J_005`
+e `T_J_007` podem ser vencidas de ponta a ponta (testes `t_j_00x_can_be_won`).
 
 **M6a: os objetos das missões tutoriais `T_J_003/005/007`.** O olho-laser varre o teto, vê
 o Jake dentro do cone do feixe e dispara rajadas de raios (5 de dano com tranco; morre com um
