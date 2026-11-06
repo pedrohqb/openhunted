@@ -65,6 +65,11 @@ fn i16_at(data: &[u8], off: usize) -> Result<i16> {
 impl Skeleton {
     /// Lê um recurso `.SKE`.
     pub fn parse(data: &[u8]) -> Result<Self> {
+        Self::parse_with_len(data).map(|(s, _)| s)
+    }
+
+    /// Lê um recurso `.SKE` e devolve também quantos bytes foram consumidos.
+    pub fn parse_with_len(data: &[u8]) -> Result<(Self, usize)> {
         if !data.starts_with(SIGNATURE) {
             let n = data.len().min(SIGNATURE.len());
             return Err(FormatError::BadMagic {
@@ -137,12 +142,15 @@ impl Skeleton {
                 joints,
             });
         }
-        Ok(Skeleton {
-            id,
-            width,
-            height,
-            entries,
-        })
+        Ok((
+            Skeleton {
+                id,
+                width,
+                height,
+                entries,
+            },
+            p,
+        ))
     }
 
     /// Entrada do rótulo `label`, se houver e tiver quadros.

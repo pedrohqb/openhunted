@@ -470,12 +470,23 @@ impl Scene {
                             .map_or((0, 0), |f| (i32::from(f.width), i32::from(f.height)));
                         let scale = object_scale(ta, tb, rw, rh);
                         let sc = |v: i32| v * scale.0 / scale.1.max(1);
-                        let skel = assets
+                        // o esqueleto do Jake tem id 1 (o do Garathe, 2)
+                        let skel = match assets
                             .archive()
                             .get("JAKE.SKE")
                             .and_then(openhunted_formats::Skeleton::parse)
-                            .ok()
-                            .map(|k| Skel::new(Rc::new(k), (sc(rw), sc(rh))));
+                        {
+                            Ok(k) if k.id == 1 => Some(Skel::new(Rc::new(k), (sc(rw), sc(rh)))),
+                            Ok(k) => {
+                                s.warnings
+                                    .push(format!("JAKE.SKE: id {} (esperado 1)", k.id));
+                                None
+                            }
+                            Err(e) => {
+                                s.warnings.push(format!("JAKE.SKE: {e}"));
+                                None
+                            }
+                        };
                         let brd = |name: &str, fallback: Rect| {
                             assets
                                 .archive()
@@ -1369,6 +1380,33 @@ mod tests {
         )]);
         let a = Assets::new(ResourceArchive::from_map(&map, |_| Ok(vols[0].1.clone())).unwrap());
         (l, a)
+    }
+
+    /// O `JAKE.SKE` precisa ter id 1 (o do Garathe é 2): senão o Jake fica sem esqueleto e
+    /// a cena avisa.
+    #[test]
+    fn jake_skeleton_must_have_id_1() {
+        let (l, _) = platform_level(0, 0x80089);
+        for (id, warned) in [(1, false), (2, true)] {
+            let ske = openhunted_formats::test_support::mkske(id, (20, 57), &[]);
+            let bmp = mkbmp(&[(20, 20, vec![1; 400])]);
+            let anm = mkanm();
+            let brd = openhunted_formats::test_support::mkbrd(&[(2, 0, 0, 60, 10)]);
+            let (map, vols) = mkarchive(&[(
+                "RESOURCE.001",
+                &[
+                    ("OAN00.BMP", bmp.as_slice()),
+                    ("OAN.ANM", anm.as_slice()),
+                    ("PL.BRD", brd.as_slice()),
+                    ("JAKE.SKE", ske.as_slice()),
+                ],
+            )]);
+            let mut a =
+                Assets::new(ResourceArchive::from_map(&map, |_| Ok(vols[0].1.clone())).unwrap());
+            let s = Scene::build(&l, &mut a).unwrap();
+            let w = s.warnings.iter().any(|w| w.starts_with("JAKE.SKE"));
+            assert_eq!(w, warned, "id {id}: {:?}", s.warnings);
+        }
     }
 
     fn settle(l: &Level, mut a: Assets) -> crate::Body {
