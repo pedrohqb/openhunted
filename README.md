@@ -11,6 +11,15 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M5: as telas em volta do jogo.** O jogo abre no menu principal original (`SMAIN.ITF`, com
+fogo, faíscas e botões animados, mouse ou teclado); "New Game" começa a campanha solo na
+primeira missão do `ENGLEVEL.TXT`, com o briefing (`SLEVD.ITF`: título e descrição, rolagem,
+GO/CANCEL) sobre o primeiro quadro da fase. A partida ocupa 640×405 com a barra de estado
+original embaixo (`INVBAR01.BMP`: vida, rosto, armadura, armas com munição, cronômetro de
+rolo); P ou Pause pausa ("GAME PAUSED"). No fim, a tela de resultado (`SMISS.ITF`) conta
+mortos, pontos e bônus de vitória, guarda o recorde da missão na sessão e oferece REPLAY,
+NEXT (a próxima missão solo, mesmo que ainda não seja jogável) e MAIN MENU.
+
 **M4c: efeitos sonoros.** **M4b: a pistola.** **M4a: a primeira missão é jogável de ponta a ponta.** Na `T_J_001`, o
 Jake corre, pula e cai, colide com o cenário e com os objetos sólidos, apanha a vida e a
 armadura, lê as dicas do tutorial, atira com a pistola (rajadas de 3, mira para cima e nas
@@ -27,18 +36,19 @@ estado em [`docs/formats/`](docs/formats/README.md)); M2 visualizador de fase; M
 corre e pula; M3b objetos sólidos e presença por modo de jogo.
 
 Ainda não há: as outras armas, o soco e a troca de arma; inimigos ativos, escadas, furtividade,
-música, os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, menu,
-telas de vitória e derrota do original, outras missões, o Garathe. Os obstáculos `OPO` (gotas, bloco que cai,
+música, os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, a
+abertura (logotipo, filme, história, créditos), os demais botões do menu (carregar, escolher
+missão, opções, dispositivos, heróis, ajuda, dois jogadores), tesouros e segredos, gravação de
+recordes e de jogo, outras missões jogáveis, o Garathe. Os obstáculos `OPO` (gotas, bloco que cai,
 portão) ainda não agem. Nas missões do Garathe não há personagem controlável (as setas rolam a
 tela).
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
 reversa, em [`docs/re/`](docs/re/).
 
-## Visualizador de fase (M2)
+## Jogar
 
-O executável `openhunted` abre uma fase numa janela, com o cenário, as decorações e os objetos
-animados. Ainda não há jogabilidade.
+O executável `openhunted` abre o menu principal do jogo.
 
 ```sh
 # com a SDL3 instalada no sistema (ex.: CachyOS/Arch: pacman -S sdl3)
@@ -48,15 +58,21 @@ cargo run --release -p openhunted -- --data /caminho/Hunter_Hunted.iso
 cargo run --release -p openhunted --features bundled-sdl -- --data /caminho/Hunter_Hunted.iso
 ```
 
-Opções: `--level T_J_001.LEV` (padrão: o primeiro tutorial do Jake), `--frames N` (fecha depois
-de N quadros). Teclas: setas movem o Jake, espaço pula (correndo, o pulo escolhe a distância
-conforme o chão adiante), Ctrl atira (segurando, rajadas; com as setas mira para cima e nas
-diagonais) e CIMA usa a saída quando ele está parado diante dela; a câmera o
-acompanha. A dica do tutorial pausa o jogo e fecha ao soltar uma tecla. Em fases sem o Jake, as setas rolam a tela,
-PageUp/PageDown pulam uma tela e Home/End vão às pontas. Tab mostra as caixas de colisão e os
-objetos de lógica; Esc sai. O som sai pelo dispositivo de áudio padrão; sem ele, o jogo avisa
-uma vez e segue mudo. A variável `OPENHUNTED_DATA`
-substitui `--data`.
+Opções: `--level T_J_001.LEV` (pula o menu e abre o briefing dessa fase), `--frames N` (fecha
+depois de N quadros). A variável `OPENHUNTED_DATA` substitui `--data`.
+
+Nas telas: o mouse aponta e clica; as setas levam o ponteiro ao botão mais próximo naquela
+direção e Enter ou espaço clicam; Esc cancela (no briefing, volta; no resultado vindo do jogo,
+nada; no menu, sai do jogo). No briefing, CIMA/BAIXO rolam o texto longo. Na tela de
+resultado, uma tecla salta a contagem.
+
+No jogo: setas movem o Jake, espaço pula (correndo, o pulo escolhe a distância conforme o chão
+adiante), Ctrl atira (segurando, rajadas; com as setas mira para cima e nas diagonais) e CIMA
+usa a saída quando ele está parado diante dela; a câmera o acompanha. P ou Pause pausa (Enter,
+espaço ou OKAY retomam). A dica do tutorial pausa o jogo e fecha ao soltar uma tecla. Esc não
+faz nada (como no original). Em fases sem o Jake, as setas rolam a tela, PageUp/PageDown pulam
+uma tela e Home/End vão às pontas. Tab mostra as caixas de colisão e os objetos de lógica. O
+som sai pelo dispositivo de áudio padrão; sem ele, o jogo avisa uma vez e segue mudo.
 
 Para renderizar sem janela: `ohtool --data … render T_J_001.LEV --out quadro.png [--camera X,Y]`.
 

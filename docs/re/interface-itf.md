@@ -71,6 +71,11 @@ posição `(x + origem_x, y + origem_y)`; o quadro da `ANM` tem seu próprio des
 dados, origem = `(−x, −y)` quase sempre: os quadros da `ANM` já vêm com a posição absoluta na
 tela 640×480. O tipo 0 chama antes a rotina própria `+0x5c`, se houver.
 
+**Paleta**: o `PAL:` das `ANM` das telas aponta `world1.pal`, que não existe; as telas usam a
+`WORLD.PAL` carregada na inicialização (`menu.md`, passo 5). [confirmado pela imagem: com
+`SMAIN.PAL` ou `INTRFACE.PAL` as cores do `SMAINBAK.BMP` saem erradas; com a `WORLD.PAL`,
+certas]
+
 Texto num controle (`0x44214c(controle, texto)`): recorta no retângulo, redesenha o controle
 de fundo (id arredondado para a centena: 25005 → 25000) para apagar, e escreve o texto
 **centrado** na horizontal e na vertical, com a fonte e a cor correntes (`0x45d32c(cor)`).

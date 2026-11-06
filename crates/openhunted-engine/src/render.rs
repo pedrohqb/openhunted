@@ -193,6 +193,29 @@ pub fn draw_text(
     }
 }
 
+/// Quebra `text` em linhas de até `width` px, por palavras; `\n` força a quebra (linhas
+/// vazias ficam). Uma palavra mais larga que `width` ocupa a linha sozinha.
+pub fn wrap_text(font: &openhunted_formats::Font, text: &str, width: i32) -> Vec<String> {
+    let mut lines = Vec::new();
+    for para in text.split('\n') {
+        let mut line = String::new();
+        for word in para.split_whitespace() {
+            let candidate = if line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{line} {word}")
+            };
+            if line.is_empty() || measure_text(font, &candidate).0 <= width {
+                line = candidate;
+            } else {
+                lines.push(std::mem::replace(&mut line, word.to_string()));
+            }
+        }
+        lines.push(line);
+    }
+    lines
+}
+
 /// As 20 cores estáticas do Windows de 256 cores (índices 0–9 e 246–255).
 const WINDOWS_STATIC: [(u8, [u8; 3]); 20] = [
     (0, [0, 0, 0]),

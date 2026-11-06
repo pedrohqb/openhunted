@@ -127,7 +127,16 @@ pub struct Scene {
     pub outcome: Option<Outcome>,
     pub tick_count: u32,
     pub rng: Rng,
+    /// Inimigos (por ora, minas) destruídos pelo jogador (`0x497348`).
+    pub kills: i32,
+    /// Cronômetro em tiques (`0x4972fc` = campo 1004 × 20; decrementado a cada tique).
+    pub timer: i32,
+    /// Limite de tempo da fase em segundos (campo 1004; 0 = sem limite).
+    pub time_limit: i32,
 }
+
+/// Tiques por segundo do cronômetro (`0x43c95c`).
+pub const TIMER_TICKS_PER_SECOND: i32 = 20;
 
 /// Tipo de objeto do Jake.
 const JAKE: u32 = 1;
@@ -232,6 +241,9 @@ impl Scene {
             outcome: None,
             tick_count: 0,
             rng: Rng::new(0x4a4b_4531),
+            kills: 0,
+            timer: 0,
+            time_limit: 0,
         }
     }
 
@@ -270,6 +282,9 @@ impl Scene {
             outcome: None,
             tick_count: 0,
             rng: Rng::new(0x4a4b_4531),
+            kills: 0,
+            timer: 0,
+            time_limit: 0,
         };
         let mut jake_layer = 0;
         let mut jake_flags = 0;
@@ -441,6 +456,8 @@ impl Scene {
             .collect();
         s.cell_world = World::new(s.cell_solids.clone());
         s.rebuild_world();
+        s.time_limit = i32::from(level.field_1004.max(0));
+        s.timer = s.time_limit * TIMER_TICKS_PER_SECOND;
         if let Ok(res) = assets.archive().get("WIZARD.RES") {
             s.hints = openhunted_formats::parse_text_list(res);
         }
@@ -512,6 +529,11 @@ impl Scene {
         }
     }
 
+    /// A fase tem limite de tempo e o cronômetro chegou a 0.
+    pub fn timed_out(&self) -> bool {
+        self.time_limit > 0 && self.timer <= 0
+    }
+
     /// Centro do Jake, para a câmera seguir.
     pub fn focus(&self) -> Option<(i32, i32)> {
         self.jake.as_ref().map(|j| {
@@ -543,7 +565,14 @@ impl Scene {
                 self.try_exit();
             }
             self.tick_entities();
-            let result = verdict::evaluate(&self.entities, self.jake.as_ref());
+            if self.timer > 0 {
+                self.timer -= 1;
+            }
+            let mut result = verdict::evaluate(&self.entities, self.jake.as_ref());
+            // tempo esgotado numa fase com limite → derrota (`0x43cdf0`)
+            if result.is_none() && self.timed_out() {
+                result = Some(Outcome::Defeat);
+            }
             if let Some(o) = self.streak.push(result) {
                 self.outcome = Some(o);
                 self.events.push(Event::Outcome(o));
@@ -793,6 +822,9 @@ impl Scene {
             // só quem trata a própria morte perde vida (por ora, as minas); os demais só
             // param a bala
             if let Behaviour::Mine(_) = self.entities[vi].behaviour {
+                if self.entities[vi].health > 0 {
+                    self.kills += 1;
+                }
                 self.entities[vi].health -= behaviour::bullet::DAMAGE;
                 self.entities[vi].health = 0;
             }
@@ -1142,6 +1174,37 @@ mod tests {
         );
     }
 
+    /// Cronômetro (`0x4972fc`): conta para baixo; esgotado numa fase com limite, derrota.
+    #[test]
+    fn timer_counts_down_and_running_out_loses() {
+        let mut s = Scene::empty(640, 480);
+        s.time_limit = 2;
+        s.timer = 2 * TIMER_TICKS_PER_SECOND;
+        for _ in 0..39 {
+            s.tick(0);
+        }
+        assert_eq!(s.timer, 1);
+        assert!(!s.timed_out());
+        s.tick(0);
+        assert!(s.timed_out());
+        // o veredito ainda precisa de 40 tiques seguidos
+        for _ in 0..38 {
+            s.tick(0);
+        }
+        assert_eq!(s.outcome, None);
+        s.tick(0);
+        assert_eq!(s.outcome, Some(Outcome::Defeat));
+        let mut free = Scene::empty(640, 480);
+        for _ in 0..100 {
+            free.tick(0);
+        }
+        assert_eq!(
+            (free.timer, free.outcome),
+            (0, None),
+            "sem limite: 0000 e nada"
+        );
+    }
+
     /// Duas minas a 20 px uma da outra e o Jake encostado na primeira: a primeira explode no
     /// contato, a explosão fere o Jake e mata a segunda em cadeia.
     #[test]
@@ -1185,6 +1248,7 @@ mod tests {
             vec![false, false],
             "as duas minas explodem (em cadeia)"
         );
+        assert_eq!(s.kills, 0, "explosão no contato não conta");
         let j = s.jake.as_ref().unwrap();
         assert!(j.health.hp < 50 && j.health.hp > 0, "vida {}", j.health.hp);
     }
@@ -1383,6 +1447,7 @@ mod tests {
                 .iter()
                 .any(|e| e.alive && e.kind == crate::entity::MINE)
         );
+        assert_eq!(s.kills, 1, "mina morta pela bala conta para o jogador");
         // (a animação sintética só tem o rótulo 1: a faísca `oex15` fica para o teste real)
         assert!(
             s.events
