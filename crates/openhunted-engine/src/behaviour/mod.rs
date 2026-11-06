@@ -3,21 +3,28 @@
 //! `minas.md`, `dano-vida.md`).
 
 pub mod barrel;
+pub mod bruiser;
 pub mod bullet;
 pub mod car_piece;
 pub mod casing;
 pub mod door;
+pub mod enemy;
+pub mod enemy_shot;
 pub mod exit;
 pub mod explosion;
 pub mod fence;
 pub mod fire;
 pub mod graffiti;
 pub mod hint;
+pub mod hop_mine;
 pub mod interact;
 pub mod laser;
 pub mod laser_eye;
 pub mod mine;
+pub mod mine_generator;
 pub mod pickup;
+pub mod security_robot;
+pub mod sentinel;
 pub mod teleporter;
 pub mod zone;
 
@@ -109,6 +116,12 @@ pub struct Out {
     pub teleport: Option<teleporter::Request>,
     /// Inventário do Jake depois de apanhar armas e munição neste tique.
     pub inventory: Option<crate::jake::Inventory>,
+    /// Inimigos mortos por balas do jogador neste tique (`0x497348`).
+    pub kills: i32,
+    /// Objetos que os inimigos pedem (tiros, minas, fogo): a cena os cria com os recursos.
+    pub enemy_spawns: Vec<enemy::Spawn>,
+    /// Terremoto do Bruiser (`0x418229`): tiques de cambaleio para o Jake, se perto.
+    pub quake: Option<u32>,
 }
 
 /// Área que fere quem a cruza na mesma camada (`0x43d629` de fogo e cerca sobre os objetos).

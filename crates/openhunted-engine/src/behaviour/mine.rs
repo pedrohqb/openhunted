@@ -83,6 +83,8 @@ pub struct MineState {
     pub hovering: bool,
     /// Velocidade pedida neste tique (1/8 px).
     pub velocity: (i32, i32),
+    /// Gerador que a soltou (`mine_generator::sync`); 0 = mina da fase.
+    pub owner: u32,
 }
 
 impl MineState {
@@ -93,6 +95,7 @@ impl MineState {
             has_target: false,
             hovering: false,
             velocity: (0, 0),
+            owner: 0,
         }
     }
 
