@@ -12,6 +12,7 @@ use crate::entity::{BOX, Behaviour, Entity, from_object, object_scale, object_st
 use crate::objects::{SOLO, flags, is_player_start, present};
 use crate::physics::{Rect, SUB, World};
 use crate::rng::Rng;
+use crate::sound::Cue;
 use crate::verdict::{self, Streak};
 use crate::{AnimPlayer, Assets, Framebuffer, Jake, draw_ops};
 
@@ -596,13 +597,20 @@ impl Scene {
     /// Balas e cápsulas que o Jake disparou neste tique viram entidades; som do tiro ao
     /// entrar num estado de tiro; aviso de sem munição.
     fn spawn_shots(&mut self) {
+        let focus = self.focus();
         let Some(j) = self.jake.as_mut() else { return };
         let shots: Vec<_> = j.shots.drain(..).collect();
         if j.no_ammo {
-            self.events.push(Event::Sound(crate::jake::SOUND_NO_AMMO));
+            self.events
+                .push(Event::Sound(Cue::ui(crate::jake::SOUND_NO_AMMO, 0)));
         }
-        if j.is_firing() && j.label_changed() {
-            self.events.push(Event::Sound(SOUND_PISTOL));
+        if let Some(c) = focus.filter(|_| j.is_firing() && j.label_changed()) {
+            self.events.push(Event::Sound(Cue::at(
+                SOUND_PISTOL,
+                crate::sound::PRIORITY_FRAME,
+                c,
+                self.jake_layer,
+            )));
         }
         let layer = self.jake_layer;
         for s in shots {
@@ -741,7 +749,12 @@ impl Scene {
             if let Some(e) = self.effect_entity(&b, behaviour::bullet::IMPACT_LABEL) {
                 out.spawn.push(e);
             }
-            out.events.push(Event::Sound(behaviour::bullet::SOUND_WALL));
+            out.events.push(Event::Sound(Cue::at(
+                behaviour::bullet::SOUND_WALL,
+                crate::sound::PRIORITY_FRAME,
+                (x, y),
+                layer,
+            )));
         }
     }
 
@@ -833,9 +846,18 @@ impl Scene {
                     ..Default::default()
                 });
             }
-            self.events
-                .push(Event::Sound(behaviour::exit::SOUND_OBJECTIVES));
-            self.events.push(Event::Sound(behaviour::exit::SOUND_ZAP));
+            self.events.push(Event::Sound(Cue::ui(
+                behaviour::exit::SOUND_OBJECTIVES,
+                crate::sound::PRIORITY_PICKUP,
+            )));
+            if let Some(c) = self.focus() {
+                self.events.push(Event::Sound(Cue::at(
+                    behaviour::exit::SOUND_ZAP,
+                    0,
+                    c,
+                    self.jake_layer,
+                )));
+            }
         }
     }
 
@@ -880,7 +902,10 @@ impl Scene {
                 scale,
                 mirror: false,
             }),
-            behaviour: Behaviour::Explosion(Default::default()),
+            behaviour: Behaviour::Explosion(behaviour::explosion::ExplosionState {
+                applied: false,
+                center: b.center,
+            }),
         })
     }
 
@@ -940,7 +965,7 @@ impl Scene {
                     Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, &mut out),
                     Behaviour::Pickup => behaviour::pickup::tick(e, &ctx, &mut out),
                     Behaviour::Mine(_) => behaviour::mine::tick(e, &mut ctx, &mut out),
-                    Behaviour::Explosion(_) => behaviour::explosion::tick(e),
+                    Behaviour::Explosion(_) => behaviour::explosion::tick(e, &mut out),
                     Behaviour::Exit(_) => behaviour::exit::tick(e),
                     Behaviour::Bullet(_) => behaviour::bullet::tick(e, &ctx, &mut out),
                     Behaviour::Casing(_) => behaviour::casing::tick(e, &mut ctx, &mut out),
@@ -968,6 +993,9 @@ impl Scene {
                 }
             }
             if let Some(e) = self.explosion_entity(b) {
+                if let Some(c) = behaviour::explosion::frame_cue(&e) {
+                    out.events.push(Event::Sound(c));
+                }
                 out.spawn.push(e);
             }
         }
@@ -1254,7 +1282,7 @@ mod tests {
         let j = s.jake.as_ref().unwrap();
         assert_eq!(j.health.hp, 30);
         assert_eq!(j.state(), State::Shocked(9));
-        assert!(s.events.contains(&Event::Sound(3772)));
+        assert!(s.events.iter().any(|e| e.sound_id() == Some(3772)));
         // morte → derrota 40 tiques depois (mesmo que a saída ligue no meio)
         if let Some(j) = s.jake.as_mut() {
             j.hurt(crate::damage::Pending {
@@ -1358,9 +1386,15 @@ mod tests {
         // (a animação sintética só tem o rótulo 1: a faísca `oex15` fica para o teste real)
         assert!(
             s.events
-                .contains(&Event::Sound(crate::behaviour::bullet::SOUND_WALL))
+                .iter()
+                .any(|e| e.sound_id() == Some(crate::behaviour::bullet::SOUND_WALL))
         );
-        assert!(s.events.contains(&Event::Sound(SOUND_PISTOL)));
+        let pistol = s.events.iter().find_map(|e| match e {
+            Event::Sound(c) if c.id == SOUND_PISTOL => Some(*c),
+            _ => None,
+        });
+        let at = pistol.and_then(|c| c.at).expect("tiro posicional");
+        assert_eq!((at.layer, pistol.unwrap().priority), (s.jake_layer, 9));
     }
 
     /// Tiro na diagonal para baixo: a bala toca a peça em que o Jake está e faísca (não
@@ -1395,7 +1429,7 @@ mod tests {
             sparks += s
                 .events
                 .drain(..)
-                .filter(|e| *e == Event::Sound(crate::behaviour::bullet::SOUND_WALL))
+                .filter(|e| e.sound_id() == Some(crate::behaviour::bullet::SOUND_WALL))
                 .count();
         }
         assert_eq!(

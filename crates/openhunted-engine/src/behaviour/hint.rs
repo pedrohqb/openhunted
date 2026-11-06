@@ -39,7 +39,8 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         text: text.clone(),
         left_of_jake,
     });
-    out.events.push(Event::Sound(SOUND_HINT));
+    out.events
+        .push(Event::Sound(crate::sound::Cue::ui(SOUND_HINT, 0)));
 }
 
 #[cfg(test)]
@@ -70,7 +71,10 @@ mod tests {
                 left_of_jake: true
             }
         );
-        assert_eq!(out.events[1], Event::Sound(SOUND_HINT));
+        assert_eq!(
+            out.events[1],
+            Event::Sound(crate::sound::Cue::ui(SOUND_HINT, 0))
+        );
         out.events.clear();
         tick(&mut h, &c, &mut out);
         assert!(out.events.is_empty(), "uma vez só");

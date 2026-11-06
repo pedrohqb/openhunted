@@ -59,7 +59,10 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     let mut h = out.heal.unwrap_or(jake.health);
     if take(e.kind, &mut h) {
         out.heal = Some(h);
-        out.events.push(Event::Sound(SOUND_PICKUP));
+        out.events.push(Event::Sound(crate::sound::Cue::ui(
+            SOUND_PICKUP,
+            crate::sound::PRIORITY_PICKUP,
+        )));
         e.alive = false;
     }
 }
@@ -95,7 +98,10 @@ mod tests {
         tick(&mut item, &ctx(&j, &w, &on), &mut out);
         assert!(!item.alive);
         assert_eq!(out.heal, Some(Health { hp: 75, armor: 0 }));
-        assert_eq!(out.events, vec![Event::Sound(SOUND_PICKUP)]);
+        assert_eq!(
+            out.events,
+            vec![Event::Sound(crate::sound::Cue::ui(SOUND_PICKUP, 200))]
+        );
         // dois itens no mesmo tique: os dois contam
         let mut armor = logic(ARMOR_ITEM, 100, 0, &[]);
         armor.flags = 0x803a9;

@@ -37,8 +37,11 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     st.vy = body.vy;
     if (body.hit_wall || body.hit_ceiling || body.on_ground) && !st.clinked {
         st.clinked = true;
+        let id = SOUNDS[ctx.rng.below(2) as usize];
+        // centro da caixa (a única da cápsula)
+        let c = (body.x + boxr.x + boxr.w / 2, body.y + boxr.y + boxr.h / 2);
         out.events
-            .push(Event::Sound(SOUNDS[ctx.rng.below(2) as usize]));
+            .push(Event::Sound(crate::sound::Cue::at(id, 0, c, e.layer)));
     }
     if body.vx.abs() < SUB && body.vy.abs() < SUB {
         st.slow += 1;

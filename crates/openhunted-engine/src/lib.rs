@@ -14,6 +14,7 @@ pub mod physics;
 pub mod render;
 pub mod rng;
 pub mod scene;
+pub mod sound;
 pub mod triggers;
 pub mod verdict;
 

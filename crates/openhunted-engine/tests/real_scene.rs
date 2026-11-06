@@ -411,6 +411,12 @@ fn tutorial_mines_explode_on_jake() {
     }
     let j = s.jake.as_ref().unwrap();
     assert!(saw_explosion);
+    // a explosão toca os sons dos quadros do `OEX.ANM` (3080–3087), no ponto e na camada
+    assert!(
+        s.events.iter().any(|e| matches!(e,
+            openhunted_engine::Event::Sound(c)
+                if (3080..=3087).contains(&c.id) && c.at.is_some_and(|a| a.layer == s.jake_layer)))
+    );
     assert!(hurt, "nenhuma mina feriu o Jake");
     assert!(!j.is_dead(), "o Jake morreu em x={}", j.body.x);
     assert!(j.body.x < 120, "parou em x={}", j.body.x);
@@ -533,6 +539,15 @@ fn tutorial_shooting_kills_the_nearest_mine() {
     assert!(alive(&s) < 7, "nenhuma mina morreu em {t} tiques");
     assert!(saw_casing);
     assert!(saw_spark, "sem faísca oex15");
+    let positioned = |id: u16| {
+        s.events.iter().any(
+            |e| matches!(e, openhunted_engine::Event::Sound(c) if c.id == id && c.at.is_some()),
+        )
+    };
+    assert!(
+        positioned(3040) && positioned(3046),
+        "tiro e faísca posicionais"
+    );
     assert!(s.jake.as_ref().unwrap().inventory.pistol_ammo() < 80);
     for _ in 0..60 {
         s.tick(0);

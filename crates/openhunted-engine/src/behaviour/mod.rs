@@ -25,9 +25,19 @@ pub enum Event {
         text: String,
         left_of_jake: bool,
     },
-    /// Som do `SOUND.RES` (ignorado por enquanto).
-    Sound(u16),
+    /// Som do `SOUND.RES`, com prioridade e, se posicional, o ponto de origem.
+    Sound(crate::sound::Cue),
     Outcome(Outcome),
+}
+
+impl Event {
+    /// Id do som, se o evento é um som.
+    pub fn sound_id(&self) -> Option<u16> {
+        match self {
+            Event::Sound(c) => Some(c.id),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
