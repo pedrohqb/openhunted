@@ -936,7 +936,7 @@ impl Jake {
         }
         self.take_damage(self.ticks);
         if !self.controllable() {
-            self.tick_passive(world);
+            self.tick_passive(input, env);
             return;
         }
         let pressed = |bit: u32| input & bit != 0;
@@ -1082,7 +1082,8 @@ impl Jake {
     }
 
     /// Tique dos estados sem entrada do jogador.
-    fn tick_passive(&mut self, world: &World) {
+    fn tick_passive(&mut self, input: u32, env: &Env) {
+        let world = env.world;
         self.fit_box(world);
         match self.state {
             State::EnteringExit(n) => {
@@ -1128,6 +1129,13 @@ impl Jake {
                 }
             }
             State::KnockedDown(_) => {
+                // arremessado (81/82): agarra a corda como nos pulos (`jake-escalada.md`)
+                if self.try_grab_in_air(input, env) {
+                    self.fit_box(world);
+                    self.animate();
+                    self.finish_tick();
+                    return;
+                }
                 let was_rising = self.body.vy < 0;
                 step(&mut self.body, world, true);
                 if self.body.on_ground && !was_rising {

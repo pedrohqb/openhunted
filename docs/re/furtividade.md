@@ -105,3 +105,5 @@ proteção em `0x0043d629`].
 - Quem são os tipos 25, 29, 99, 100, 106 e 108 (também destruídos pelo especial).
 - Os demais inimigos (fora o tipo 8) ignoram o esconderijo? Nenhum outro teste achado.
 - `0x004081ae` (efeito visual) e a variante do registro de cada soco.
+- Ordem de desenho do escondido (`+0x1b4 = 0x28`): o OpenHunted ainda não tem campo de
+  ordem de desenho e desenha o Jake sempre na mesma posição.

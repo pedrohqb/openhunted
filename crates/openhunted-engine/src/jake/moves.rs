@@ -747,6 +747,7 @@ impl Jake {
         let d = pressed(DOWN) && free(self.probe(world, 0, 1));
         let l = pressed(LEFT) && free(self.probe(world, -1, 0));
         let r = pressed(RIGHT) && free(self.probe(world, 1, 0));
+        // Ruling: CIMA+BAIXO com um lado (máscara 7, fora da tabela) anda de lado (32)
         let lateral = match (l, r) {
             (true, false) => -1,
             (false, true) => 1,
@@ -1390,6 +1391,21 @@ mod tests {
         let y = j.body.y;
         j.tick_in(0, &env);
         assert_eq!(j.body.y, y, "parado na corda");
+        // Ruling: CIMA+BAIXO com um lado (máscara 7) anda de lado (32)
+        j.tick_in(UP | DOWN | RIGHT, &env);
+        assert_eq!(j.state(), State::Climb(Climb::Side));
+        // arremessado (81/82) também agarra
+        let mut j = Jake::new(0, -300, BOX, lengths()).with_skeleton(skeleton());
+        j.tick_in(0, &env);
+        j.hurt(Pending {
+            knockdown: true,
+            push: (0, -4),
+            ..Default::default()
+        });
+        j.tick_in(0, &env);
+        assert!(matches!(j.state(), State::KnockedDown(_)));
+        j.tick_in(DOWN, &env);
+        assert_eq!(j.state(), State::Climb(Climb::Vertical));
     }
 
     #[test]
