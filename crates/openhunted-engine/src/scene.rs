@@ -2,6 +2,7 @@
 //! Cena de uma fase: blocos de cenário, decorações e objetos, com as animações em curso.
 
 mod arsenal;
+mod cell_door;
 
 use std::rc::Rc;
 
@@ -140,6 +141,8 @@ pub struct Scene {
     pub timer: i32,
     /// Limite de tempo da fase em segundos (campo 1004; 0 = sem limite).
     pub time_limit: i32,
+    /// Portas de célula (células de índice `…38…`).
+    pub cell_doors: Vec<cell_door::CellDoor>,
 }
 
 /// Tiques por segundo do cronômetro (`0x43c95c`).
@@ -314,6 +317,7 @@ impl Scene {
             mines_at_start: 0,
             timer: 0,
             time_limit: 0,
+            cell_doors: Vec::new(),
         }
     }
 
@@ -357,7 +361,9 @@ impl Scene {
             mines_at_start: 0,
             timer: 0,
             time_limit: 0,
+            cell_doors: Vec::new(),
         };
+        let mut scenery = 0usize;
         let mut jake_layer = 0;
         let mut jake_flags = 0;
         let mut objects: Vec<&LevelObject> = level.objects.iter().collect();
@@ -372,16 +378,49 @@ impl Scene {
                         .ok()
                         .and_then(|id| AnimPlayer::at_label(&a, id))
                     {
-                        Some(player) => s.sprites.push(Sprite {
-                            layer: Layer::Scenery,
-                            anim: a,
-                            player,
-                            x: cx,
-                            y: cy,
-                            frozen: false,
-                            scale: (1, 1),
-                            mirror: cell.mirrored,
-                        }),
+                        Some(player) => {
+                            if cell_door::is_door(cell.index) {
+                                let id = cell.index as u16;
+                                let first = a
+                                    .labels
+                                    .iter()
+                                    .find(|l| l.id == id)
+                                    .map_or(0, |l| l.frame as usize);
+                                let next = a
+                                    .labels
+                                    .iter()
+                                    .map(|l| l.frame as usize)
+                                    .filter(|&f| f > first)
+                                    .min()
+                                    .unwrap_or(a.frames.len());
+                                let fx = if cell.version >= 1006 { 16 } else { 15 };
+                                let mut d =
+                                    cell_door::CellDoor::new(cell.fields.get(fx..).unwrap_or(&[]));
+                                d.origin = (cx, cy);
+                                d.layer = cz;
+                                d.sprite = scenery;
+                                d.first = first;
+                                d.last = next.saturating_sub(1).max(first);
+                                d.frame = if d.state == cell_door::OPEN {
+                                    d.last
+                                } else {
+                                    first
+                                };
+                                d.triggers = cell.triggers.clone();
+                                s.cell_doors.push(d);
+                            }
+                            scenery += 1;
+                            s.sprites.push(Sprite {
+                                layer: Layer::Scenery,
+                                anim: a,
+                                player,
+                                x: cx,
+                                y: cy,
+                                frozen: false,
+                                scale: (1, 1),
+                                mirror: cell.mirrored,
+                            })
+                        }
                         None => s.warnings.push(format!(
                             "{}: rótulo {} inexistente",
                             cell.animation, cell.index
@@ -390,7 +429,46 @@ impl Scene {
                     Err(e) => s.warnings.push(format!("{}: {e}", cell.animation)),
                 }
             }
-            if !cell.border.is_empty() {
+            let door = s
+                .cell_doors
+                .last_mut()
+                .filter(|d| d.origin == (cx, cy) && d.layer == cz);
+            if let Some(d) = door {
+                // a colisão da porta fica fora das caixas fixas: as duas versões do BRD
+                for closed in [true, false] {
+                    let name = cell_door::border_name(cell.index, closed);
+                    let boxes: Vec<Rect> = assets
+                        .archive()
+                        .get(&name)
+                        .and_then(Border::parse)
+                        .map(|b| {
+                            b.boxes
+                                .into_iter()
+                                .filter(|bx| bx.kind == BOX)
+                                .map(|bx| {
+                                    let w = i32::from(bx.width);
+                                    let x = if cell.mirrored {
+                                        CELL - i32::from(bx.x) - w
+                                    } else {
+                                        i32::from(bx.x)
+                                    };
+                                    Rect {
+                                        x: cx.saturating_add(x),
+                                        y: cy.saturating_add(i32::from(bx.y)),
+                                        w,
+                                        h: i32::from(bx.height),
+                                    }
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if closed {
+                        d.closed = boxes;
+                    } else {
+                        d.open = boxes;
+                    }
+                }
+            } else if !cell.border.is_empty() {
                 match assets.archive().get(&cell.border).and_then(Border::parse) {
                     Ok(b) => s.borders.extend(b.boxes.into_iter().map(|mut bx| {
                         if cell.mirrored {
@@ -685,6 +763,7 @@ impl Scene {
         if let Some(r) = self.jake.as_mut().and_then(|j| j.punch.take()) {
             self.apply_punch(r);
         }
+        self.tick_cell_doors();
         self.spawn_shots();
         if self.outcome.is_none() {
             // balas à queima-roupa: acertam já na boca, antes de voar
@@ -1147,6 +1226,8 @@ impl Scene {
                 h: i32::from(b.height),
             })
             .collect();
+        let doors = self.door_solids(layer);
+        self.cell_solids.extend(doors);
         self.cell_world = World::new(self.cell_solids.clone());
         self.rebuild_world();
     }

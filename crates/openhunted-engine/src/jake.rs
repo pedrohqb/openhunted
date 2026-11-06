@@ -469,6 +469,9 @@ pub struct Jake {
     switch_pose: u32,
     /// Veneno (`+0x270`): quanto perde a cada 20 tiques.
     pub poison: i32,
+    /// Chegou ao fim do rótulo 100 empurrando neste tique (`0x00425d04`: a cena tenta a
+    /// porta da célula numa zona PR 0x20).
+    pub door_push: bool,
     /// Tiques desde a criação (o veneno age em `tique % 20 = 0`).
     clock: u32,
 }
@@ -508,6 +511,7 @@ impl Jake {
             switched: false,
             switch_pose: 0,
             poison: 0,
+            door_push: false,
             clock: 0,
         }
     }
@@ -1060,6 +1064,7 @@ impl Jake {
         self.special = None;
         self.punch = None;
         self.switched = false;
+        self.door_push = false;
         self.anim_mode = AnimMode::Auto;
         self.ske_req = None;
         if self.state == State::Dead {
@@ -1166,6 +1171,7 @@ impl Jake {
             }
             _ => self.tick_move(input, env, jump_edge, side),
         }
+        self.door_push = self.state == State::Push && self.ticks + 1 == self.len_of(100) as u32;
         if matches!(self.state, State::Run | State::Push) {
             // −1 px por tique enquanto corre (sobe degraus pequenos), se houver espaço.
             let up = Rect {
