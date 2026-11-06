@@ -11,6 +11,16 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M6a: os objetos das missões tutoriais `T_J_003/005/007`.** O olho-laser varre o teto, vê
+o Jake dentro do cone do feixe e dispara rajadas de raios (5 de dano com tranco; morre com um
+tiro e explode); o barril tomba quando o Jake encosta, rola empurrado, explode com tiro, fogo,
+raio, explosão ou batida rápida, em cadeia; o fogo cresce e queima 1 por tique; a cerca
+elétrica faísca e dá choque; o grafite escreve o texto do `GRAFFITI.RES`; a peça do carro
+flutua e, apanhada, cumpre o objetivo; o teletransporte some com o Jake e o põe no destino; as
+paredes e portas `OH` abrem por empurrão ou gatilho e fecham por tempo; a pistola, a munição,
+a comida, as armaduras, o lança-foguetes e as granadas são apanhados. As escadas e a troca de
+camada ainda não existem: as três missões não são jogáveis de ponta a ponta.
+
 **M5: as telas em volta do jogo.** O jogo abre no menu principal original (`SMAIN.ITF`, com
 fogo, faíscas e botões animados, mouse ou teclado); "New Game" começa a campanha solo na
 primeira missão do `ENGLEVEL.TXT`, com o briefing (`SLEVD.ITF`: título e descrição, rolagem,
@@ -35,7 +45,8 @@ Etapas anteriores: M1 formatos (a biblioteca `openhunted-formats` lê os dados d
 estado em [`docs/formats/`](docs/formats/README.md)); M2 visualizador de fase; M3a o Jake
 corre e pula; M3b objetos sólidos e presença por modo de jogo.
 
-Ainda não há: as outras armas, o soco e a troca de arma; inimigos ativos, escadas, furtividade,
+Ainda não há: as outras armas, o soco e a troca de arma; os demais inimigos, escadas e troca
+de camada, furtividade,
 música, os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, a
 abertura (logotipo, filme, história, créditos), os demais botões do menu (carregar, escolher
 missão, opções, dispositivos, heróis, ajuda, dois jogadores), tesouros e segredos, gravação de

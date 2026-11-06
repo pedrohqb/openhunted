@@ -37,6 +37,12 @@ pub fn satisfied(list: &[(i32, Option<i32>)], on: &dyn Fn(i32) -> Option<bool>) 
     !evaluated
 }
 
+/// A lista tem alguma entrada contada (código > 0)? Sem nenhuma, `0x435bd8` devolve −1 e
+/// quem só reage a "> 0" (o barril) não dispara.
+pub fn armed(list: &[(i32, Option<i32>)]) -> bool {
+    list.iter().any(|&(_, c)| c.unwrap_or(0) > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,5 +71,7 @@ mod tests {
         assert!(satisfied(&[(42, Some(11))], &on)); // alvo inexistente
         // OU entre entradas
         assert!(satisfied(&[(2, Some(11)), (1, Some(12))], &on));
+        assert!(armed(&[(0, Some(0)), (1, Some(11))]));
+        assert!(!armed(&[(0, Some(0)), (1, None)]));
     }
 }

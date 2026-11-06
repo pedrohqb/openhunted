@@ -85,26 +85,36 @@ fn multilayer_level_has_no_transparent_holes() {
     }
 }
 
-/// Objetos do tipo 6 (OGF.ANM, uma folha de itens num rótulo só) ficam parados.
+/// Objetos do tipo 6 são grafites: a linha `values[0]` do `GRAFFITI.RES` escrita com o
+/// `OGF.ANM` como fonte (T_J_005: "EXPLOSIVE" e duas vezes "1", este com 11 px).
 #[test]
-fn generic_item_objects_do_not_cycle() {
-    let Some((mut s, _)) = load("H_J_027.LEV") else {
+fn graffiti_objects_write_their_text() {
+    let Some((mut s, _)) = load("T_J_005.LEV") else {
         return;
     };
-    let frames = |s: &openhunted_engine::Scene| -> Vec<usize> {
+    let texts = |s: &Scene| -> Vec<(String, i32, bool)> {
         s.entities
             .iter()
-            .filter_map(|e| e.sprite.as_ref())
-            .filter(|p| p.anim.frames.len() == 256)
-            .map(|p| p.player.frame())
+            .filter_map(|e| match &e.behaviour {
+                Behaviour::Graffiti(g) => Some((g.text.clone(), g.width, g.visible)),
+                _ => None,
+            })
             .collect()
     };
-    let before = frames(&s);
-    assert!(!before.is_empty());
-    for _ in 0..40 {
+    for _ in 0..5 {
         s.tick(0);
     }
-    assert_eq!(frames(&s), before);
+    let t = texts(&s);
+    assert_eq!(t.len(), 3);
+    assert_eq!(t[0].0, "EXPLOSIVE");
+    assert!(t[1..].iter().all(|(x, w, v)| x == "1" && *w == 11 && *v));
+    let Some((h, _)) = load("H_J_027.LEV") else {
+        return;
+    };
+    assert!(
+        h.entities.iter().any(|e| e.kind == 6),
+        "grafites em outras fases"
+    );
 }
 
 /// O Jake da T_J_001 é desenhado a 47/88 (tamanho-alvo 22×47 nos campos do objeto).
@@ -263,17 +273,21 @@ fn jake_can_move_in_every_level() {
         if s0.jake.is_none() {
             continue;
         }
-        let moved = [LEFT, RIGHT].iter().any(|&dir| {
-            let mut s = s0.clone();
-            for _ in 0..40 {
-                s.tick(0);
-            }
-            let x0 = s.jake.as_ref().unwrap().body.x;
-            for _ in 0..10 {
-                s.tick(dir);
-            }
-            s.jake.as_ref().unwrap().body.x != x0
-        });
+        // assentado (40 tiques) ou logo depois de pousar (12): o piso que cede sob o Jake
+        // parado (porta `OH_F` da D_J_007, aberta por 10 tiques de toque) o derruba num poço
+        let moved = [(40, LEFT), (40, RIGHT), (12, LEFT), (12, RIGHT)]
+            .iter()
+            .any(|&(settle, dir)| {
+                let mut s = s0.clone();
+                for _ in 0..settle {
+                    s.tick(0);
+                }
+                let x0 = s.jake.as_ref().unwrap().body.x;
+                for _ in 0..10 {
+                    s.tick(dir);
+                }
+                s.jake.as_ref().unwrap().body.x != x0
+            });
         assert!(moved, "{level}: o Jake não sai do lugar");
     }
 }

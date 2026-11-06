@@ -18,10 +18,12 @@ impl Health {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Pending {
     pub amount: i32,
-    /// Natureza (`+0x252`): veneno (1), explosão (2), elétrico (0x20).
+    /// Natureza (`+0x252`): veneno (1), explosão (2), fogo (4), elétrico (0x20).
     pub poison: bool,
     pub explosion: bool,
     pub electric: bool,
+    /// Fogo (`0x4`): só o barril reage a ela (explode).
+    pub fire: bool,
     /// Empurrão (`+0x244`/`+0x248`), em px/tique.
     pub push: (i32, i32),
     /// Reações (`+0x250`): derrubada (4), empurrão (2).
@@ -40,6 +42,7 @@ impl Pending {
         self.poison |= o.poison;
         self.explosion |= o.explosion;
         self.electric |= o.electric;
+        self.fire |= o.fire;
         self.push.0 = self.push.0.saturating_add(o.push.0);
         self.push.1 = self.push.1.saturating_add(o.push.1);
         self.knockdown |= o.knockdown;
