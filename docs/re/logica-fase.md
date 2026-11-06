@@ -102,7 +102,7 @@ O retorno decide:
   `0x200008`, zera a colisão `+0x208`; espera 10 tiques (`+0x298`) e depois encolhe a escala
   `+0x1f0` em 1 por tique até 30. [confirmado]
 - **0** (objetivos incompletos) → choque: `+0x252 |= 0x20` (elétrico), `+0x24c = 20` de
-  dano, som 3772 ("MC Objectives not satisfied", volume 200) e som posicionado 3135
+  dano, som 3772 ("MC Objectives not satisfied", prioridade 200) e som posicionado 3135
   ("Electric Fence Zap #1") no centro do Jake. [confirmado]
 - **1** → estado 8 (rótulo `J003`, apertar o botão), retorno `0x426ecc`.
 

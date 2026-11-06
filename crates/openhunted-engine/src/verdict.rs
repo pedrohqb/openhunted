@@ -13,15 +13,21 @@ pub const OBJ_SURVIVE: i32 = 8;
 pub const STREAK: u32 = 40;
 
 /// Os objetivos estão cumpridos, sem contar a própria saída (`0x0043cdf0(0)`): o jogador
-/// vivo e todo objeto "destruir" morto.
+/// vivo, todo objeto "destruir" morto e todo objeto "acionar" (fora as saídas) ligado — a peça
+/// do carro apanhada fica ligada (`+0x178 = 0x40`) mesmo fora do jogo.
 pub fn objectives_met(entities: &[Entity], jake: Option<&Jake>) -> bool {
     if jake.is_some_and(Jake::is_dead) {
         return false;
     }
-    entities
+    let destroyed = entities
         .iter()
         .filter(|e| e.objective & OBJ_DESTROY != 0)
-        .all(|e| !e.alive || e.health <= 0)
+        .all(|e| !e.alive || e.health <= 0);
+    let activated = entities
+        .iter()
+        .filter(|e| e.objective & OBJ_ACTIVATE != 0 && !matches!(e.behaviour, Behaviour::Exit(_)))
+        .all(|e| e.on);
+    destroyed && activated
 }
 
 /// Resultado do tique: derrota se o jogador morreu (bit "sobreviver"); vitória se a saída
@@ -87,5 +93,23 @@ mod tests {
             let r = s.push(Some(Outcome::Defeat));
             assert_eq!(r, if i == 39 { Some(Outcome::Defeat) } else { None });
         }
+    }
+
+    #[test]
+    fn activate_objective_needs_the_object_on() {
+        use crate::behaviour::test_support::logic;
+        let mut piece = logic(crate::entity::CAR_PIECE, 0, 0, &[]);
+        piece.objective = OBJ_ACTIVATE;
+        let mut exit = logic(crate::entity::EXIT, 0, 0, &[]);
+        exit.objective = OBJ_ACTIVATE;
+        exit.behaviour = Behaviour::Exit(Default::default());
+        let mut ents = vec![exit, piece];
+        assert!(!objectives_met(&ents, None), "peça não apanhada");
+        ents[1].alive = false;
+        ents[1].on = true;
+        assert!(
+            objectives_met(&ents, None),
+            "apanhada: cumpre (a saída não conta)"
+        );
     }
 }

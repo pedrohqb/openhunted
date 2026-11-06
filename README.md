@@ -23,6 +23,15 @@ levanta); o pulo para cima contra um teto de cenário pendura na barra (mão ant
 corpo). BAIXO+ATIRAR com vida acima de 25 é o especial: custa 3 de vida e destrói ou fere o
 que estiver a menos de 70 px.
 
+**M6a: os objetos das missões tutoriais `T_J_003/005/007`.** O olho-laser varre o teto, vê
+o Jake dentro do cone do feixe e dispara rajadas de raios (5 de dano com tranco; morre com um
+tiro e explode); o barril tomba quando o Jake encosta, rola empurrado, explode com tiro, fogo,
+raio, explosão ou batida rápida, em cadeia; o fogo cresce e queima 1 por tique; a cerca
+elétrica faísca e dá choque; o grafite escreve o texto do `GRAFFITI.RES`; a peça do carro
+flutua e, apanhada, cumpre o objetivo; o teletransporte some com o Jake e o põe no destino; as
+paredes e portas `OH` abrem por empurrão ou gatilho e fecham por tempo; a pistola, a munição,
+a comida, as armaduras, o lança-foguetes e as granadas são apanhados.
+
 **M5: as telas em volta do jogo.** O jogo abre no menu principal original (`SMAIN.ITF`, com
 fogo, faíscas e botões animados, mouse ou teclado); "New Game" começa a campanha solo na
 primeira missão do `ENGLEVEL.TXT`, com o briefing (`SLEVD.ITF`: título e descrição, rolagem,
@@ -30,7 +39,9 @@ GO/CANCEL) sobre o primeiro quadro da fase. A partida ocupa 640×405 com a barra
 original embaixo (`INVBAR01.BMP`: vida, rosto, armadura, armas com munição, cronômetro de
 rolo); P ou Pause pausa ("GAME PAUSED"). No fim, a tela de resultado (`SMISS.ITF`) conta
 mortos, pontos e bônus de vitória, guarda o recorde da missão na sessão e oferece REPLAY,
-NEXT (a próxima missão solo, mesmo que ainda não seja jogável) e MAIN MENU.
+NEXT (a próxima missão solo) e MAIN MENU. Decisão do port: enquanto o Garathe não existe, o
+NEXT pula as missões sem o Jake controlável (as do Garathe); uma fase aberta com `--level` fora
+da lista de missões não grava recorde e o NEXT dela volta ao menu.
 
 **M4c: efeitos sonoros.** **M4b: a pistola.** **M4a: a primeira missão é jogável de ponta a ponta.** Na `T_J_001`, o
 Jake corre, pula e cai, colide com o cenário e com os objetos sólidos, apanha a vida e a
@@ -47,7 +58,7 @@ Etapas anteriores: M1 formatos (a biblioteca `openhunted-formats` lê os dados d
 estado em [`docs/formats/`](docs/formats/README.md)); M2 visualizador de fase; M3a o Jake
 corre e pula; M3b objetos sólidos e presença por modo de jogo.
 
-Ainda não há: as outras armas, o soco e a troca de arma; inimigos ativos (e o efeito do
+Ainda não há: as outras armas, o soco e a troca de arma; os demais inimigos (e o efeito do
 esconderijo sobre eles), empurrar blocos (zona 0x20), o equilíbrio na beirada (162/163),
 música, os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, a
 abertura (logotipo, filme, história, créditos), os demais botões do menu (carregar, escolher
@@ -83,10 +94,12 @@ No jogo: setas movem o Jake, espaço pula (correndo, o pulo escolhe a distância
 adiante; com CIMA, para cima), Ctrl atira (segurando, rajadas; com as setas mira para cima e
 nas diagonais; BAIXO+Ctrl é o especial), X anda furtivo, Z é o soco (ainda sem efeito), CIMA
 usa a saída quando ele está parado diante dela, agarra cordas e escadas, passa pelas portas
-de camada ou o esconde, e BAIXO agacha (e engatinha com as setas) ou desce de camada; a câmera o acompanha. P ou Pause pausa (Enter,
+de camada ou o esconde, e BAIXO agacha (e engatinha com as setas) ou desce de camada; a
+câmera o acompanha. P ou Pause pausa (Enter,
 espaço ou OKAY retomam). A dica do tutorial pausa o jogo e fecha ao soltar uma tecla. Esc não
 faz nada (como no original). Em fases sem o Jake, as setas rolam a tela, PageUp/PageDown pulam
-uma tela e Home/End vão às pontas. Tab mostra as caixas de colisão e os objetos de lógica. O
+uma tela, Home/End vão às pontas e Esc volta ao menu (sem personagem, a fase nunca acaba).
+Quando a janela perde o foco, o jogo pausa. Só o botão esquerdo do mouse clica. Tab mostra as caixas de colisão e os objetos de lógica. O
 som sai pelo dispositivo de áudio padrão; sem ele, o jogo avisa uma vez e segue mudo.
 
 Para renderizar sem janela: `ohtool --data … render T_J_001.LEV --out quadro.png [--camera X,Y]`.

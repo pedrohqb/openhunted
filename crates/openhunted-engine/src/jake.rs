@@ -124,7 +124,14 @@ pub enum State {
     Ready(u32),
     /// Guardando a arma (estado 19, `J019`).
     Holster,
+    /// Levado por um teletransporte (`0x4136ef`): invisível, sem entrada nem dano; tiques
+    /// desde a partida.
+    Teleporting(u32),
 }
+
+/// Viagem do teletransporte: some, muda de lugar na metade e reaparece no fim.
+pub const TELEPORT_TICKS: u32 = 42;
+const TELEPORT_MOVE: u32 = TELEPORT_TICKS / 2;
 
 /// Mira da pistola (`0x0043ae4c`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -348,6 +355,7 @@ fn anim_of(s: State) -> (u16, u32) {
         State::BarMove => (107, 1),
         State::BarPull | State::BarDown => (105, 0),
         State::BarUp => (104, 0),
+        State::Teleporting(_) => (1, 1),
     }
 }
 
@@ -401,6 +409,8 @@ pub struct Jake {
     pending: Pending,
     /// Rótulo em que morreu (o cadáver fica no último quadro dele).
     death_label: u16,
+    /// Deslocamento pendente da viagem de teletransporte.
+    teleport: Option<(i32, i32)>,
     /// Numerador da escala ao entrar na porta (encolhe 1 por tique após 10 tiques).
     exit_scale: Option<i32>,
     pub inventory: Inventory,
@@ -443,6 +453,7 @@ impl Jake {
             health: Health { hp: 100, armor: 0 },
             pending: Pending::default(),
             death_label: DIE_DEFAULT,
+            teleport: None,
             exit_scale: None,
             inventory: Inventory::from_points(&[]),
             shots: Vec::new(),
@@ -477,6 +488,11 @@ impl Jake {
     pub fn with_layer(mut self, layer: i32) -> Self {
         self.layer = layer;
         self
+    }
+
+    /// Põe o Jake na camada `layer` (sem a animação das portas).
+    pub fn set_layer(&mut self, layer: i32) {
+        self.layer = layer;
     }
 
     /// Camada corrente (`+0x17c`).
@@ -595,9 +611,26 @@ impl Jake {
         matches!(self.state, State::Dying(_) | State::Dead) || self.health.is_dead()
     }
 
-    /// Vivo e no jogo (não morrendo nem saindo pela porta).
+    /// Vivo e no jogo (não morrendo, saindo pela porta nem em viagem).
     pub fn is_active(&self) -> bool {
-        !self.is_dead() && !matches!(self.state, State::EnteringExit(_))
+        !self.is_dead() && !matches!(self.state, State::EnteringExit(_) | State::Teleporting(_))
+    }
+
+    /// Desenhado (fica invisível durante o teletransporte).
+    pub fn is_visible(&self) -> bool {
+        !matches!(self.state, State::Teleporting(_))
+    }
+
+    /// Entra no teletransporte: some, e na metade da viagem anda `delta` px.
+    pub fn start_teleport(&mut self, delta: (i32, i32)) {
+        if self.is_dead() {
+            return;
+        }
+        self.body.vx = 0;
+        self.body.vy = 0;
+        self.pending = Pending::default();
+        self.teleport = Some(delta);
+        self.set(State::Teleporting(0));
     }
 
     /// Parado em pé, podendo usar a saída.
@@ -642,13 +675,17 @@ impl Jake {
                 | State::Dying(_)
                 | State::Dead
                 | State::EnteringExit(_)
+                | State::Teleporting(_)
         )
     }
 
     /// Reações ao dano pendente (`0x004231f9`) e aplicação; devolve `true` se morreu agora.
     fn take_damage(&mut self, tick: u32) -> bool {
         let p = std::mem::take(&mut self.pending);
-        if p.is_empty() || self.is_dead() || matches!(self.state, State::EnteringExit(_)) {
+        if p.is_empty()
+            || self.is_dead()
+            || matches!(self.state, State::EnteringExit(_) | State::Teleporting(_))
+        {
             return false;
         }
         if p.knockdown {
@@ -1051,6 +1088,21 @@ impl Jake {
                 self.animate();
                 self.finish_tick();
                 return;
+            }
+            State::Teleporting(n) => {
+                if n + 1 == TELEPORT_MOVE {
+                    if let Some((dx, dy)) = self.teleport.take() {
+                        self.body.x = self.body.x.saturating_add(dx);
+                        self.body.y = self.body.y.saturating_add(dy);
+                    }
+                }
+                self.body.vx = 0;
+                self.body.vy = 0;
+                if n + 1 >= TELEPORT_TICKS {
+                    self.set(State::Idle);
+                } else {
+                    self.state = State::Teleporting(n + 1);
+                }
             }
             State::Shocked(n) => {
                 self.body.vx = 0;
@@ -1610,6 +1662,32 @@ mod tests {
         }
         assert_eq!(j.scale_override(), Some(30));
         assert!(!j.is_active());
+    }
+
+    #[test]
+    fn teleport_hides_moves_halfway_and_ignores_input_and_damage() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0);
+        let (x0, y0) = (j.body.x, j.body.y);
+        j.start_teleport((68, -256));
+        assert!(!j.is_visible() && !j.is_active());
+        for t in 1..TELEPORT_TICKS {
+            j.hurt(Pending {
+                amount: 10,
+                ..Default::default()
+            });
+            j.tick(RIGHT | JUMP, &w);
+            let moved = (j.body.x - x0, j.body.y - y0);
+            if t < TELEPORT_MOVE {
+                assert_eq!(moved, (0, 0), "tique {t}");
+            } else {
+                assert_eq!(moved, (68, -256), "tique {t}");
+            }
+        }
+        j.tick(0, &w);
+        assert_eq!(j.state(), State::Idle);
+        assert!(j.is_visible());
+        assert_eq!(j.health.hp, 100, "invulnerável na viagem");
     }
 
     #[test]

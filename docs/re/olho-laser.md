@@ -81,6 +81,10 @@ na vertical para baixo e 11 ≈ −9,5° (direita): o olho de teto varre o semic
 
 ## Disparo (`0x0041fbe6`) [confirmado]
 
+- Tabelas completas (dx, dy por posição 0–11), lidas do executável [confirmado, M6a]:
+  boca 1 (1,4) (2,8) (6,12) (10,17) (14,22) (18,22) (22,22) (27,22) (33,17) (43,13) (45,8)
+  (45,4); boca 2 (2,4) (3,8) (7,14) (18,19) (27,22) (31,22) (35,22) (38,20) (43,17) (45,12)
+  (45,8) (45,4).
 - Duas bocas: `boca1 = posição do objeto + tabela 0x00472e84[pos]`,
   `boca2 = posição + tabela 0x00472f14[pos]` (registros de 12 bytes: dx, dy, ângulo extra 0).
   Ex. (dx, dy) da boca 1: pos 0 (1, 4), 5 (18, 22), 11 (45, 4); boca 2: pos 0 (2, 4),
@@ -98,6 +102,10 @@ na vertical para baixo e 11 ≈ −9,5° (direita): o olho de teto varre o semic
   `ola.brd`; escala 1/1. A caixa é deslocada para trás conforme o sinal da velocidade.
 - Som posicional na criação: 3037 (variantes 0 e 2) ou 3036 (1 e 3), "Laser" (`0x47209c`).
 - Rotinas: `+0x1c0 = 0x410bda`, `+0x1d0 = 0x410dae`, `+0x1d4 = 0x411043` (evento de colisão).
+- **Não há `OLA.ANM`**: o desenho `0x410dae` traça uma linha da cabeça (posição + caixa) à
+  cauda (`+0x278/+0x27c`), encurtada a 25 px, nas cores da variante (tabela `0x004720ac`,
+  3 índices da paleta por variante: `b7 ba bc`, `c2 c6 c7`, `d8 da dc`, `e1 e7 e9`). A
+  caixa do `OLA.BRD` é 8 × 8. [confirmado, M6a]
 
 Atualização `0x410bda`:
 
@@ -113,7 +121,7 @@ Linhas do `DAMAGE.TBL` (atacante 36) [confirmado]:
 
 | Vítima | Variante | Natureza | Reação | Dano | Efeito |
 |---|---|---|---|---|---|
-| 1 (jogador) | 0 / 1 / 2 / 3 | 10 (`0x2|0x8`) | 2 empurrão | **5** / 7 / 10 / 5 | `oex01`, raio 5 |
+| 1 (jogador) | 0 / 1 / 2 / 3 | 10 (`0x2|0x8`) | 2 empurrão (fixo 0, 0; módulo 0) | **5** / 7 / 10 / 5 | `oex01`, raio 5 |
 | 0 (outro) | 0 / 1 / 2 / 3 | 10 | — | 5 / 7 / 10 / 5 | nenhum |
 
 A natureza inclui `0x2` (explosão): um raio que acerte um barril o faz explodir

@@ -24,7 +24,7 @@ campo `+0x1ec` (busca em `0x004470fa`) quando o bit 0x80 dos sinalizadores `+0x1
 
 Nos dados, as plataformas do `OPO.ANM` usam o próprio tipo ou uma variante (68 → 68, 70 → 70,
 72 → 272), as peças do `OPL.ANM` (tipo 56) um dos rótulos 1 a 12 (uma peça por rótulo), e os
-inimigos `OH1`/`OH2` um estado (50…55, 300…). O Jake e os itens de tipo 6 não têm o bit: a
+inimigos `OH1`/`OH2` um estado (50…55, 300…). O Jake e os grafites (tipo 6) não têm o bit: a
 referência é o quadro 0. Com o quadro 0 em todos (M3a), a plataforma 72 saía 6,4× maior.
 
 ## Presença por modo de jogo e jogador
@@ -83,12 +83,13 @@ jogador cruza o retângulo do objeto (exceto o portão no estado 2) e, se cruza,
 `0x0040b9eb(jogador, 0xe85, 0xe99, 200, 200)` uma vez (`+0x270`) e chama `0x0043d629`: é o
 esmagamento pelo portão e pelo bloco. Nada disso sustenta o Jake.
 
-## Tipo 6: itens genéricos
+## Tipo 6: grafite [confirmado, M6a]
 
-`OGF.ANM` tem um rótulo só cobrindo os 256 quadros de `OGF00.BMP` (216 deles são marcadores de
-1×1; os outros, itens diferentes). Cada objeto do tipo 6 mostra **um** desses quadros, escolhido
-por um campo ainda não decifrado; `values[0]` acerta em 62 dos 215 objetos. Decisão provisória
-(M2): objetos do tipo 6 ficam parados no quadro `values[0]` quando ele é válido, senão no 0.
+Não é item. `OGF.ANM` (um rótulo só, 256 quadros) é uma **fonte**: o quadro `c` é o glifo do
+caractere `toupper(c)`. O objeto escreve a linha `values[0]` do `GRAFFITI.RES` (contando de
+1) com altura `values[1]` (< 5 → 18), sem colisão, visível enquanto os gatilhos dão
+verdadeiro. Detalhes em [`objetos-tutorial.md`](objetos-tutorial.md). A decisão provisória da
+M2 (sprite parado no quadro `values[0]`) foi abandonada: `values[0]` é o número da linha.
 
 ## Comportamento por tipo (para a M3)
 

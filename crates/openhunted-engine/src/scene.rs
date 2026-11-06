@@ -132,6 +132,8 @@ pub struct Scene {
     pub rng: Rng,
     /// Inimigos (por ora, minas) destruídos pelo jogador (`0x497348`).
     pub kills: i32,
+    /// Inimigos presentes no início da partida (minas e olhos-laser, por ora).
+    pub mines_at_start: i32,
     /// Cronômetro em tiques (`0x4972fc` = campo 1004 × 20; decrementado a cada tique).
     pub timer: i32,
     /// Limite de tempo da fase em segundos (campo 1004; 0 = sem limite).
@@ -143,6 +145,21 @@ pub const TIMER_TICKS_PER_SECOND: i32 = 20;
 
 /// Tipo de objeto do Jake.
 const JAKE: u32 = 1;
+
+/// A fase tem o Jake controlável no modo solo (como em `Scene::build`): um início de jogador
+/// de tipo 1 no modo solo ou, sem modo solo, algum objeto de tipo 1. Nas fases do Garathe
+/// (ainda sem personagem controlável) é `false`.
+pub fn has_controllable_jake(level: &Level) -> bool {
+    let objects: Vec<&LevelObject> = level
+        .objects
+        .iter()
+        .chain(level.cells.iter().flatten().flat_map(|c| c.objects.iter()))
+        .collect();
+    let solo = objects.iter().any(|o| is_player_start(o, SOLO));
+    objects
+        .iter()
+        .any(|o| o.kind == JAKE && (!solo || is_player_start(o, SOLO)))
+}
 /// Caixa de colisão de reserva do Jake (envolvente do `JK_DEFLT.BRD`).
 const JAKE_BOX: Rect = Rect {
     x: 2,
@@ -214,6 +231,52 @@ fn draw_sprite(sp: &Sprite, assets: &mut Assets, fb: &mut Framebuffer, camera: (
     }
 }
 
+/// Grafite: um glifo do `OGF.ANM` por caractere, com a escala do texto.
+fn draw_graffiti(
+    e: &Entity,
+    g: &behaviour::graffiti::GraffitiState,
+    sp: &Sprite,
+    assets: &mut Assets,
+    fb: &mut Framebuffer,
+    camera: (i32, i32),
+) {
+    for &(dx, frame) in &g.glyphs {
+        let glyph = Sprite {
+            player: AnimPlayer::from_frame(&sp.anim, frame),
+            x: e.x.saturating_add(dx),
+            y: e.y,
+            scale: g.scale,
+            mirror: false,
+            ..sp.clone()
+        };
+        draw_sprite(&glyph, assets, fb, camera);
+    }
+}
+
+/// Raio laser (`0x00410dae`): traço da cauda à cabeça, até 25 px, nas cores da variante.
+fn draw_laser(
+    e: &Entity,
+    l: &behaviour::laser::LaserState,
+    fb: &mut Framebuffer,
+    camera: (i32, i32),
+) {
+    let head = e.center();
+    let (mut dx, mut dy) = (l.tail.0 - head.0, l.tail.1 - head.1);
+    let d = behaviour::mine::distance((0, 0), (dx, dy));
+    if d > behaviour::laser::TRAIL {
+        dx = dx * behaviour::laser::TRAIL / d;
+        dy = dy * behaviour::laser::TRAIL / d;
+    }
+    let colors = behaviour::laser::COLORS[l.variant.min(3)];
+    let n = dx.abs().max(dy.abs()).max(1);
+    for i in 0..=n {
+        let x = head.0 + dx * i / n - camera.0;
+        let y = head.1 + dy * i / n - camera.1;
+        fb.fill_rect(x - 1, y, 3, 1, colors[2]);
+        fb.fill_rect(x, y, 1, 1, colors[0]);
+    }
+}
+
 impl Scene {
     /// Cena vazia de `width × height` pixels.
     pub fn empty(width: i32, height: i32) -> Self {
@@ -246,6 +309,7 @@ impl Scene {
             tick_count: 0,
             rng: Rng::new(0x4a4b_4531),
             kills: 0,
+            mines_at_start: 0,
             timer: 0,
             time_limit: 0,
         }
@@ -288,6 +352,7 @@ impl Scene {
             tick_count: 0,
             rng: Rng::new(0x4a4b_4531),
             kills: 0,
+            mines_at_start: 0,
             timer: 0,
             time_limit: 0,
         };
@@ -490,6 +555,13 @@ impl Scene {
                 s.projectile_borders.insert(name.to_string(), b);
             }
         }
+        s.mines_at_start = s
+            .entities
+            .iter()
+            .filter(|e| {
+                e.alive && matches!(e.behaviour, Behaviour::Mine(_) | Behaviour::LaserEye(_))
+            })
+            .count() as i32;
         Ok(s)
     }
 
@@ -507,11 +579,21 @@ impl Scene {
             draw_sprite(sp, assets, fb, camera);
         }
         for e in &self.entities {
-            if let (true, Some(sp)) = (e.alive, &e.sprite) {
-                draw_sprite(sp, assets, fb, camera);
+            if !e.visible() {
+                continue;
+            }
+            match (&e.behaviour, &e.sprite) {
+                (Behaviour::Graffiti(g), Some(sp)) => draw_graffiti(e, g, sp, assets, fb, camera),
+                (Behaviour::Laser(l), _) => draw_laser(e, l, fb, camera),
+                (_, Some(sp)) => draw_sprite(sp, assets, fb, camera),
+                _ => {}
             }
         }
-        if let Some(j) = &self.jake_sprite {
+        if let Some(j) = self
+            .jake_sprite
+            .as_ref()
+            .filter(|_| self.jake.as_ref().is_none_or(crate::jake::Jake::is_visible))
+        {
             draw_sprite(j, assets, fb, camera);
         }
         if overlay {
@@ -780,6 +862,9 @@ impl Scene {
                 vx: s.vx * SUB,
                 vy: s.vy * SUB,
                 prev: None,
+                spent: false,
+                // `spawn_shots` só cria as balas do Jake
+                player_shot: true,
             }),
         )
     }
@@ -860,18 +945,64 @@ impl Scene {
             if !self.entities[bi].alive {
                 continue;
             }
-            // só quem trata a própria morte perde vida (por ora, as minas); os demais só
-            // param a bala
+            // só quem trata a própria morte perde vida (minas, olhos-laser, barris); os
+            // demais só param a bala. Contam para o jogador as minas e os olhos que a bala
+            // dele mata.
+            let by_player = matches!(
+                self.entities[bi].behaviour,
+                Behaviour::Bullet(behaviour::bullet::BulletState {
+                    player_shot: true,
+                    ..
+                })
+            );
             if let Behaviour::Mine(_) = self.entities[vi].behaviour {
-                if self.entities[vi].health > 0 {
+                if self.entities[vi].health > 0 && by_player {
                     self.kills += 1;
                 }
                 self.entities[vi].health -= behaviour::bullet::DAMAGE;
                 self.entities[vi].health = 0;
+            } else {
+                let fresh = matches!(&self.entities[vi].behaviour,
+                    Behaviour::LaserEye(s) if s.hurt.is_empty());
+                let p = crate::damage::Pending {
+                    amount: behaviour::bullet::DAMAGE,
+                    explosion: true,
+                    ..Default::default()
+                };
+                if behaviour::interact::hurt(&mut self.entities[vi], &p) && fresh && by_player {
+                    self.kills += 1;
+                }
             }
             let c = self.entities[bi].center();
             self.entities[bi].alive = false;
             out.impacts.push((c.0, c.1, self.entities[bi].layer));
+        }
+        for e in self.entities.iter_mut() {
+            behaviour::bullet::finish(e, out);
+        }
+    }
+
+    /// Interações entre objetos depois do tique deles (`behaviour::interact`): raios contra
+    /// objetos, fogo e cerca contra barris, o par da cerca, os efeitos `oex` fixos e o
+    /// teletransporte do Jake.
+    fn object_interactions(&mut self, out: &mut Out) {
+        behaviour::interact::laser_hits(&mut self.entities, out);
+        behaviour::interact::apply_hazards(&mut self.entities, &out.hazards);
+        behaviour::interact::sync_fences(&mut self.entities);
+        for (b, label) in std::mem::take(&mut out.effects) {
+            if let Some(e) = self.effect_entity(&b, label) {
+                if let Some(c) = behaviour::explosion::frame_cue(&e) {
+                    out.events.push(Event::Sound(c));
+                }
+                out.spawn.push(e);
+            }
+        }
+        if let Some(req) = out.teleport.take() {
+            let dest = behaviour::teleporter::destination(&self.entities, &req, &mut self.rng);
+            if let (Some((delta, i)), Some(j)) = (dest, self.jake.as_mut()) {
+                j.start_teleport(delta);
+                behaviour::teleporter::arrive(&mut self.entities[i], self.tick_count);
+            }
         }
     }
 
@@ -1078,7 +1209,16 @@ impl Scene {
                 match e.behaviour {
                     Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, &mut out),
                     Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, &mut out),
-                    Behaviour::Pickup => behaviour::pickup::tick(e, &ctx, &mut out),
+                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &ctx, &mut out),
+                    Behaviour::LaserEye(_) => behaviour::laser_eye::tick(e, &mut ctx, &mut out),
+                    Behaviour::Laser(_) => behaviour::laser::tick(e, &ctx, &mut out),
+                    Behaviour::Barrel(_) => behaviour::barrel::tick(e, &ctx, &mut out),
+                    Behaviour::Fire(_) => behaviour::fire::tick(e, &ctx, &mut out),
+                    Behaviour::Fence(_) => behaviour::fence::tick(e, &mut ctx, &mut out),
+                    Behaviour::Graffiti(_) => behaviour::graffiti::tick(e, &ctx, &mut out),
+                    Behaviour::CarPiece => behaviour::car_piece::tick(e, &ctx, &mut out),
+                    Behaviour::Teleporter(_) => behaviour::teleporter::tick(e, &ctx, &mut out),
+                    Behaviour::Door(_) => behaviour::door::tick(e, &ctx, &mut out),
                     Behaviour::Mine(_) => behaviour::mine::tick(e, &mut ctx, &mut out),
                     Behaviour::Explosion(_) => behaviour::explosion::tick(e, &mut out),
                     Behaviour::Exit(_) => behaviour::exit::tick(e),
@@ -1091,6 +1231,7 @@ impl Scene {
         self.rng = rng;
         self.bullet_hits(&mut out);
         self.resolve_impacts(&mut out);
+        self.object_interactions(&mut out);
         // Explosões: dano de área ao Jake e às minas, e o efeito visual (`OEX.ANM`).
         for b in &out.blasts {
             if let Some(j) = self.jake.as_mut().filter(|j| j.is_active()) {
@@ -1101,11 +1242,7 @@ impl Scene {
                 }
             }
             for e in self.entities.iter_mut().filter(|e| e.alive) {
-                if let Behaviour::Mine(_) = e.behaviour {
-                    if let Some(p) = behaviour::explosion::area_effect(b, e.center(), e.layer) {
-                        e.health -= p.amount.max(1);
-                    }
-                }
+                behaviour::interact::blast(b, e);
             }
             if let Some(e) = self.explosion_entity(b) {
                 if let Some(c) = behaviour::explosion::frame_cue(&e) {
@@ -1117,6 +1254,9 @@ impl Scene {
         if let Some(j) = self.jake.as_mut() {
             if let Some(h) = out.heal {
                 j.health = h;
+            }
+            if let Some(inv) = out.inventory.take() {
+                j.inventory = inv;
             }
             if !out.jake_damage.is_empty() {
                 j.hurt(out.jake_damage);
@@ -1615,6 +1755,7 @@ mod tests {
             behaviour: Behaviour::Mine(MineState::new(0)),
         };
         mine.values = vec![0];
+        let mine2 = mine.clone();
         s.entities.push(mine);
         s.tick(SHOOT);
         for _ in 0..20 {
@@ -1626,6 +1767,28 @@ mod tests {
                 .any(|e| e.alive && e.kind == crate::entity::MINE)
         );
         assert_eq!(s.kills, 1, "mina morta pela bala conta para o jogador");
+        // bala que não é do jogador (inimigos atirando, no futuro): mata, mas não conta
+        s.entities.push(mine2);
+        let not_mine = |s: &mut Scene| {
+            for e in s.entities.iter_mut() {
+                if let Behaviour::Bullet(b) = &mut e.behaviour {
+                    b.player_shot = false;
+                }
+            }
+        };
+        for _ in 0..30 {
+            s.tick(SHOOT);
+            not_mine(&mut s);
+        }
+        for _ in 0..20 {
+            s.tick(0);
+        }
+        assert!(
+            !s.entities
+                .iter()
+                .any(|e| e.alive && e.kind == crate::entity::MINE)
+        );
+        assert_eq!(s.kills, 1);
         // (a animação sintética só tem o rótulo 1: a faísca `oex15` fica para o teste real)
         assert!(
             s.events
@@ -1825,11 +1988,12 @@ mod tests {
         assert_eq!(object_start(&o, &a).0, 0);
         o.start_label = Some(999);
         assert_eq!(object_start(&o, &a).0, 0);
-        // item de tipo 6: mostra values[0], mas a escala é a do quadro 0
-        let mut item = object(crate::entity::GENERIC_ITEM, 0, 0, "OGF.ANM");
+        // grafite (tipo 6): o OGF.ANM é uma fonte; o sprite fica parado no quadro 0 e o
+        // desenho é letra a letra
+        let mut item = object(crate::entity::GRAFFITI, 0, 0, "OGF.ANM");
         item.values = vec![1];
         let (ref_frame, player, frozen) = object_start(&item, &a);
-        assert_eq!((ref_frame, player.frame(), frozen), (0, 1, true));
+        assert_eq!((ref_frame, player.frame(), frozen), (0, 0, true));
     }
 
     #[test]

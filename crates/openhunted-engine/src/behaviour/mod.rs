@@ -2,13 +2,23 @@
 //! Comportamentos por tipo de objeto (`docs/re/logica-fase.md`, `dicas.md`, `itens.md`,
 //! `minas.md`, `dano-vida.md`).
 
+pub mod barrel;
 pub mod bullet;
+pub mod car_piece;
 pub mod casing;
+pub mod door;
 pub mod exit;
 pub mod explosion;
+pub mod fence;
+pub mod fire;
+pub mod graffiti;
 pub mod hint;
+pub mod interact;
+pub mod laser;
+pub mod laser_eye;
 pub mod mine;
 pub mod pickup;
+pub mod teleporter;
 pub mod zone;
 
 use crate::damage::Pending;
@@ -91,6 +101,85 @@ pub struct Out {
     pub heal: Option<crate::damage::Health>,
     /// Impactos de bala (centro x, y, camada): faísca `oex15` e som.
     pub impacts: Vec<(i32, i32, i32)>,
+    /// Efeitos do `OEX.ANM` com rótulo fixo e sem dano (o `oex01` do raio laser).
+    pub effects: Vec<(Blast, u16)>,
+    /// Dano de contato a outros objetos (fogo, cerca): a cena aplica a quem cruza a caixa.
+    pub hazards: Vec<Hazard>,
+    /// Teletransporte pedido neste tique.
+    pub teleport: Option<teleporter::Request>,
+    /// Inventário do Jake depois de apanhar armas e munição neste tique.
+    pub inventory: Option<crate::jake::Inventory>,
+}
+
+/// Área que fere quem a cruza na mesma camada (`0x43d629` de fogo e cerca sobre os objetos).
+#[derive(Debug, Clone, Copy)]
+pub struct Hazard {
+    pub rect: Rect,
+    pub layer: i32,
+    pub damage: Pending,
+}
+
+/// Ângulo de 16 bits de (dx, dy) com y para baixo (`0x46718e`, atan2): 0 = direita,
+/// 16384 = baixo, 32768 = esquerda.
+pub fn angle16(dx: i32, dy: i32) -> i32 {
+    let a = f64::from(dy).atan2(f64::from(dx));
+    ((a * 65536.0 / std::f64::consts::TAU).round() as i64).rem_euclid(65536) as i32
+}
+
+/// Diferença `a − b` de ângulos de 16 bits, reduzida a −32768…32767.
+pub fn angle_diff(a: i32, b: i32) -> i32 {
+    (a.wrapping_sub(b) as i16) as i32
+}
+
+/// Cosseno e seno em escala 2^14 de um ângulo de 16 bits (`0x467154`/`0x46717a`).
+pub fn cos_sin14(a: i32) -> (i32, i32) {
+    let r = f64::from(a) * std::f64::consts::TAU / 65536.0;
+    (
+        (r.cos() * 16384.0).round() as i32,
+        (r.sin() * 16384.0).round() as i32,
+    )
+}
+
+/// Caixa `r` alargada em `d` px de cada lado (contato de quem encosta num sólido).
+pub fn grow(r: Rect, d: i32) -> Rect {
+    Rect {
+        x: r.x - d,
+        y: r.y - d,
+        w: r.w + 2 * d,
+        h: r.h + 2 * d,
+    }
+}
+
+/// Põe o sprite da entidade no quadro `offset` do rótulo `label` (sem o rótulo, nada).
+pub fn show(e: &mut Entity, label: u16, offset: usize) {
+    if let Some(sp) = e.sprite.as_mut() {
+        if let Some(l) = sp.anim.labels.iter().find(|l| l.id == label) {
+            let f = (l.frame as usize).saturating_add(offset);
+            if f < sp.anim.frames.len() {
+                sp.player = crate::AnimPlayer::from_frame(&sp.anim, f);
+            }
+        }
+    }
+}
+
+/// Rótulo em que está o quadro atual do sprite (o de maior início ≤ quadro).
+pub fn label_of(sp: &crate::Sprite) -> Option<u16> {
+    let f = sp.player.frame();
+    sp.anim
+        .labels
+        .iter()
+        .filter(|l| l.frame as usize <= f)
+        .max_by_key(|l| l.frame)
+        .map(|l| l.id)
+}
+
+/// Recomeça o sprite no rótulo `label`, se ele existir.
+pub fn restart(e: &mut Entity, label: u16) {
+    if let Some(sp) = e.sprite.as_mut() {
+        if let Some(p) = crate::AnimPlayer::at_label(&sp.anim, label) {
+            sp.player = p;
+        }
+    }
 }
 
 #[cfg(test)]

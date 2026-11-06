@@ -205,7 +205,7 @@ impl Results {
             self.progress += COUNT_STEP;
         }
         // durante a contagem, uma tecla só a salta para o fim
-        if matches!(input, Input::Activate | Input::Cancel) && self.progress < 100 {
+        if matches!(input, Input::Activate | Input::Cancel | Input::Nav(_)) && self.progress < 100 {
             self.skip_count();
             return None;
         }

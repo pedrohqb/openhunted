@@ -21,6 +21,12 @@ pub struct BulletState {
     pub vy: i32,
     /// Posição antes do último deslocamento (para o teste de acerto varrer o caminho).
     pub prev: Option<(i32, i32)>,
+    /// Bateu no cenário neste tique: a cena ainda testa o acerto em objetos encostados na
+    /// parede (o olho-laser no teto) antes de virar faísca.
+    pub spent: bool,
+    /// Disparada pelo jogador (as mortes que ela causa entram nas estatísticas). Quando os
+    /// inimigos atirarem, as balas deles nascem com `false`.
+    pub player_shot: bool,
 }
 
 /// Caixa varrida pela bala no último tique (união da caixa anterior com a atual), para o
@@ -105,8 +111,20 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         return;
     }
     if !moved {
-        e.alive = false;
-        out.impacts.push((c.0, c.1, e.layer));
+        if let crate::entity::Behaviour::Bullet(b) = &mut e.behaviour {
+            b.spent = true;
+        }
+    }
+}
+
+/// Bala que bateu no cenário e não acertou ninguém: faísca no ponto.
+pub fn finish(e: &mut Entity, out: &mut Out) {
+    if let crate::entity::Behaviour::Bullet(b) = &e.behaviour {
+        if b.spent && e.alive {
+            let c = e.center();
+            e.alive = false;
+            out.impacts.push((c.0, c.1, e.layer));
+        }
     }
 }
 

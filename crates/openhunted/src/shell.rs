@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::rc::Rc;
 
+use openhunted_engine::scene::has_controllable_jake;
 use openhunted_engine::shell::briefing::{self, Briefing};
 use openhunted_engine::shell::generic::GenericBox;
 use openhunted_engine::shell::results::{self, Remains, Results, Stats};
@@ -64,7 +65,8 @@ pub struct Held {
 /// Para onde o CANCEL do briefing volta (o estado anterior, `0x47f53c`).
 enum Back {
     Menu,
-    Results(Box<Results>),
+    /// O resultado e a missão de antes (índice e fase), restaurados se o jogador cancela.
+    Results(Box<Results>, Option<usize>, (String, String, String)),
 }
 
 enum State {
@@ -98,7 +100,12 @@ pub struct App {
     missions: Vec<MissionInfo>,
     /// Recorde por missão (só nesta sessão: `hunter.fam` ainda não é gravado).
     records: Vec<i32>,
-    index: usize,
+    /// Índice da missão corrente na lista solo; `None` para fase fora da lista (`--level`).
+    index: Option<usize>,
+    /// Missões com o Jake controlável (as do Garathe ainda não são jogáveis).
+    playable: Vec<bool>,
+    /// Última posição do ponteiro (para a caixa de pausa realçar o botão já na abertura).
+    last_pointer: (i32, i32),
     /// Fase corrente: arquivo, título e descrição.
     level: (String, String, String),
     system: Vec<String>,
@@ -133,7 +140,7 @@ impl App {
                 .iter()
                 .position(|m| m.file.eq_ignore_ascii_case(l))
             {
-                app.index = i;
+                app.index = Some(i);
             }
             app.start_briefing(l, Back::Menu)?;
         }
@@ -159,12 +166,24 @@ impl App {
         let font = assets.font("SLEVD.PFT").ok();
         let generic = assets.bitmap("SGENERIC.BMP").ok();
         let records = vec![0; missions.len()];
+        let playable = missions
+            .iter()
+            .map(|m| {
+                levels
+                    .get(&m.file)
+                    .ok()
+                    .and_then(|d| Level::parse(&d).ok())
+                    .is_some_and(|l| has_controllable_jake(&l))
+            })
+            .collect();
         let mut app = Self {
             assets,
             levels,
             missions,
             records,
-            index: 0,
+            index: None,
+            playable,
+            last_pointer: (SCREEN_W as i32 / 2, SCREEN_H as i32 / 2),
             level: Default::default(),
             system,
             font,
@@ -223,7 +242,7 @@ impl App {
         &self.missions
     }
 
-    pub fn mission_index(&self) -> usize {
+    pub fn mission_index(&self) -> Option<usize> {
         self.index
     }
 
@@ -347,7 +366,11 @@ impl App {
     }
 
     fn start_mission(&mut self, back: Back) {
-        let Some(file) = self.missions.get(self.index).map(|m| m.file.clone()) else {
+        let Some(file) = self
+            .index
+            .and_then(|i| self.missions.get(i))
+            .map(|m| m.file.clone())
+        else {
             return;
         };
         if let Err(e) = self.start_briefing(&file, back) {
@@ -377,6 +400,7 @@ impl App {
         });
         let stats = Stats {
             kills: scene.kills,
+            kills_total: scene.mines_at_start,
             ..Default::default()
         };
         let remains = match scene.jake.as_ref() {
@@ -395,15 +419,16 @@ impl App {
         let mut improve = None;
         let mut cumulative = None;
         if outcome == Outcome::Victory {
-            if let Some(rec) = self.records.get_mut(self.index) {
+            // fase fora da lista (`--level`): sem recorde nem soma
+            if let Some(rec) = self.index.and_then(|i| self.records.get_mut(i)) {
                 if score > *rec {
                     if *rec != 0 {
                         improve = Some(score - *rec);
                     }
                     *rec = score;
                 }
+                cumulative = Some(self.records.iter().sum());
             }
-            cumulative = Some(self.records.iter().sum());
         }
         let improve = improve.map(|d| self.sys_text(text::IMPROVED).replace("%d", &d.to_string()));
         let itf = self.itf("SMISS.ITF")?;
@@ -481,11 +506,19 @@ impl App {
                 use openhunted_engine::input::{JUMP, UP};
                 match key {
                     Key::Pause if v.modal().is_none() && v.outcome().is_none() => {
-                        *pause = self
-                            .generic
-                            .as_ref()
-                            .zip(self.font.as_ref())
-                            .map(|(b, f)| GenericBox::new(b, f, &paused_text, &okay));
+                        *pause = self.generic.as_ref().zip(self.font.as_ref()).map(|(b, f)| {
+                            let mut g = GenericBox::new(b, f, &paused_text, &okay);
+                            g.pointer(self.last_pointer.0, self.last_pointer.1);
+                            g
+                        });
+                    }
+                    // sem personagem controlável (fases do Garathe) a fase nunca acaba:
+                    // Esc volta ao menu (decisão do port)
+                    Key::Escape if !v.has_jake() => {
+                        if let Err(e) = self.open_menu() {
+                            eprintln!("erro: {e}");
+                            self.quit = true;
+                        }
                     }
                     Key::Tab => v.apply(Action::ToggleOverlay),
                     // com a dica aberta, a tecla só a fecha (não vira pulo nem CIMA)
@@ -495,7 +528,7 @@ impl App {
                     Key::PageDown => v.apply(Action::PageRight),
                     Key::Home => v.apply(Action::Home),
                     Key::End => v.apply(Action::End),
-                    // Esc no jogo: nada (como o original)
+                    // Esc com o Jake: nada (como o original)
                     _ => {}
                 }
             }
@@ -548,6 +581,7 @@ impl App {
 
     /// Ponteiro do mouse em coordenadas da tela 640×480.
     pub fn pointer_move(&mut self, x: i32, y: i32) {
+        self.last_pointer = (x, y);
         match &mut self.state {
             State::Menu(s) => {
                 s.handle(Input::PointerMove(x, y));
@@ -560,6 +594,14 @@ impl App {
             }
             State::Play { pause: Some(b), .. } => b.pointer(x, y),
             State::Play { .. } => {}
+        }
+    }
+
+    /// A janela perdeu o foco: solta o botão do mouse e, no jogo, pausa (decisão do port).
+    pub fn focus_lost(&mut self) {
+        self.pointer_button(false);
+        if self.mode() == Mode::Play && self.viewer.as_ref().is_some_and(|v| v.modal().is_none()) {
+            self.key_down(Key::Pause);
         }
     }
 
@@ -606,7 +648,7 @@ impl App {
                 self.last_menu_button = menu::NEW_GAME;
                 // `0x440fe0`: zera a campanha e começa da primeira missão solo
                 self.records.iter_mut().for_each(|r| *r = 0);
-                self.index = 0;
+                self.index = Some(0);
                 self.start_mission(Back::Menu);
             }
             // sem o diálogo de confirmação 10005
@@ -645,7 +687,10 @@ impl App {
                             self.quit = true;
                         }
                     }
-                    Back::Results(mut r) => {
+                    Back::Results(mut r, index, level) => {
+                        // a missão volta a ser a do resultado (o REPLAY repete ela)
+                        self.index = index;
+                        self.level = level;
                         r.from_game = false;
                         self.state = State::Results(r);
                     }
@@ -665,6 +710,7 @@ impl App {
             },
         );
         let State::Results(r) = old else { return };
+        let back = |r: Box<Results>, app: &App| Back::Results(r, app.index, app.level.clone());
         match c {
             results::Choice::Main => {
                 if let Err(e) = self.open_menu() {
@@ -674,23 +720,36 @@ impl App {
             }
             results::Choice::Replay => {
                 let file = self.level.0.clone();
-                if let Err(e) = self.start_briefing(&file, Back::Results(r)) {
+                let b = back(r, self);
+                if let Err(e) = self.start_briefing(&file, b) {
                     eprintln!("erro ao abrir {file}: {e}");
                 }
             }
             results::Choice::Next => {
-                self.index = next_mission(self.index, &self.records);
-                let file = self.missions.get(self.index).map(|m| m.file.clone());
-                if let Some(file) = file {
-                    if let Err(e) = self.start_briefing(&file, Back::Results(r)) {
+                // fase fora da lista: não há próxima, vai ao menu
+                let next = self
+                    .index
+                    .and_then(|i| next_mission(i, &self.records, &self.playable));
+                let file = next
+                    .and_then(|i| self.missions.get(i))
+                    .map(|m| m.file.clone());
+                if let (Some(i), Some(file)) = (next, file) {
+                    let b = back(r, self);
+                    let prev = self.index;
+                    self.index = Some(i);
+                    if let Err(e) = self.start_briefing(&file, b) {
                         eprintln!("erro ao abrir {file}: {e}");
+                        self.index = prev;
                     }
                 }
             }
         }
-        // se a troca falhou, fica onde estava
-        if matches!(self.state, State::Play { .. }) && self.viewer.is_none() {
-            let _ = self.open_menu();
+        // a troca falhou (ou não havia para onde ir): menu
+        if matches!(self.state, State::Play { .. }) {
+            if let Err(e) = self.open_menu() {
+                eprintln!("erro: {e}");
+                self.quit = true;
+            }
         }
     }
 
@@ -802,11 +861,99 @@ mod tests {
     use super::*;
 
     fn app() -> Option<App> {
+        app_at(None)
+    }
+
+    fn app_at(level: Option<&str>) -> Option<App> {
         let Some(p) = std::env::var_os("OPENHUNTED_DATA") else {
             eprintln!("pulado: OPENHUNTED_DATA não definido");
             return None;
         };
-        Some(App::load(Path::new(&p), None).unwrap())
+        Some(App::load(Path::new(&p), level).unwrap())
+    }
+
+    #[test]
+    fn cancelling_next_briefing_restores_the_mission_for_replay() {
+        let Some(mut a) = app() else { return };
+        enter(&mut a);
+        enter(&mut a);
+        win(&mut a, 0);
+        a.key_down(Key::Enter); // salta a contagem
+        enter(&mut a); // NEXT
+        assert_eq!(a.level_file(), "T_J_003.lev");
+        a.key_down(Key::Escape); // CANCEL: volta ao resultado da T_J_001
+        assert_eq!(a.mode(), Mode::Results);
+        assert_eq!(a.mission_index(), Some(0));
+        assert_eq!(a.level_file(), "T_J_001.lev");
+        a.key_down(Key::Left); // de NEXT a REPLAY
+        enter(&mut a);
+        assert_eq!(a.mode(), Mode::Briefing);
+        assert_eq!(
+            a.level_file(),
+            "T_J_001.lev",
+            "REPLAY repete a missão do resultado"
+        );
+    }
+
+    #[test]
+    fn garathe_level_escape_returns_to_menu() {
+        let Some(mut a) = app_at(Some("T_M_002.LEV")) else {
+            return;
+        };
+        assert!(!a.playable[1], "T_M_002 sem personagem controlável");
+        assert!(a.playable[0]);
+        enter(&mut a); // GO
+        assert_eq!(a.mode(), Mode::Play);
+        a.key_down(Key::Escape);
+        assert_eq!(a.mode(), Mode::Menu);
+    }
+
+    #[test]
+    fn level_outside_the_list_keeps_no_record_and_next_goes_to_menu() {
+        let Some(mut a) = app_at(Some("C_2_001.LEV")) else {
+            return;
+        };
+        assert_eq!(a.mission_index(), None);
+        enter(&mut a);
+        win(&mut a, 1);
+        assert_eq!(a.mode(), Mode::Results);
+        assert!(a.records.iter().all(|&r| r == 0));
+        assert_eq!(a.results().unwrap().cumulative, None);
+        a.key_down(Key::Enter); // salta a contagem
+        enter(&mut a); // NEXT
+        assert_eq!(a.mode(), Mode::Menu);
+    }
+
+    #[test]
+    fn arrow_key_skips_the_count_up() {
+        let Some(mut a) = app() else { return };
+        enter(&mut a);
+        enter(&mut a);
+        win(&mut a, 0);
+        a.key_down(Key::Down);
+        assert_eq!(a.results().unwrap().progress(), 100);
+    }
+
+    #[test]
+    fn focus_loss_pauses_and_pause_box_hovers_at_once() {
+        let Some(mut a) = app() else { return };
+        enter(&mut a);
+        enter(&mut a);
+        a.advance(100);
+        a.pointer_button(true);
+        a.focus_lost();
+        assert_eq!(a.mode(), Mode::Paused);
+        let State::Play { pause: Some(b), .. } = &a.state else {
+            panic!()
+        };
+        let r = b.button_rect;
+        a.resume();
+        a.pointer_move(r.x + 4, r.y + 4);
+        a.key_down(Key::Pause);
+        // sem mexer o mouse, um clique já pega o OKAY
+        a.pointer_button(true);
+        a.pointer_button(false);
+        assert_eq!(a.mode(), Mode::Play);
     }
 
     /// Clica com o teclado no controle sob o ponteiro e espera o despacho.
@@ -875,6 +1022,7 @@ mod tests {
         let r = a.results().unwrap();
         assert_eq!(r.outcome, Outcome::Victory);
         assert_eq!(r.stats.kills, 2);
+        assert_eq!(r.stats.kills_total, 7, "as minas da fase");
         assert!(r.bonus >= 500);
         assert_eq!(r.score, 60 + r.bonus);
         assert_eq!(a.records[0], r.score);
@@ -884,8 +1032,9 @@ mod tests {
         }
         enter(&mut a);
         assert_eq!(a.mode(), Mode::Briefing);
-        assert_eq!(a.mission_index(), 1);
-        assert_eq!(a.level_file(), "T_M_002.lev");
+        // a T_M_002 (Garathe, sem personagem controlável) é pulada
+        assert_eq!(a.mission_index(), Some(2));
+        assert_eq!(a.level_file(), "T_J_003.lev");
         // CANCEL volta ao resultado; aí o Esc vai ao menu
         a.key_down(Key::Escape);
         assert_eq!(a.mode(), Mode::Results);
