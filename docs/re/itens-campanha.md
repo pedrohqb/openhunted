@@ -94,9 +94,40 @@ saída).
 fora de colisão e de varreduras), id de gatilho 0. A tabela de tipos tem o par `(0, nulo)`:
 **nenhuma inicialização**. Restos do editor (um traz `EDITOR.INI` em outras fases) [inferido].
 
+## Porta de célula (`0x40ecd7`, `0x40ed62`, `0x40eed4`, `0x40f040`) [confirmado]
+
+Uma célula é porta se `(índice / 10) % 100 = 38` (`0x40ecd7`; as demais ficam com a rotina
+normal `0x432c71`). Campos: `+0x00` índice (o rótulo do cenário), a tabela de `s16` lida
+depois de `+0x9c` em `+0x44…` (no JSON, `fields[16..]` nas versões ≥ 1006):
+
+| Campo | Papel |
+|---|---|
+| `+0x44` | ≠ 0 → começa aberta (estado 4), senão fechada (1) |
+| `+0x48` | chaves exigidas (bit i = chave 62 + i) |
+| `+0x4c` | tiques aberta até fechar (0 → 55; < 0 → nunca); `+0x50` é o contador |
+| `+0x54` | estado: 1 fechada, 2 fechando, 3 abrindo, 4 aberta |
+| `+0x30` | quadro do cenário (`+0x18` a animação, `+0x2c` a colisão) |
+| `+0xa0` | gatilhos da célula (4 entradas) |
+
+`0x40eed4(célula, s)`: 1 → quadro = primeiro do rótulo e colisão `C%d%c%02d%c1.BRD`
+(`índice/10000`, `'A' + índice/1000 % 10`, `índice/10 % 100`, `'A' + índice % 10`); 2 → a
+mesma colisão fechada; 3 → nada; 4 → último quadro do rótulo e `…0.BRD` (aberta). Por tique
+(`0x40ed62`): abrindo, quadro + 1 até o fim do rótulo → 4; fechando, quadro − 1 até o
+começo → 1; aberta, conta `+0x50` e, a 0, se nenhum objeto cruza a colisão fechada
+(`0x435d1c`), `+0x50 = +0x4c` e fecha. Nos dados, a colisão fechada tem uma coluna de 20 px
+no meio da célula que a aberta encurta (`C1A38A1/0.BRD`: 104 → 30 px de altura).
+
+`0x40f040(célula, máscara, quem)` (Jake `0x425e3c`, Garathe `0x42abac`): fechada → sem a
+trapaça `0x49738c`, com `+0x48 ≠ 0` e `+0x48 & máscara = 0` fala (3715/3714 Jake,
+3730/3732 Garathe) e recusa; senão exige `0x435bd8(+0xa0, 2, 2)` (entradas 3–4) verdadeiro,
+ou fala (3715/3719, 3730/3741); aceita → `0x40eed4(3)`. Aberta → `0x40eed4(2)`. Devolve
+estado = 3. O Jake chama ao fim do rótulo 100 (empurrar, `0x425d04`) sobre zona PR 0x20,
+com a célula da posição dele (`x >> 7`, `y >> 7`, camada). As entradas 1–2 de `+0xa0` não
+são lidas por nenhuma das rotinas vistas.
+
 ## Em aberto
 
 - Nomes das falas 3714/3715/3719/3730/3732/3741 (fora do `SOUND.RES`).
-- Estrutura completa da porta de célula (`+0x48`, `+0x54`, `+0xa0`) e `0x40eed4`.
+- O que lê as entradas 1–2 dos gatilhos das células.
 - Se alguma fase da campanha usa portas com chaves que o Jake não encontra (conferir
   máscaras `+0x48` contra as chaves presentes).
