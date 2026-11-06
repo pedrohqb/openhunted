@@ -11,6 +11,18 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M7a: os inimigos principais da campanha.** O robô de segurança voador (`OSR`) flutua,
+patrulha, persegue o Jake a 80–200 px e dispara raios laser alternando os dois canhões, em
+rajadas; não vê o Jake escondido contra a parede; atingido, a vida cai a 45 e, abaixo de 0,
+ele cai e explode dez vezes. A sentinela (`OSE`) abre o casulo diante do Jake e dispara
+rajadas de três balas (fechada, é invulnerável). A mina saltadora (`OHS`) dá cinco pulinhos e
+um pulo grande para o lado em que olha e explode ao tocar o Jake. O gerador (`OHG`) solta
+minas flutuantes em levas, até quatro vivas. O Bruiser acorda pelos gatilhos, anda, atira
+balas e foguetes, põe fogo no chão, faz o chão tremer (o Jake cambaleia) e esmaga quem está
+embaixo; leva metade do dano, é imune a fogo e morre em 30 explosões. As mortes por bala do
+jogador contam no resultado; os sons de cada um tocam pelos quadros (`SOUND.TBL`). Regras e
+simplificações em `docs/superpowers/specs/2026-11-06-m7a-inimigos-design.md`.
+
 **M6b: os demais movimentos do Jake.** O esqueleto `JAKE.SKE` é lido e move o Jake como no
 original: o andar furtivo (X), o impulso do pulo estendido, os pulos parado e para cima (com a
 tabela de velocidades e o controle no ar), as aterrissagens que deslizam, a escalada, o
@@ -59,8 +71,8 @@ Etapas anteriores: M1 formatos (a biblioteca `openhunted-formats` lê os dados d
 estado em [`docs/formats/`](docs/formats/README.md)); M2 visualizador de fase; M3a o Jake
 corre e pula; M3b objetos sólidos e presença por modo de jogo.
 
-Ainda não há: as outras armas, o soco e a troca de arma; os demais inimigos (e o efeito do
-esconderijo sobre eles), empurrar blocos (zona 0x20), o equilíbrio na beirada (162/163),
+Ainda não há: as outras armas, o soco e a troca de arma; os demais inimigos (Morte, Camaleão,
+catapulta, dardos, Anticorpo, Manta, Entidade, Minotauro), empurrar blocos (zona 0x20), o equilíbrio na beirada (162/163),
 música, os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, a
 abertura (logotipo, filme, história, créditos), os demais botões do menu (carregar, escolher
 missão, opções, dispositivos, heróis, ajuda, dois jogadores), tesouros e segredos, gravação de
