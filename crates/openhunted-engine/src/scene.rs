@@ -999,10 +999,12 @@ impl Scene {
         }
         if let Some(req) = out.teleport.take() {
             let dest = behaviour::teleporter::destination(&self.entities, &req, &mut self.rng);
+            let mut to = None;
             if let (Some((delta, i)), Some(j)) = (dest, self.jake.as_mut()) {
                 j.start_teleport(delta);
-                behaviour::teleporter::arrive(&mut self.entities[i], self.tick_count);
+                to = Some(i);
             }
+            behaviour::teleporter::settle(&mut self.entities, to, self.tick_count);
         }
     }
 

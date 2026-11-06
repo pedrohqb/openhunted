@@ -131,7 +131,8 @@ pub enum State {
 
 /// Viagem do teletransporte: some, muda de lugar na metade e reaparece no fim.
 pub const TELEPORT_TICKS: u32 = 42;
-const TELEPORT_MOVE: u32 = TELEPORT_TICKS / 2;
+/// Tique da viagem em que o passageiro muda de lugar (metade).
+pub const TELEPORT_MOVE: u32 = TELEPORT_TICKS / 2;
 
 /// Mira da pistola (`0x0043ae4c`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -614,6 +615,11 @@ impl Jake {
     /// Vivo e no jogo (não morrendo, saindo pela porta nem em viagem).
     pub fn is_active(&self) -> bool {
         !self.is_dead() && !matches!(self.state, State::EnteringExit(_) | State::Teleporting(_))
+    }
+
+    /// Em viagem de teletransporte.
+    pub fn is_teleporting(&self) -> bool {
+        matches!(self.state, State::Teleporting(_))
     }
 
     /// Desenhado (fica invisível durante o teletransporte).

@@ -291,3 +291,35 @@ fn random_play_never_panics() {
     }
     assert!(n > 20, "poucas fases com Jake: {n}");
 }
+
+/// I_J_104: os teletransportes id 1 (810, 366) e id 2 (790, 110), camada 0, apontam um para o
+/// outro. Levado de um ao outro, o Jake reaparece sobre o destino e recupera o controle: o
+/// destino espera 40 tiques a partir da mudança de lugar e lembra o passageiro enquanto ele
+/// viaja, sem mandá-lo de volta.
+#[test]
+fn i_j_104_teleporter_pair_does_not_ping_pong() {
+    let Some(mut s) = load("I_J_104.LEV") else {
+        return;
+    };
+    s.jake.as_mut().unwrap().set_layer(0);
+    s.set_jake_layer(0);
+    place(&mut s, 812, 330, 0);
+    let mut trips = 0;
+    let mut was = false;
+    let mut active_run = 0;
+    for _ in 0..300 {
+        s.tick(0);
+        let j = s.jake.as_ref().unwrap();
+        let now = matches!(j.state(), State::Teleporting(_));
+        if now && !was {
+            trips += 1;
+        }
+        was = now;
+        active_run = if j.is_active() { active_run + 1 } else { 0 };
+    }
+    let j = s.jake.as_ref().unwrap();
+    assert_eq!(trips, 1, "viagens: {trips}");
+    assert!(active_run > 200, "sem controle: {active_run}");
+    // uma célula acima (o id 2 está na célula de cima)
+    assert!(j.body.y < 336 - 100, "não chegou ao id 2: y {}", j.body.y);
+}
