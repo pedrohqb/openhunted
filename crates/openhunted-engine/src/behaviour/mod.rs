@@ -20,9 +20,11 @@ pub mod laser_eye;
 pub mod mine;
 pub mod pellet;
 pub mod pickup;
+pub mod piston;
 pub mod projectile;
 pub mod rocket;
 pub mod star;
+pub mod switch;
 pub mod teleporter;
 pub mod zone;
 

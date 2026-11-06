@@ -228,3 +228,88 @@ fn fuzz_random_input_on_all_solo_levels() {
         }
     }
 }
+
+/// D_J_012: o pistão anda com o gatilho (o alvo 3 não existe na fase: vale verdadeiro,
+/// `0x435bd8`), mas não com o alvo desligado; esmaga o Jake na frente dele.
+#[test]
+fn d_j_012_piston_moves_on_its_trigger_and_crushes() {
+    let Some(mut s) = load("D_J_012.LEV") else {
+        return;
+    };
+    let pi = s.entities.iter().position(|e| e.kind == 39).unwrap();
+    let target = s.entities[pi].triggers[0].0;
+    let frame = |s: &Scene| match &s.entities[pi].behaviour {
+        Behaviour::Piston(p) => p.frame,
+        _ => unreachable!(),
+    };
+    assert!(s.entities.iter().all(|e| e.id != target));
+    // um alvo desligado com esse id segura o pistão
+    let mut off = s.entities[pi].clone();
+    off.kind = 0;
+    off.id = target;
+    off.on = false;
+    off.behaviour = Behaviour::Static;
+    s.entities.push(off);
+    let parked = s.entities.len() - 1;
+    if let Behaviour::Piston(p) = &mut s.entities[pi].behaviour {
+        *p = Default::default();
+    }
+    for _ in 0..10 {
+        s.tick(0);
+    }
+    assert_eq!(frame(&s), 0, "parado com o alvo desligado");
+    s.entities[parked].on = true;
+    let r = s.entities[pi].sprite_rect().unwrap();
+    let layer = s.entities[pi].layer;
+    let hp = s.jake.as_ref().unwrap().health.hp;
+    place(&mut s, r.x + r.w / 2, r.y, layer, 0);
+    let mut moved = 0;
+    for _ in 0..12 {
+        s.tick(0);
+        moved = moved.max(frame(&s));
+    }
+    assert!(moved >= 5, "o pistão andou: {moved}");
+    assert!(s.jake.as_ref().unwrap().health.hp < hp, "esmagou o Jake");
+}
+
+/// D_J_001: CIMA diante de um interruptor (zona PR 0x40) o inverte.
+#[test]
+fn d_j_001_up_flips_a_switch() {
+    let Some(mut s) = load("D_J_001.LEV") else {
+        return;
+    };
+    let zones: Vec<_> = s
+        .prop_zones
+        .iter()
+        .filter(|z| z.kind & 0x40 != 0)
+        .copied()
+        .collect();
+    let si = s
+        .entities
+        .iter()
+        .position(|e| {
+            e.kind == 74
+                && e.bounds().is_some_and(|b| {
+                    zones
+                        .iter()
+                        .any(|z| z.layer == e.layer && z.rect.overlaps(&b))
+                })
+        })
+        .expect("interruptor sobre zona 0x40");
+    let b = s.entities[si].bounds().unwrap();
+    let z = zones
+        .iter()
+        .find(|z| z.layer == s.entities[si].layer && z.rect.overlaps(&b))
+        .copied()
+        .unwrap();
+    let was = s.entities[si].on;
+    place(
+        &mut s,
+        z.rect.x + z.rect.w / 2 - 11,
+        z.rect.y - 10,
+        z.layer,
+        15,
+    );
+    s.tick(openhunted_engine::input::UP);
+    assert_ne!(s.entities[si].on, was);
+}

@@ -3,6 +3,7 @@
 
 mod arsenal;
 mod cell_door;
+mod switches;
 
 use std::rc::Rc;
 
@@ -785,6 +786,7 @@ impl Scene {
             self.events.extend(pre.events);
             let up_edge = input & crate::input::UP != 0 && self.prev_input & crate::input::UP == 0;
             if up_edge {
+                self.try_switch();
                 self.try_exit();
             }
             self.tick_entities();
@@ -1341,6 +1343,8 @@ impl Scene {
                     Behaviour::Rocket(_) => behaviour::rocket::tick(e, &ctx, &mut out),
                     Behaviour::Star(_) => behaviour::star::tick(e, &ctx, &mut out),
                     Behaviour::Grenade(_) => behaviour::grenade::tick(e, &ctx, &mut out),
+                    Behaviour::Piston(_) => behaviour::piston::tick(e, &ctx, &mut out),
+                    Behaviour::Switch(_) => behaviour::switch::tick(e),
                     _ => {}
                 }
             }

@@ -80,6 +80,9 @@ pub const ROCKET: u32 = 21;
 pub const SHELL: u32 = 23;
 pub const GRENADE: u32 = 26;
 pub const STAR: u32 = 27;
+/// Pistão e interruptor.
+pub const PISTON: u32 = 39;
+pub const SWITCH: u32 = 74;
 
 /// Estado por tipo.
 #[derive(Debug, Clone)]
@@ -106,6 +109,8 @@ pub enum Behaviour {
     Rocket(crate::behaviour::rocket::RocketState),
     Star(crate::behaviour::star::StarState),
     Grenade(crate::behaviour::grenade::GrenadeState),
+    Piston(crate::behaviour::piston::PistonState),
+    Switch(crate::behaviour::switch::SwitchState),
 }
 
 #[derive(Debug, Clone)]
@@ -210,8 +215,10 @@ pub fn object_scale(a: i32, b: i32, ref_w: i32, ref_h: i32) -> (i32, i32) {
 /// barril, porta, cerca).
 pub fn object_start(o: &LevelObject, a: &Animation) -> (usize, AnimPlayer, bool) {
     let n = a.frames.len();
-    let frozen = matches!(o.kind, GRAFFITI | LASER_EYE | BARREL | FENCE | TELEPORTER)
-        || DOORS.contains(&o.kind);
+    let frozen = matches!(
+        o.kind,
+        GRAFFITI | LASER_EYE | BARREL | FENCE | TELEPORTER | PISTON | SWITCH
+    ) || DOORS.contains(&o.kind);
     let state = o.fields.get(5).copied().unwrap_or(0);
     let label = match o.kind {
         // A saída força o rótulo 8 (`0x0040e393`).
@@ -220,7 +227,7 @@ pub fn object_start(o: &LevelObject, a: &Animation) -> (usize, AnimPlayer, bool)
         // teletransporte: rótulo 2 (`obo01`, parado); peça do carro: rótulo 1 [ruling: sem
         // campanha, a peça é a primeira].
         BARREL => Some(if state == 3 { 3 } else { 1 }),
-        LASER_EYE | FENCE | CAR_PIECE => Some(1),
+        LASER_EYE | FENCE | CAR_PIECE | PISTON => Some(1),
         // chaves e bandeiras: rótulo = tipo (`0x40f214`, `0x40b2c8`); estrela no chão: 4
         62..=67 | 80..=85 => Some(o.kind as u16),
         STAR => Some(4),
@@ -390,6 +397,21 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
             }
         }
         CAR_PIECE => Behaviour::CarPiece,
+        PISTON => {
+            // caixa = retângulo do quadro (só contato, `|= 0x28`)
+            if let Some(fb) = frame_box {
+                boxes = vec![fb];
+                solid_shapes = false;
+            }
+            Behaviour::Piston(crate::behaviour::piston::PistonState::default())
+        }
+        SWITCH => {
+            if let Some(fb) = frame_box {
+                boxes = vec![fb];
+                solid_shapes = false;
+            }
+            Behaviour::Switch(crate::behaviour::switch::SwitchState::default())
+        }
         TELEPORTER => Behaviour::Teleporter(TeleporterState::default()),
         k if DOORS.contains(&k) => {
             if boxes.is_empty() {
@@ -437,7 +459,7 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
         solid_shapes,
         on: match &behaviour {
             Behaviour::Door(d) => d.state > crate::behaviour::door::CLOSING,
-            _ => f & 0x40 != 0 || (o.kind == EXIT && value(0) != 0),
+            _ => f & 0x40 != 0 || (matches!(o.kind, EXIT | SWITCH) && value(0) != 0),
         },
         alive: true,
         sprite,
