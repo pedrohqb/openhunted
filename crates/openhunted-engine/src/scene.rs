@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Cena de uma fase: blocos de cenário, decorações e objetos, com as animações em curso.
 
+mod arsenal;
+
 use std::rc::Rc;
 
 use std::collections::HashMap;
@@ -677,6 +679,9 @@ impl Scene {
         if let Some(b) = self.jake.as_mut().and_then(|j| j.special.take()) {
             self.apply_special(b);
         }
+        if let Some(r) = self.jake.as_mut().and_then(|j| j.punch.take()) {
+            self.apply_punch(r);
+        }
         self.spawn_shots();
         if self.outcome.is_none() {
             // balas à queima-roupa: acertam já na boca, antes de voar
@@ -746,19 +751,19 @@ impl Scene {
         self.projectile_borders.get(name).cloned()
     }
 
-    /// Balas e cápsulas que o Jake disparou neste tique viram entidades; som do tiro ao
-    /// entrar num estado de tiro; aviso de sem munição.
+    /// Projéteis e cápsulas que o Jake disparou neste tique viram entidades; som do tiro ao
+    /// entrar num estado de tiro; aviso de sem munição e de troca de arma (3090).
     fn spawn_shots(&mut self) {
         let focus = self.focus();
         let Some(j) = self.jake.as_mut() else { return };
         let shots: Vec<_> = j.shots.drain(..).collect();
-        if j.no_ammo {
+        if j.no_ammo || j.switched {
             self.events
                 .push(Event::Sound(Cue::ui(crate::jake::SOUND_NO_AMMO, 0)));
         }
-        if let Some(c) = focus.filter(|_| j.is_firing() && j.label_changed()) {
+        if let (Some(c), Some(id)) = (focus, j.fire_sound()) {
             self.events.push(Event::Sound(Cue::at(
-                SOUND_PISTOL,
+                id,
                 crate::sound::PRIORITY_FRAME,
                 c,
                 self.jake_layer,
@@ -766,14 +771,19 @@ impl Scene {
         }
         let layer = self.jake_layer;
         for s in shots {
-            let e = if s.casing {
-                self.casing_entity(&s, layer)
-            } else {
-                self.bullet_entity(&s, layer)
-            };
-            if let Some(e) = e {
+            if let Some(e) = self.shot_entity(&s, layer) {
                 self.entities.push(e);
             }
+        }
+    }
+
+    /// Entidade de um `Shot` do Jake pelo tipo.
+    fn shot_entity(&mut self, s: &crate::jake::Shot, layer: i32) -> Option<Entity> {
+        use crate::jake::ShotKind;
+        match s.kind {
+            ShotKind::Bullet => self.bullet_entity(s, layer),
+            ShotKind::Casing => self.casing_entity(s, layer),
+            _ => self.weapon_entity(s, layer),
         }
     }
 

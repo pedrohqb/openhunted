@@ -83,6 +83,7 @@ fn t_j_003_laser_eye_fires_at_jake_and_a_bullet_kills_it() {
     // a pistola, e tiros para cima
     if let Some(j) = s.jake.as_mut() {
         j.inventory.slots[2] = (1, 50);
+        j.inventory.weapon = 2;
     }
     let kills = s.kills;
     let mut t = 0;
