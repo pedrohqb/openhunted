@@ -531,6 +531,12 @@ impl Scene {
         }
         self.spawn_shots();
         if self.outcome.is_none() {
+            // balas à queima-roupa: acertam já na boca, antes de voar
+            let mut pre = Out::default();
+            self.bullet_hits(&mut pre);
+            self.resolve_impacts(&mut pre);
+            self.entities.extend(pre.spawn);
+            self.events.extend(pre.events);
             let up_edge = input & crate::input::UP != 0 && self.prev_input & crate::input::UP == 0;
             if up_edge {
                 self.try_exit();
@@ -625,7 +631,10 @@ impl Scene {
             layer,
         } = p;
         let anim = self.assets_anim(anim_name)?;
-        let player = AnimPlayer::at_label(&anim, label)?;
+        // rótulo da direção; sem ele, o primeiro rótulo ou o quadro 0 (animações parciais)
+        let player = AnimPlayer::at_label(&anim, label)
+            .or_else(|| AnimPlayer::at_label(&anim, 1))
+            .unwrap_or_else(|| AnimPlayer::from_frame(&anim, 0));
         let f = anim.frames.get(player.frame())?;
         let (fw, fh) = (i32::from(f.width).max(1), i32::from(f.height).max(1));
         let scale = if fw >= fh { (target, fw) } else { (target, fh) };
@@ -644,7 +653,11 @@ impl Scene {
             kind,
             x,
             y,
-            flags: 0x2019,
+            flags: if kind == crate::entity::CASING {
+                0x2031
+            } else {
+                0x2019
+            },
             layer,
             id: 0,
             values: vec![],
@@ -688,6 +701,7 @@ impl Scene {
             Behaviour::Bullet(behaviour::bullet::BulletState {
                 vx: s.vx * SUB,
                 vy: s.vy * SUB,
+                prev: None,
             }),
         )
     }
@@ -714,6 +728,23 @@ impl Scene {
         )
     }
 
+    /// Impactos de bala → faísca `oex15` e som.
+    fn resolve_impacts(&mut self, out: &mut Out) {
+        for (x, y, layer) in std::mem::take(&mut out.impacts) {
+            let b = behaviour::Blast {
+                center: (x, y),
+                layer,
+                radius: behaviour::bullet::IMPACT_RADIUS,
+                push: 0,
+                damage: 0,
+            };
+            if let Some(e) = self.effect_entity(&b, behaviour::bullet::IMPACT_LABEL) {
+                out.spawn.push(e);
+            }
+            out.events.push(Event::Sound(behaviour::bullet::SOUND_WALL));
+        }
+    }
+
     /// Balas contra as entidades sólidas da camada (minas, inimigos…): vítima leva o dano
     /// da linha (19, qualquer); a bala vira faísca.
     fn bullet_hits(&mut self, out: &mut Out) {
@@ -723,12 +754,13 @@ impl Scene {
                 .iter()
                 .enumerate()
                 .filter(|(_, e)| e.alive && matches!(e.behaviour, Behaviour::Bullet(_)))
-                .filter_map(|(i, e)| e.bounds().map(|b| (i, b, e.layer)))
+                .filter_map(|(i, e)| behaviour::bullet::swept_bounds(e).map(|b| (i, b, e.layer)))
                 .collect();
             let mut v = Vec::new();
             for (bi, bb, layer) in bullets {
                 let victim = self.entities.iter().position(|e| {
                     e.alive
+                        && e.solid_shapes
                         && e.layer == layer
                         && e.flags & 0x80003 == 0x80001
                         && e.flags & 0x20 == 0
@@ -745,8 +777,10 @@ impl Scene {
             if !self.entities[bi].alive {
                 continue;
             }
-            self.entities[vi].health -= behaviour::bullet::DAMAGE;
+            // só quem trata a própria morte perde vida (por ora, as minas); os demais só
+            // param a bala
             if let Behaviour::Mine(_) = self.entities[vi].behaviour {
+                self.entities[vi].health -= behaviour::bullet::DAMAGE;
                 self.entities[vi].health = 0;
             }
             let c = self.entities[bi].center();
@@ -916,19 +950,7 @@ impl Scene {
         }
         self.rng = rng;
         self.bullet_hits(&mut out);
-        for (x, y, layer) in std::mem::take(&mut out.impacts) {
-            let b = behaviour::Blast {
-                center: (x, y),
-                layer,
-                radius: behaviour::bullet::IMPACT_RADIUS,
-                push: 0,
-                damage: 0,
-            };
-            if let Some(e) = self.effect_entity(&b, behaviour::bullet::IMPACT_LABEL) {
-                out.spawn.push(e);
-            }
-            out.events.push(Event::Sound(behaviour::bullet::SOUND_WALL));
-        }
+        self.resolve_impacts(&mut out);
         // Explosões: dano de área ao Jake e às minas, e o efeito visual (`OEX.ANM`).
         for b in &out.blasts {
             if let Some(j) = self.jake.as_mut().filter(|j| j.is_active()) {
@@ -1339,6 +1361,99 @@ mod tests {
                 .contains(&Event::Sound(crate::behaviour::bullet::SOUND_WALL))
         );
         assert!(s.events.contains(&Event::Sound(SOUND_PISTOL)));
+    }
+
+    /// Tiro na diagonal para baixo: a bala toca a peça em que o Jake está e faísca (não
+    /// desliza pelo chão); uma zona invisível no caminho não a para; uma mina colada no cano
+    /// morre no primeiro tique.
+    #[test]
+    fn bullets_spark_on_floors_ignore_zones_and_hit_point_blank() {
+        use crate::behaviour::mine::MineState;
+        use crate::input::{DOWN, RIGHT, SHOOT};
+        let (mut l, mut a) = platform_level(0, 0x80089);
+        l.grid_x = 4;
+        l.cells = vec![None; 32];
+        l.objects[0].points = vec![(0, 0), (1, 20), (1, 80)];
+        // chão largo de células: uma caixa em y = 100 (abaixo da peça)
+        let mut s = Scene::build(&l, &mut a).unwrap();
+        s.cell_solids.push(Rect {
+            x: -1000,
+            y: 100,
+            w: 3000,
+            h: 20,
+        });
+        s.cell_world = World::new(s.cell_solids.clone());
+        s.rebuild_world();
+        for _ in 0..30 {
+            s.tick(0);
+        }
+        s.tick(RIGHT);
+        s.tick(DOWN | RIGHT | SHOOT);
+        let mut sparks = 0;
+        for _ in 0..12 {
+            s.tick(DOWN | RIGHT);
+            sparks += s
+                .events
+                .drain(..)
+                .filter(|e| *e == Event::Sound(crate::behaviour::bullet::SOUND_WALL))
+                .count();
+        }
+        assert_eq!(
+            sparks, 3,
+            "as três balas da diagonal tocam o chão e faíscam"
+        );
+        assert!(
+            !s.entities
+                .iter()
+                .any(|e| e.alive && e.kind == crate::entity::BULLET)
+        );
+        // zona invisível na linha de tiro: a bala passa
+        let mut zone = crate::behaviour::test_support::zone(120, 0, 64, 64, &[64, 64, 0, 0, 0, 0]);
+        zone.layer = 0;
+        s.entities.push(zone);
+        for _ in 0..30 {
+            s.tick(0);
+        }
+        s.tick(SHOOT);
+        s.tick(SHOOT);
+        for _ in 0..4 {
+            s.tick(0);
+        }
+        let flying = s
+            .entities
+            .iter()
+            .filter(|e| e.alive && e.kind == crate::entity::BULLET)
+            .count();
+        assert!(flying >= 2, "balas paradas pela zona: só {flying} voando");
+        // mina colada no cano (a 10 px): morre no mesmo tique do disparo
+        for _ in 0..60 {
+            s.tick(0);
+        }
+        let (jx, jy) = (
+            s.jake.as_ref().unwrap().body.x,
+            s.jake.as_ref().unwrap().body.y,
+        );
+        let mut mine =
+            crate::behaviour::test_support::logic(crate::entity::MINE, jx + 30, jy - 5, &[0]);
+        mine.flags = 0x80801;
+        mine.boxes = vec![Rect {
+            x: 0,
+            y: 0,
+            w: 17,
+            h: 17,
+        }];
+        mine.solid_shapes = true;
+        mine.health = 1;
+        mine.behaviour = Behaviour::Mine(MineState::new(0));
+        s.entities.push(mine);
+        s.tick(SHOOT);
+        s.tick(SHOOT);
+        assert!(
+            !s.entities
+                .iter()
+                .any(|e| e.alive && e.kind == crate::entity::MINE),
+            "mina à queima-roupa sobreviveu"
+        );
     }
 
     #[test]

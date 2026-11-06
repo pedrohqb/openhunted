@@ -3,7 +3,7 @@
 
 use super::{Ctx, Out};
 use crate::entity::Entity;
-use crate::physics::{Body, Rect, SUB, step};
+use crate::physics::{Body, step};
 
 /// Som "Bullet Hitting Wall" (quadro 148 do `OEX.ANM`, `oex15`).
 pub const SOUND_WALL: u16 = 3046;
@@ -19,6 +19,37 @@ pub struct BulletState {
     /// Velocidade em 1/8 px por tique.
     pub vx: i32,
     pub vy: i32,
+    /// Posição antes do último deslocamento (para o teste de acerto varrer o caminho).
+    pub prev: Option<(i32, i32)>,
+}
+
+/// Caixa varrida pela bala no último tique (união da caixa anterior com a atual), para o
+/// teste de acerto não pular alvos menores que o passo de 20 px.
+pub fn swept_bounds(e: &Entity) -> Option<crate::physics::Rect> {
+    let now = e.bounds()?;
+    let prev = match &e.behaviour {
+        crate::entity::Behaviour::Bullet(b) => b.prev,
+        _ => None,
+    };
+    let Some((px, py)) = prev else {
+        return Some(now);
+    };
+    let (dx, dy) = (px - e.x, py - e.y);
+    let before = crate::physics::Rect {
+        x: now.x + dx,
+        y: now.y + dy,
+        ..now
+    };
+    let x0 = now.x.min(before.x);
+    let y0 = now.y.min(before.y);
+    let x1 = (now.x + now.w).max(before.x + before.w);
+    let y1 = (now.y + now.h).max(before.y + before.h);
+    Some(crate::physics::Rect {
+        x: x0,
+        y: y0,
+        w: x1 - x0,
+        h: y1 - y0,
+    })
 }
 
 /// Rótulo do `OBU.ANM` e espelhamento (bit 1 horizontal, bit 2 vertical) pela direção
@@ -43,32 +74,40 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         e.alive = false;
         return;
     };
-    let (vx, vy) = match &e.behaviour {
-        crate::entity::Behaviour::Bullet(b) => (b.vx, b.vy),
+    let (vx, vy) = match &mut e.behaviour {
+        crate::entity::Behaviour::Bullet(b) => {
+            b.prev = Some((e.x, e.y));
+            (b.vx, b.vy)
+        }
         _ => return,
     };
+    // nasceu dentro de um sólido (boca na parede): impacto imediato
+    if let Some(b) = e.bounds() {
+        if ctx.cells.blocked(&b) {
+            let c = e.center();
+            e.alive = false;
+            out.impacts.push((c.0, c.1, e.layer));
+            return;
+        }
+    }
     let mut body = Body::new(e.x, e.y, boxr);
     body.vx = vx;
     body.vy = vy;
     step(&mut body, ctx.cells, false);
+    // qualquer desvio do deslocamento pedido (parede, teto ou chão) é um toque
+    let full = (vx >> 3, vy >> 3);
+    let moved = (body.x - e.x, body.y - e.y) == full;
     e.x = body.x;
     e.y = body.y;
-    let moved = (body.x, body.y) != (e.x - (vx >> 3), e.y - (vy >> 3));
     let c = e.center();
     if c.0 < 0 || c.1 < 0 || c.0 >= ctx.level.0 || c.1 >= ctx.level.1 {
         e.alive = false;
         return;
     }
-    if body.hit_wall || body.hit_ceiling || !moved {
+    if !moved {
         e.alive = false;
         out.impacts.push((c.0, c.1, e.layer));
     }
-    let _ = SUB;
-}
-
-/// Caixa da bala em px da fase.
-pub fn bounds(e: &Entity) -> Option<Rect> {
-    e.bounds()
 }
 
 #[cfg(test)]

@@ -617,3 +617,65 @@ fn t_j_001_shooting_helps() {
         "atirando {hp_shoot} < sem atirar {hp_plain}"
     );
 }
+
+/// Em toda fase com Jake e pistola: empurrando uma parede e atirando para a frente, nenhuma
+/// bala aparece do outro lado (a boca dentro da parede não dispara; a que nasce encostada
+/// faísca na hora).
+#[test]
+fn bullets_never_cross_cell_walls() {
+    use openhunted_engine::input::{LEFT, RIGHT, SHOOT};
+    if std::env::var_os("OPENHUNTED_DATA").is_none() {
+        return;
+    }
+    let mut checked = 0;
+    for level in mission_files() {
+        let (s0, _) = load(&level).unwrap();
+        let Some(j0) = s0.jake.as_ref() else { continue };
+        if j0.inventory.pistol_ammo() <= 0 {
+            continue;
+        }
+        for dir in [LEFT, RIGHT] {
+            let mut s = s0.clone();
+            for _ in 0..30 {
+                s.tick(0);
+            }
+            // anda até bater numa parede (ou desiste)
+            let mut hit = false;
+            for _ in 0..200 {
+                s.tick(dir);
+                if s.jake.as_ref().unwrap().body.hit_wall {
+                    hit = true;
+                    break;
+                }
+            }
+            if !hit {
+                continue;
+            }
+            checked += 1;
+            for _ in 0..6 {
+                s.tick(0);
+            }
+            for t in 0..30 {
+                s.tick(if t < 8 { SHOOT } else { 0 });
+                let jb = s.jake.as_ref().unwrap().body.bounds();
+                let jc = (jb.x + jb.w / 2, jb.y + jb.h / 2);
+                for b in s.entities.iter().filter(|e| e.alive && e.kind == 19) {
+                    let bb = b.bounds().unwrap();
+                    let bc = (bb.x + bb.w / 2, bb.y + bb.h / 2);
+                    // o segmento do centro do Jake ao centro da bala não cruza sólido algum
+                    let crossed = (1..16).any(|i| {
+                        let p = openhunted_engine::Rect {
+                            x: jc.0 + (bc.0 - jc.0) * i / 16,
+                            y: jc.1 + (bc.1 - jc.1) * i / 16,
+                            w: 1,
+                            h: 1,
+                        };
+                        s.cell_world().blocked(&p)
+                    });
+                    assert!(!crossed, "{level}: bala atravessou a parede em {bb:?}");
+                }
+            }
+        }
+    }
+    assert!(checked > 10, "poucas paredes testadas: {checked}");
+}

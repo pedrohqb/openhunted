@@ -298,17 +298,35 @@ impl Jake {
         self
     }
 
-    /// Começa (ou recomeça) uma rajada com a mira da entrada; sem munição, só avisa.
-    fn start_fire(&mut self, input: u32) {
+    /// Começa (ou recomeça) uma rajada com a mira da entrada; sem munição, avisa uma vez
+    /// (na borda da tecla) e devolve `false`, deixando o controle normal seguir.
+    fn start_fire(&mut self, input: u32) -> bool {
         if self.inventory.pistol_ammo() <= 0 {
-            self.no_ammo = true;
-            return;
+            self.no_ammo = self.prev_input & SHOOT == 0;
+            return false;
         }
         self.body.vx = 0;
         let aim = Aim::from_input(input);
         self.state = State::Fire { aim, t: 0 };
         self.ticks = 0;
         self.label_changed = true;
+        true
+    }
+
+    /// A linha do centro da caixa até a boca da arma está livre de sólidos
+    /// (`docs/re/tiro-jake.md`, passo 4: senão o tiro é pulado).
+    fn muzzle_clear(&self, world: &World, muzzle: (i32, i32)) -> bool {
+        let b = self.body.bounds();
+        let c = (b.x + b.w / 2, b.y + b.h / 2);
+        (1..=8).all(|i| {
+            let p = Rect {
+                x: c.0 + (muzzle.0 - c.0) * i / 8,
+                y: c.1 + (muzzle.1 - c.1) * i / 8,
+                w: 1,
+                h: 1,
+            };
+            !world.blocked(&p)
+        })
     }
 
     /// Tique de um estado de tiro (`0x0043b50b`/`0x0043b1d0`).
@@ -316,10 +334,14 @@ impl Jake {
         let pressed = |bit: u32| input & bit != 0;
         let t = t + 1;
         self.state = State::Fire { aim, t };
-        if (1..=3).contains(&t) && self.inventory.pistol_ammo() > 0 {
+        let right = self.facing_right;
+        let (mx, my) = aim.muzzle(right);
+        let muzzle = (self.body.x + mx, self.body.y + my);
+        if (1..=3).contains(&t)
+            && self.inventory.pistol_ammo() > 0
+            && self.muzzle_clear(world, muzzle)
+        {
             self.inventory.slots[PISTOL].1 -= 1;
-            let right = self.facing_right;
-            let (mx, my) = aim.muzzle(right);
             let (vx, vy) = aim.velocity(right);
             // 1ª e 3ª balas desviam 1 px/tique perpendicular (`0x0043bab7`): (−vy, vx)/|v|,
             // negado olhando para a esquerda — na mira de frente a 1ª desce e a 3ª sobe
@@ -331,8 +353,8 @@ impl Jake {
                 _ => (0, 0),
             };
             self.shots.push(Shot {
-                x: self.body.x + mx,
-                y: self.body.y + my,
+                x: muzzle.0,
+                y: muzzle.1,
                 vx: vx + dx,
                 vy: vy + dy,
                 casing: false,
@@ -349,7 +371,7 @@ impl Jake {
             }
         }
         let moving = pressed(LEFT) || pressed(RIGHT) || pressed(JUMP);
-        if t >= 7 && pressed(SHOOT) {
+        if t >= 7 && pressed(SHOOT) && self.inventory.pistol_ammo() > 0 {
             self.start_fire(input);
         } else if t > 6 && moving && !pressed(SHOOT) {
             self.set(State::Idle);
@@ -584,14 +606,14 @@ impl Jake {
                 return;
             }
             State::Recover | State::Ready(_) | State::Holster => {
-                if shooting {
-                    self.start_fire(input);
-                } else if moving || jump_edge {
+                if shooting && self.start_fire(input) {
+                    // nova rajada
+                } else if moving || jump_edge || pressed(UP) || pressed(DOWN) {
                     self.set(State::Idle);
                 } else {
                     match self.state {
                         State::Recover if self.anim_done() => self.set(State::Ready(0)),
-                        State::Ready(n) if n >= READY_TICKS => self.set(State::Holster),
+                        State::Ready(n) if n + 1 >= READY_TICKS => self.set(State::Holster),
                         State::Ready(n) => self.state = State::Ready(n + 1),
                         State::Holster if self.anim_done() => self.set(State::Idle),
                         _ => {}
@@ -603,14 +625,17 @@ impl Jake {
                 self.prev_input = input;
                 return;
             }
-            State::Idle | State::Run | State::Push | State::Land(_) if shooting => {
-                self.start_fire(input);
-                step(&mut self.body, world, true);
-                self.finish_tick();
-                self.prev_input = input;
-                return;
-            }
             _ => {}
+        }
+        let can_fire = matches!(
+            self.state,
+            State::Idle | State::Run | State::Push | State::Land(_)
+        );
+        if can_fire && shooting && self.start_fire(input) {
+            step(&mut self.body, world, true);
+            self.finish_tick();
+            self.prev_input = input;
+            return;
         }
         match self.state {
             State::Idle | State::Run | State::Push => {
@@ -1186,6 +1211,32 @@ mod tests {
     }
 
     #[test]
+    fn muzzle_inside_a_wall_fires_nothing() {
+        // parede logo à direita do Jake: a boca (x + 25) fica dentro dela
+        let w = World::new(vec![
+            Rect {
+                x: -1000,
+                y: 100,
+                w: 2000,
+                h: 20,
+            },
+            Rect {
+                x: 24,
+                y: -100,
+                w: 20,
+                h: 200,
+            },
+        ]);
+        let mut j = jake_on(&w, 0).with_inventory(pistol());
+        j.tick(RIGHT, &w);
+        for _ in 0..5 {
+            j.tick(SHOOT, &w);
+        }
+        assert!(j.shots.iter().all(|s| s.casing), "{:?}", j.shots);
+        assert_eq!(j.inventory.pistol_ammo(), 80, "não gasta munição");
+    }
+
+    #[test]
     fn release_recovers_then_ready_then_holsters() {
         let w = long_floor();
         let mut j = jake_on(&w, 0).with_inventory(pistol());
@@ -1213,10 +1264,24 @@ mod tests {
         assert!(j.is_firing());
         j.tick(RIGHT | SHOOT, &w);
         assert_eq!(j.body.x, x, "parou para atirar");
-        // sem munição: nada sai, só o aviso
+        // sem munição: nada sai, o aviso uma vez só, e o Jake continua a correr
         let mut empty = jake_on(&w, 0).with_inventory(Inventory::from_points(&[]));
-        empty.tick(SHOOT, &w);
+        empty.tick(SHOOT | RIGHT, &w);
         assert!(empty.no_ammo && !empty.is_firing() && empty.shots.is_empty());
+        let x = empty.body.x;
+        for _ in 0..5 {
+            empty.tick(SHOOT | RIGHT, &w);
+            assert!(!empty.no_ammo, "aviso repetido");
+        }
+        assert!(empty.body.x > x, "não anda segurando ATIRAR sem munição");
+        // acabou a munição no meio: sai da rajada e volta ao controle
+        let mut j =
+            jake_on(&w, 0).with_inventory(Inventory::from_points(&[(0, 0), (1, 20), (1, 2)]));
+        for _ in 0..30 {
+            j.tick(SHOOT, &w);
+        }
+        assert_eq!(j.inventory.pistol_ammo(), 0);
+        assert!(!j.is_firing(), "{:?}", j.state());
     }
 
     #[test]
