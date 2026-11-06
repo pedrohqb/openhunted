@@ -1022,6 +1022,8 @@ impl Jake {
             }
             _ => self.tick_move(input, env, jump_edge, side),
         }
+        // a caixa do estado vale já para a física deste tique (o BRD troca com o estado)
+        self.fit_box(world);
         if matches!(self.state, State::Run | State::Push) {
             // −1 px por tique enquanto corre (sobe degraus pequenos), se houver espaço.
             let up = Rect {
@@ -1083,6 +1085,7 @@ impl Jake {
 
     /// Tique dos estados sem entrada do jogador.
     fn tick_passive(&mut self, world: &World) {
+        self.fit_box(world);
         match self.state {
             State::EnteringExit(n) => {
                 if n >= 10 {
@@ -1146,6 +1149,7 @@ impl Jake {
             }
             _ => {}
         }
+        self.fit_box(world);
         self.animate();
         self.finish_tick();
     }

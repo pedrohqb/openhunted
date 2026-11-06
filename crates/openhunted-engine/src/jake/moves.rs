@@ -305,14 +305,29 @@ impl Jake {
         self.probe(world, 0, -1) == CONTACT_SCENERY
     }
 
-    /// Ajusta a caixa ao estado (BRD da coluna `+0x01`): engatinhando, `JK_CRAWL`; puxando
-    /// o corpo na barra, `JK_BARUP`; senão a padrão. Só cresce se couber.
-    pub(super) fn fit_box(&mut self, world: &World) {
-        let want = match self.state {
+    /// Caixa do estado (BRD da coluna `+0x01`): engatinhando, `JK_CRAWL`; puxando o corpo
+    /// na barra, `JK_BARUP`; senão a padrão.
+    fn state_box(&self) -> Rect {
+        match self.state {
             State::Crouch | State::Crawl | State::StandUp => self.box_crawl,
             State::BarPull | State::BarUp | State::BarDown => self.box_bar,
             _ => self.box_default,
-        };
+        }
+    }
+
+    /// A caixa corrente é a do estado, salvo no ar ou nos estados sem controle (lá a
+    /// caixa padrão espera caber; ver `fit_box`).
+    pub fn box_matches_state(&self) -> bool {
+        self.body.boxr == self.state_box() || !self.controllable() || !self.body.on_ground
+    }
+
+    /// Ajusta a caixa ao estado, antes da física (o original troca o BRD com o estado).
+    /// Só cresce se couber. Regra (Ruling) para manter "em pé ⇒ caixa padrão": num estado
+    /// controlável no chão em que a caixa padrão não cabe (sob um teto baixo), o Jake fica
+    /// engatinhando (86), como o original faz no 77/78/86 com teto baixo; no ar e nos
+    /// estados sem controle a caixa menor fica até a padrão caber (o pouso decide).
+    pub(super) fn fit_box(&mut self, world: &World) {
+        let want = self.state_box();
         if self.body.boxr == want {
             return;
         }
@@ -326,6 +341,10 @@ impl Jake {
             && new.y + new.h <= old.y + old.h;
         if inside || !world.blocked(&new) {
             self.body.boxr = want;
+        } else if self.body.boxr == self.box_crawl && self.controllable() && self.body.on_ground {
+            self.body.vx = 0;
+            self.ske_req = None;
+            self.set(State::Crawl);
         }
     }
 
@@ -1471,6 +1490,114 @@ mod tests {
             j.tick(0, &w);
         }
         assert_eq!((j.state(), j.body.boxr), (State::Idle, BOX));
+    }
+
+    /// Beiral com 35 px livres sobre o chão (23 < 35 < 44): engatinhando passa, em pé não.
+    fn overhang() -> World {
+        World::new(vec![
+            floor(100),
+            Rect {
+                x: 100,
+                y: 0,
+                w: 400,
+                h: 65,
+            },
+        ])
+    }
+
+    /// Em pé, a caixa é sempre a padrão e nunca cruza o beiral.
+    fn assert_box_ok(j: &Jake, w: &World, t: usize) {
+        assert!(
+            j.box_matches_state(),
+            "tique {t}: {:?} com {:?}",
+            j.state(),
+            j.body.boxr
+        );
+        if j.body.boxr == BOX {
+            assert!(!w.blocked(&j.body.bounds()), "tique {t}: {:?}", j.body);
+        }
+    }
+
+    #[test]
+    fn standing_never_keeps_the_crawl_box_under_an_overhang() {
+        let w = overhang();
+        let mut j = jake(&w, 0);
+        // correndo em pé, para no beiral
+        for t in 0..40 {
+            j.tick(RIGHT, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        assert!(j.body.bounds().x + j.body.bounds().w <= 100);
+        // agacha, solta BAIXO e segura DIR: levanta e corre, mas não passa por baixo
+        for t in 0..5 {
+            j.tick(DOWN, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        assert_eq!(j.state(), State::Crawl);
+        for t in 0..60 {
+            j.tick(RIGHT, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        assert!(
+            j.body.bounds().x + j.body.bounds().w <= 100,
+            "{:?} {:?}",
+            j.state(),
+            j.body
+        );
+        // engatinhando passa; sob o beiral, soltar BAIXO e segurar DIR não o põe em pé
+        for t in 0..5 {
+            j.tick(DOWN, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        for t in 0..20 {
+            j.tick(DOWN | RIGHT, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        assert!(j.body.bounds().x > 110, "passou engatinhando: {:?}", j.body);
+        for input in [RIGHT, UP, JUMP, SHOOT, UP | RIGHT, 0, LEFT] {
+            for t in 0..12 {
+                j.tick(input, &w);
+                assert_box_ok(&j, &w, t);
+            }
+        }
+    }
+
+    #[test]
+    fn knockdown_under_an_overhang_keeps_crawling_and_in_the_open_stands() {
+        let w = overhang();
+        let mut j = jake(&w, 60);
+        for _ in 0..5 {
+            j.tick(DOWN, &w);
+        }
+        for _ in 0..30 {
+            j.tick(DOWN | RIGHT, &w);
+        }
+        assert!(j.body.bounds().x > 110);
+        j.hurt(Pending {
+            knockdown: true,
+            push: (4, -6),
+            ..Default::default()
+        });
+        for t in 0..60 {
+            j.tick(0, &w);
+            assert_box_ok(&j, &w, t);
+        }
+        assert!(matches!(j.state(), State::Crawl), "{:?}", j.state());
+        // ao ar livre, a derrubada devolve a caixa padrão
+        let w = World::new(vec![floor(100)]);
+        let mut j = jake(&w, 0);
+        for _ in 0..5 {
+            j.tick(DOWN, &w);
+        }
+        assert_eq!(j.state(), State::Crawl);
+        j.hurt(Pending {
+            knockdown: true,
+            push: (4, -6),
+            ..Default::default()
+        });
+        j.tick(0, &w);
+        assert!(matches!(j.state(), State::KnockedDown(_)));
+        assert_eq!(j.body.boxr, BOX, "a derrubada usa a caixa padrão");
     }
 
     #[test]
