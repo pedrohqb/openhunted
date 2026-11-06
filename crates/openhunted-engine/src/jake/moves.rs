@@ -594,10 +594,11 @@ impl Jake {
                 }
             }
             State::Land(Landing::Medium | Landing::Long) => {
-                // dois quadros por tique; a velocidade usa o Δ do último (k = 1, só x)
+                // dois quadros por tique; a velocidade usa o Δ do último (k = 1, só x). Se
+                // um dos dois `0x423835` passa do último quadro, parado (`0x425946`).
                 let n = self.len_of(anim_of(self.state).0);
                 let t = self.ticks as usize;
-                if t >= 2 && 2 * t - 3 >= n - 1 {
+                if t >= 1 && 2 * t > n {
                     self.body.vx = 0;
                     self.set(State::Idle);
                     return;
@@ -1241,20 +1242,22 @@ mod tests {
             xs.push((x0 - j.body.x, j.frame()));
         }
         assert_eq!(
-            xs[..6],
-            [(0, 0), (4, 1), (6, 3), (9, 5), (11, 7), (13, 8)],
-            "vx 4, 2, 3, 2 (e o último quadro)"
+            xs[..5],
+            [(0, 0), (4, 1), (6, 3), (9, 5), (11, 7)],
+            "vx 4, 2, 3, 2"
         );
+        // 5º tique: o segundo `0x423835` passa do último quadro → parado (11 px ao todo)
+        assert_eq!(xs[5].0, 11);
         assert_eq!(j.state(), State::Idle);
         let mut j = jake(&w, 0);
         j.set(State::Land(Landing::Medium));
         let x0 = j.body.x;
-        for _ in 0..3 {
+        for _ in 0..2 {
             j.tick(0, &w);
         }
-        assert_eq!(x0 - j.body.x, 10, "35: 5 px em dois tiques");
+        assert_eq!(x0 - j.body.x, 5, "35: 5 px no 1º tique");
         j.tick(0, &w);
-        assert_eq!(j.state(), State::Idle);
+        assert_eq!((x0 - j.body.x, j.state()), (5, State::Idle), "parado no 2º");
     }
 
     #[test]
