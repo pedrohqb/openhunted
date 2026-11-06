@@ -11,12 +11,16 @@ satisfeitos: a saída (tipo 5, bit 2, ignorada até o Jake apertar CIMA nela) e 
 (bit 8). A saída só aceita o CIMA (estado 3 sobre a zona PR 0x40) quando os demais objetivos
 já estão cumpridos; senão dá o choque de 20.
 
+As células das três saídas são **espelhadas**: a zona PR espelha com a célula, como as
+caixas do BRD (`0x00405775`: `x' = 128 − x − l`). Até a M6b o OpenHunted punha as zonas sem
+espelhar; desde a M6b elas seguem o espelhamento (é onde a arte da saída está).
+
 ## `T_J_003` — "Jake Tutorial 2"
 
 "Get to the exit. Use the 'up' key while in front of the ropes to climb." Grade 8×5×1.
 
 - **Objetivos** [confirmado nos dados]: saída (888, 155), célula (6, 1), zona PR 0x40 na célula
-  (7, 1) em x 971–984, y 181–219; Jake (`+0x1ac = 8`). Nada mais.
+  (7, 1, espelhada) em x 936–949 (971–984 sem espelhar), y 181–219; Jake (`+0x1ac = 8`). Nada mais.
 - **Jake**: (91, 196), célula (0, 1); vida 99, armadura 0; `points`: punhos (1, 20) e pistola
   (0, 90) → começa **de punhos**. A pistola (tipo 12, v = 20) está ao lado, em (62, 200): dá o
   "tem" e soma 60 (teto 99). Vida (32) em (39, 201) e (659, 451); munição (16, v = 25) em
@@ -37,8 +41,8 @@ já estão cumpridos; senão dá o choque de 20.
 "Get to the exit. Surprising how far a guy can jump when he really needs to." Grade 12×3×1,
 um corredor na linha 1 com dois fossos embaixo.
 
-- **Objetivos**: saída (1298, 156), zona PR 0x40 na célula (10, 1) em x 1326–1348,
-  y 187–219; Jake vivo. Nada mais.
+- **Objetivos**: saída (1298, 156), zona PR 0x40 na célula (10, 1, espelhada) em
+  x 1340–1362 (1326–1348 sem espelhar), y 187–219; Jake vivo. Nada mais.
 - **Jake**: (104, 197); vida 100, armadura 0; pistola (1, 20) e granadas (1, 2) → pistola.
 - **Rota** [inferido]: andar para a direita pelo corredor.
   1. Fosso 1 (células (2, 2)–(3, 2)): pular. Quem cai encontra no fundo a dica 15 (zona 2,
@@ -68,7 +72,7 @@ threat". Grade 9×4×**3**: camada 0 completa; camada 1 nas células (2..8, 2); 
 (3..6, 2).
 
 - **Objetivos** [confirmado nos dados]: saída (818, 284) na **camada 1**, zona PR 0x40 na
-  célula (6, 2, 1) em x 784–799, y 328–360; Jake vivo; **peça do carro** (tipo 9,
+  célula (6, 2, 1, espelhada) em x 865–880 (784–799 sem espelhar), y 328–360; Jake vivo; **peça do carro** (tipo 9,
   `+0x1ac = 2`) em (781, 301) na **camada 2**: precisa ser pega antes da saída.
 - **Jake**: (182, 49), camada 0, de pé sobre três plataformas `OPL` (y = 93); vida 150,
   armadura 100; pistola (1, 30).
@@ -88,7 +92,7 @@ threat". Grade 9×4×**3**: camada 0 completa; camada 1 nas células (2..8, 2); 
   4. Na camada 2: minas Delta (687, 277) e Alpha (777, 317), (835, 317); pegar a **peça do
      carro** em (781, 301) (dica 34, zona 5). Voltar a x ≈ 707 e apertar **CIMA** → camada 1,
      já à direita da parede.
-  5. Andar até x 784–799 e apertar CIMA na saída. Os barris (813, 318/347) estão colados à
+  5. Andar até x 865–880 e apertar CIMA na saída. Os barris (813, 318/347) estão colados à
      saída, ao lado de "FLAMMABLE": não atirar neles de perto (R = 144).
 - **Perigos**: olho-laser Alpha logo acima do início (198, 12), alcance 150; cerca elétrica A
   (328, 372) pendurada sobre o corredor de baixo [inferido: fora do caminho no chão]. O
