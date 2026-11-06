@@ -353,14 +353,29 @@ fn i_j_107_collecting_the_grenades_meets_the_objectives() {
     assert!(verdict::objectives_met(&s.entities, s.jake.as_ref()));
 }
 
-/// I_J_005: os objetos "acionar" são de tipos ainda estáticos; não impedem os objetivos.
+/// I_J_005: o objeto "acionar" é a bandeira 81 (M7b): os objetivos só se cumprem depois
+/// de apanhá-la.
 #[test]
-fn i_j_005_static_activate_objects_do_not_block_the_objectives() {
-    let Some(s) = load("I_J_005.LEV") else {
+fn i_j_005_the_flag_must_be_collected() {
+    let Some(mut s) = load("I_J_005.LEV") else {
         return;
     };
-    assert!(s.entities.iter().any(|e| {
-        e.objective & verdict::OBJ_ACTIVATE != 0 && matches!(e.behaviour, Behaviour::Static)
-    }));
+    let goals: Vec<(u32, i32, i32, i32)> = s
+        .entities
+        .iter()
+        .filter(|e| {
+            e.objective & verdict::OBJ_ACTIVATE != 0 && matches!(e.behaviour, Behaviour::Pickup(_))
+        })
+        .map(|e| (e.kind, e.x, e.y, e.layer))
+        .collect();
+    assert!(goals.iter().any(|g| g.0 == 81), "{goals:?}");
+    assert!(!verdict::objectives_met(&s.entities, s.jake.as_ref()));
+    for &(_, x, y, layer) in &goals {
+        s.jake.as_mut().unwrap().set_layer(layer);
+        s.set_jake_layer(layer);
+        place(&mut s, x - 4, y - 30, 3);
+    }
+    let j = s.jake.as_ref().unwrap();
+    assert_eq!(j.inventory.slots[81 - 73], (1, 1), "par da bandeira");
     assert!(verdict::objectives_met(&s.entities, s.jake.as_ref()));
 }

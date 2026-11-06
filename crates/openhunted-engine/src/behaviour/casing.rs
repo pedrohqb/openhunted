@@ -35,7 +35,11 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     e.y = body.y;
     st.vx = body.vx;
     st.vy = body.vy;
-    if (body.hit_wall || body.hit_ceiling || body.on_ground) && !st.clinked {
+    // o cartucho da espingarda (23) não tilinta
+    if (body.hit_wall || body.hit_ceiling || body.on_ground)
+        && !st.clinked
+        && e.kind == crate::entity::CASING
+    {
         st.clinked = true;
         let id = SOUNDS[ctx.rng.below(2) as usize];
         // centro da caixa (a única da cápsula)

@@ -547,12 +547,15 @@ impl Scene {
             s.hints = openhunted_formats::parse_text_list(res);
         }
         s.explosion_anim = assets.animation("OEX.ANM").ok();
-        for name in ["OBU.ANM", "OBS00.ANM"] {
+        for name in ["OBU.ANM", "OBS00.ANM"].into_iter().chain(arsenal::ANIMS) {
             if let Ok(a) = assets.animation(name) {
                 s.projectile_anims.insert(name.to_string(), a);
             }
         }
-        for name in ["OBU00.BRD", "OBU01.BRD", "OBU02.BRD", "OBS.BRD"] {
+        for name in ["OBU00.BRD", "OBU01.BRD", "OBU02.BRD", "OBS.BRD"]
+            .into_iter()
+            .chain(arsenal::BORDERS)
+        {
             if let Ok(b) = assets.archive().get(name).and_then(Border::parse) {
                 s.projectile_borders.insert(name.to_string(), b);
             }
@@ -823,7 +826,7 @@ impl Scene {
             kind,
             x,
             y,
-            flags: if kind == crate::entity::CASING {
+            flags: if kind == crate::entity::CASING || kind == crate::entity::SHELL {
                 0x2031
             } else {
                 0x2019
@@ -1236,12 +1239,17 @@ impl Scene {
                     Behaviour::Exit(_) => behaviour::exit::tick(e),
                     Behaviour::Bullet(_) => behaviour::bullet::tick(e, &ctx, &mut out),
                     Behaviour::Casing(_) => behaviour::casing::tick(e, &mut ctx, &mut out),
+                    Behaviour::Pellet(_) => behaviour::pellet::tick(e, &ctx, &mut out),
+                    Behaviour::Rocket(_) => behaviour::rocket::tick(e, &ctx, &mut out),
+                    Behaviour::Star(_) => behaviour::star::tick(e, &ctx, &mut out),
+                    Behaviour::Grenade(_) => behaviour::grenade::tick(e, &ctx, &mut out),
                     _ => {}
                 }
             }
         }
         self.rng = rng;
         self.bullet_hits(&mut out);
+        self.weapon_hits(&mut out);
         self.resolve_impacts(&mut out);
         self.object_interactions(&mut out);
         // Explosões: dano de área ao Jake e às minas, e o efeito visual (`OEX.ANM`).

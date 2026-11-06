@@ -40,8 +40,46 @@ pub const TELEPORTER: u32 = 46;
 pub const LASER_EYE: u32 = 104;
 /// Paredes e portas `OH` (tipos 50–52).
 pub const DOORS: std::ops::RangeInclusive<u32> = 50..=52;
-/// Itens de coleta genérica tratados: armas e munição, vida, comida e armaduras.
-pub const PICKUPS: [u32; 10] = [12, 14, 16, 26, HEALTH_ITEM, 34, 76, 77, 78, ARMOR_ITEM];
+/// Itens de coleta genérica tratados: armas e munição (12–14, 16–18, 26, 27), vida e comida
+/// (32, 34), veneno (33, 35), antídoto (37), armaduras (76–79), chaves (62–67) e bandeiras
+/// (80–85).
+pub const PICKUPS: [u32; 29] = [
+    12,
+    13,
+    14,
+    16,
+    17,
+    18,
+    26,
+    27,
+    HEALTH_ITEM,
+    33,
+    34,
+    35,
+    37,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    76,
+    77,
+    78,
+    ARMOR_ITEM,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+];
+/// Projéteis das armas 3–6 do Jake.
+pub const PELLET: u32 = 20;
+pub const ROCKET: u32 = 21;
+pub const SHELL: u32 = 23;
+pub const GRENADE: u32 = 26;
+pub const STAR: u32 = 27;
 
 /// Estado por tipo.
 #[derive(Debug, Clone)]
@@ -64,6 +102,10 @@ pub enum Behaviour {
     CarPiece,
     Teleporter(TeleporterState),
     Door(DoorState),
+    Pellet(crate::behaviour::pellet::PelletState),
+    Rocket(crate::behaviour::rocket::RocketState),
+    Star(crate::behaviour::star::StarState),
+    Grenade(crate::behaviour::grenade::GrenadeState),
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +221,9 @@ pub fn object_start(o: &LevelObject, a: &Animation) -> (usize, AnimPlayer, bool)
         // campanha, a peça é a primeira].
         BARREL => Some(if state == 3 { 3 } else { 1 }),
         LASER_EYE | FENCE | CAR_PIECE => Some(1),
+        // chaves e bandeiras: rótulo = tipo (`0x40f214`, `0x40b2c8`); estrela no chão: 4
+        62..=67 | 80..=85 => Some(o.kind as u16),
+        STAR => Some(4),
         TELEPORTER => Some(crate::behaviour::teleporter::LABEL_IDLE),
         GRAFFITI => None,
         _ => o.start_label.and_then(|l| u16::try_from(l).ok()),

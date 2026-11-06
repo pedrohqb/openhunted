@@ -12,12 +12,17 @@ pub mod explosion;
 pub mod fence;
 pub mod fire;
 pub mod graffiti;
+pub mod grenade;
 pub mod hint;
 pub mod interact;
 pub mod laser;
 pub mod laser_eye;
 pub mod mine;
+pub mod pellet;
 pub mod pickup;
+pub mod projectile;
+pub mod rocket;
+pub mod star;
 pub mod teleporter;
 pub mod zone;
 

@@ -5,7 +5,7 @@
 use super::{Ctx, Event, Out};
 use crate::damage::Health;
 use crate::entity::{ARMOR_ITEM, Entity, HEALTH_ITEM};
-use crate::jake::{Inventory, PISTOL};
+use crate::jake::{GRENADES, Inventory, PISTOL, ROCKETS, SHOTGUN, STARS};
 use crate::physics::{Body, step};
 
 /// Som "Pickup generic object".
@@ -26,26 +26,45 @@ fn effect(kind: u32) -> (i32, i32) {
     }
 }
 
-/// Tipos de arma e munição: pistola (12), lança-foguetes (14), munição da pistola (16),
-/// granadas (26).
+/// Tipos de arma e munição: pistola (12), espingarda (13), lança-foguetes (14), munição da
+/// pistola (16), cartuchos (17), foguetes (18), granadas (26), estrelas (27).
 pub const PISTOL_ITEM: u32 = 12;
+pub const SHOTGUN_ITEM: u32 = 13;
 pub const ROCKET_ITEM: u32 = 14;
 pub const AMMO_ITEM: u32 = 16;
+pub const SHELLS_ITEM: u32 = 17;
+pub const ROCKETS_ITEM: u32 = 18;
 pub const GRENADE_ITEM: u32 = 26;
+pub const STAR_ITEM: u32 = 27;
+/// Chaves (62–67) e bandeiras (80–85): pares `tipo − 49` e `tipo − 73`.
+pub const KEYS: std::ops::RangeInclusive<u32> = 62..=67;
+pub const FLAGS: std::ops::RangeInclusive<u32> = 80..=85;
+/// Som "Pickup flag or key".
+pub const SOUND_KEY: u16 = 5060;
 /// Teto da munição (`0x40a36d`).
 pub const AMMO_CAP: i32 = 99;
-const ROCKETS: usize = 4;
-const GRENADES: usize = 6;
 
 /// Arma e munição (`0x409fe8` + aceitação `0x40b6ed`) com o valor `v` (`values[0]`) do item:
-/// `None` se o item não é de arma; `Some(false)` se recusado (munição ≥ 99 numa arma que já
-/// tem). Quem dá a arma aceita sempre quando o "tem" é 0. A dificuldade fica em ×1.
+/// `None` se o item não é de arma, chave ou bandeira; `Some(false)` se recusado (munição ≥ 99
+/// numa arma que já tem). Quem dá a arma aceita sempre quando o "tem" é 0 e pode torná-la a
+/// corrente (`0x43af6c`, antes de a arma entrar). Chaves e bandeiras: "tem" = 1 e +1. A
+/// dificuldade fica em ×1.
 pub fn take_weapon(kind: u32, v: i32, inv: &mut Inventory) -> Option<bool> {
+    if KEYS.contains(&kind) || FLAGS.contains(&kind) {
+        let slot = (kind - if KEYS.contains(&kind) { 49 } else { 73 }) as usize;
+        inv.slots[slot].0 = 1;
+        inv.slots[slot].1 = (inv.slots[slot].1 + 1).min(AMMO_CAP);
+        return Some(true);
+    }
     let (slot, gives, amount) = match kind {
         PISTOL_ITEM => (PISTOL, true, 3 * v),
         AMMO_ITEM => (PISTOL, false, 3 * v),
+        SHOTGUN_ITEM => (SHOTGUN, true, v),
+        SHELLS_ITEM => (SHOTGUN, false, v),
         ROCKET_ITEM => (ROCKETS, true, v),
+        ROCKETS_ITEM => (ROCKETS, false, v),
         GRENADE_ITEM => (GRENADES, true, v),
+        STAR_ITEM => (STARS, true, v),
         _ => return None,
     };
     let (has, qty) = inv.slots[slot];
@@ -53,12 +72,44 @@ pub fn take_weapon(kind: u32, v: i32, inv: &mut Inventory) -> Option<bool> {
         return Some(false);
     }
     if gives {
+        inv.gained(slot);
         inv.slots[slot].0 = 1;
     }
     if amount != 0 {
         inv.slots[slot].1 = (qty + amount.max(1)).min(AMMO_CAP);
     }
     Some(true)
+}
+
+/// Som da coleta: 5060 para chaves, bandeiras e a peça do carro; senão 5057.
+pub fn pickup_sound(kind: u32) -> u16 {
+    if KEYS.contains(&kind) || FLAGS.contains(&kind) || kind == crate::entity::CAR_PIECE {
+        SOUND_KEY
+    } else {
+        SOUND_PICKUP
+    }
+}
+
+/// A estrela cravada (`0x40bcd7`): o Jake que a toca recolhe 1 estrela (coleta genérica).
+pub fn collect_star(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
+    let (Some(item), Some(j), Some(jake)) = (e.bounds(), ctx.jake_bounds(), ctx.jake) else {
+        return;
+    };
+    if e.layer != ctx.jake_layer || !item.overlaps(&j) {
+        return;
+    }
+    let mut inv = out
+        .inventory
+        .clone()
+        .unwrap_or_else(|| jake.inventory.clone());
+    if take_weapon(STAR_ITEM, 1, &mut inv) == Some(true) {
+        out.inventory = Some(inv);
+        out.events.push(Event::Sound(crate::sound::Cue::ui(
+            SOUND_PICKUP,
+            crate::sound::PRIORITY_PICKUP,
+        )));
+        e.alive = false;
+    }
 }
 
 /// Aceita e aplica o item à vida `h` (`0x0040b6ed` + `0x0040b57b`); `false` = recusado.
@@ -137,7 +188,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         if ok {
             out.inventory = Some(inv);
             out.events.push(Event::Sound(crate::sound::Cue::ui(
-                SOUND_PICKUP,
+                pickup_sound(e.kind),
                 crate::sound::PRIORITY_PICKUP,
             )));
             // apanhado fica ligado (`+0x178 = 0x40`, `itens.md` passo 11)
