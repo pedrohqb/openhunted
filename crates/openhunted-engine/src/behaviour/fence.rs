@@ -51,13 +51,17 @@ pub const SPARKING: u8 = 2;
 const PARTNER_IDLE: u16 = 3;
 const PARTNER_SPARKING: u16 = 4;
 /// Distância horizontal máxima do centro da vítima ao ponto da faísca.
-const REACH: i32 = 8;
+pub const REACH: i32 = 8;
 /// Altura do poste (quadros do `oef01`: 45 px): faixa vertical do choque [ruling].
 pub const POST_HEIGHT: i32 = 45;
 
 #[derive(Debug, Clone)]
 pub struct FenceState {
+    /// Índice do nome na tabela (0…2).
     pub variant: usize,
+    /// Passo da faísca (`+0x26c`) e curso (`+0x264`).
+    pub step: i32,
+    pub travel: i32,
     pub state: u8,
     /// Faísca (`+0x27c`): 0 … curso − 4.
     pub spark: i32,
@@ -71,8 +75,24 @@ pub struct FenceState {
 
 impl FenceState {
     pub fn new(variant: i32) -> Self {
+        Self::from_values(&[variant])
+    }
+
+    /// `values[0]` = variante; `0x414739` copia a tabela só com variante < 3; senão o objeto
+    /// fica com os próprios `values[1]` (curso `+0x264`) e `values[3]` (passo `+0x26c`).
+    pub fn from_values(values: &[i32]) -> Self {
+        let value = |i: usize| values.get(i).copied().unwrap_or(0);
+        let variant = value(0);
+        let (step, travel) = if variant < 3 {
+            let v = VARIANTS[variant.clamp(0, 2) as usize];
+            (v.step, v.travel)
+        } else {
+            (value(3), value(1))
+        };
         Self {
             variant: variant.clamp(0, 2) as usize,
+            step,
+            travel,
             state: IDLE,
             spark: 0,
             forward: true,
@@ -87,9 +107,8 @@ impl FenceState {
     }
 
     fn advance_spark(&mut self) {
-        let v = *self.variant();
-        let end = (v.travel - 4).max(0);
-        self.spark += if self.forward { v.step } else { -v.step };
+        let end = (self.travel - 4).max(0);
+        self.spark += if self.forward { self.step } else { -self.step };
         if self.spark >= end {
             self.spark = end;
             self.forward = false;
@@ -119,6 +138,13 @@ pub fn zap_rect(e: &Entity, spark: i32) -> Option<Rect> {
         w: 2 * REACH + 1,
         h: POST_HEIGHT,
     })
+}
+
+/// A vítima está na faísca (`0x41494b`): centro x a ≤ 8 px do ponto e faixa vertical
+/// cruzando a do poste.
+pub fn in_spark(zone: &Rect, b: &Rect) -> bool {
+    let cx = b.x + b.w / 2;
+    (cx - (zone.x + REACH)).abs() <= REACH && b.y < zone.y + zone.h && zone.y < b.y + b.h
 }
 
 pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
@@ -215,12 +241,9 @@ fn zap(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         rect: zone,
         layer: e.layer,
         damage: zap,
+        source: Some((e.x, e.y)),
     });
-    let hit = ctx.jake_layer == e.layer
-        && ctx.jake_bounds().is_some_and(|j| {
-            let cx = j.x + j.w / 2;
-            (cx - (zone.x + REACH)).abs() <= REACH && j.y < zone.y + zone.h && zone.y < j.y + j.h
-        });
+    let hit = ctx.jake_layer == e.layer && ctx.jake_bounds().is_some_and(|j| in_spark(&zone, &j));
     if hit {
         out.jake_damage.add(&zap);
         st.recharge = RECHARGE;
@@ -309,5 +332,17 @@ mod tests {
             e,
             Event::Sound(c) if SOUNDS.contains(&c.id)
         )));
+    }
+
+    /// `0x414739` só copia a tabela com variante < 3; as variantes 3 e 4 ficam com os valores
+    /// do próprio objeto (`values[1]` = curso `+0x264`, `values[3]` = passo `+0x26c`).
+    #[test]
+    fn variants_three_and_four_keep_their_own_values() {
+        let s = FenceState::from_values(&[3, 50, 7, 1, 32]);
+        assert_eq!((s.step, s.travel), (1, 50));
+        let s = FenceState::from_values(&[4, 80, 0, 5, 0]);
+        assert_eq!((s.step, s.travel), (5, 80));
+        let s = FenceState::from_values(&[2, 50, 7, 1, 32]);
+        assert_eq!((s.step, s.travel), (3, 100), "C da tabela");
     }
 }

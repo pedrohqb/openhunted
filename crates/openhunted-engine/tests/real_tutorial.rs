@@ -291,3 +291,75 @@ fn random_play_never_panics() {
     }
     assert!(n > 20, "poucas fases com Jake: {n}");
 }
+
+/// I_J_104: os teletransportes id 1 (810, 366) e id 2 (790, 110), camada 0, apontam um para o
+/// outro. Levado de um ao outro, o Jake reaparece sobre o destino e recupera o controle: o
+/// destino espera 40 tiques a partir da mudança de lugar e lembra o passageiro enquanto ele
+/// viaja, sem mandá-lo de volta.
+#[test]
+fn i_j_104_teleporter_pair_does_not_ping_pong() {
+    let Some(mut s) = load("I_J_104.LEV") else {
+        return;
+    };
+    s.jake.as_mut().unwrap().set_layer(0);
+    s.set_jake_layer(0);
+    place(&mut s, 812, 330, 0);
+    let mut trips = 0;
+    let mut was = false;
+    let mut active_run = 0;
+    for _ in 0..300 {
+        s.tick(0);
+        let j = s.jake.as_ref().unwrap();
+        let now = matches!(j.state(), State::Teleporting(_));
+        if now && !was {
+            trips += 1;
+        }
+        was = now;
+        active_run = if j.is_active() { active_run + 1 } else { 0 };
+    }
+    let j = s.jake.as_ref().unwrap();
+    assert_eq!(trips, 1, "viagens: {trips}");
+    assert!(active_run > 200, "sem controle: {active_run}");
+    // uma célula acima (o id 2 está na célula de cima)
+    assert!(j.body.y < 336 - 100, "não chegou ao id 2: y {}", j.body.y);
+}
+
+/// I_J_107: os objetivos "acionar" são as seis granadas; apanhadas todas, estão cumpridos.
+#[test]
+fn i_j_107_collecting_the_grenades_meets_the_objectives() {
+    let Some(mut s) = load("I_J_107.LEV") else {
+        return;
+    };
+    let goals: Vec<(i32, i32, i32)> = s
+        .entities
+        .iter()
+        .filter(|e| e.objective & verdict::OBJ_ACTIVATE != 0 && e.kind == 26)
+        .map(|e| (e.x, e.y, e.layer))
+        .collect();
+    assert_eq!(goals.len(), 6);
+    assert!(!verdict::objectives_met(&s.entities, s.jake.as_ref()));
+    for (x, y, layer) in goals {
+        s.jake.as_mut().unwrap().set_layer(layer);
+        s.set_jake_layer(layer);
+        place(&mut s, x - 4, y - 30, 3);
+    }
+    let left = s
+        .entities
+        .iter()
+        .filter(|e| e.kind == 26 && e.objective & verdict::OBJ_ACTIVATE != 0 && e.alive)
+        .count();
+    assert_eq!(left, 0, "granadas não apanhadas");
+    assert!(verdict::objectives_met(&s.entities, s.jake.as_ref()));
+}
+
+/// I_J_005: os objetos "acionar" são de tipos ainda estáticos; não impedem os objetivos.
+#[test]
+fn i_j_005_static_activate_objects_do_not_block_the_objectives() {
+    let Some(s) = load("I_J_005.LEV") else {
+        return;
+    };
+    assert!(s.entities.iter().any(|e| {
+        e.objective & verdict::OBJ_ACTIVATE != 0 && matches!(e.behaviour, Behaviour::Static)
+    }));
+    assert!(verdict::objectives_met(&s.entities, s.jake.as_ref()));
+}

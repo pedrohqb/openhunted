@@ -62,6 +62,11 @@ do caractere `1`, 11 px de largura); `T_J_007` 29 "FLAMMABLE" e 57 "CAR".
   da metade e termina no quadro 0); ao chegar ao quadro 0 o passageiro reaparece (`&= ~2`); o
   clone volta ao rótulo 2/fase 0 e, por ter `0x10`, é destruído. Total ≈ 42 tiques.
 
+Porte [ruling]: o destino é sorteado na partida; sem destino válido não há viagem (nem
+feixe, nem os 42 tiques ocupados); dois pedidos no mesmo tique: vale o primeiro da lista. O
+destino tipo 46 conta os 40 tiques a partir da metade da viagem e, enquanto o passageiro
+viaja (invisível), não o esquece: o par id 1 ↔ 2 da `I_J_104` não o devolve em laço.
+
 Na `T_J_005`: teletransporte no fundo do primeiro fosso (374, 367), gatilho `(1, 11)` → a
 zona 73 de id 1 em (438, 98), no poço de cima da célula (3, 0). Dica 15: "To activate
 teleporters STEP ON THEM" (zona 2, no fundo do fosso).
@@ -134,3 +139,7 @@ estado 1 = coletável no rótulo 1; estados 0/2 são a granada lançada).
 - Rótulo 0 da peça do carro (missão já vencida): desenha algo?
 - Sentido do gatilho no fechamento das portas `OH`; papel do gatilho de célula `(2, 11)`.
 - Comportamento do Bruiser (tipo 7).
+- Derrubada do barril em qualquer objeto (não só no Jake) e o atrito depois dela.
+- Linha de visão do olho-laser através de objetos sólidos (hoje só as células barram).
+- Porta `OH` da `I_J_107` que nasce sobre o Jake; e o "rótulo 0 → o primeiro da animação"
+  das `OH`: é o primeiro rótulo do `.ANM` ou o de menor número? (pergunta de RE)

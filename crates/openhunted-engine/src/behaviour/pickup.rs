@@ -140,6 +140,8 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
                 SOUND_PICKUP,
                 crate::sound::PRIORITY_PICKUP,
             )));
+            // apanhado fica ligado (`+0x178 = 0x40`, `itens.md` passo 11)
+            e.on = true;
             e.alive = false;
         }
         return;
@@ -151,6 +153,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
             SOUND_PICKUP,
             crate::sound::PRIORITY_PICKUP,
         )));
+        e.on = true;
         e.alive = false;
     }
 }
@@ -253,5 +256,19 @@ mod tests {
         tick(&mut gun, &ctx(&j, &w, &on), &mut out);
         assert!(!gun.alive);
         assert_eq!(out.inventory.unwrap().slots[PISTOL].0, 1);
+    }
+
+    /// `itens.md` passo 11: o item apanhado fica ligado (`+0x178 = 0x40`); é o que cumpre o
+    /// objetivo "acionar" das granadas da I_J_107.
+    #[test]
+    fn collected_items_turn_on() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(100, 0);
+        for kind in [HEALTH_ITEM, GRENADE_ITEM] {
+            let mut item = logic(kind, 100, 0, &[3]);
+            item.flags = 0x803a9;
+            tick(&mut item, &ctx(&j, &w, &on), &mut Out::default());
+            assert!(!item.alive && item.on, "tipo {kind}");
+        }
     }
 }

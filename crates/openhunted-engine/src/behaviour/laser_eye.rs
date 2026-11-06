@@ -321,6 +321,8 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         st.firing = false;
         st.lost = false;
     }
+    // 6. o tiro sai da posição de antes de seguir (o disparo vem antes do passo 7)
+    let shot_pos = st.pos;
     // 7. seguir o alvo que anda
     if let (Some(j), Some(jake)) = (target, ctx.jake) {
         let jc = (j.x + j.w / 2, j.y + j.h / 2);
@@ -362,7 +364,14 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         )));
     }
     if let (true, Some(j)) = (shoot, target) {
-        fire(e, ctx, out, &variant, pos, (j.x + j.w / 2, j.y + j.h / 2));
+        fire(
+            e,
+            ctx,
+            out,
+            &variant,
+            shot_pos,
+            (j.x + j.w / 2, j.y + j.h / 2),
+        );
     }
 }
 
@@ -379,7 +388,10 @@ fn fire(e: &Entity, ctx: &mut Ctx, out: &mut Out, v: &Variant, pos: i32, target:
     let vel = ((c * s) >> 14, (sn * s) >> 14);
     for m in [m1, m2] {
         let variant = v.bolt.unwrap_or_else(|| ctx.rng.below(4) as usize);
-        let b = super::laser::bolt(m, vel, e.layer, variant);
+        let mut b = super::laser::bolt(m, vel, e.layer, variant);
+        if let Behaviour::Laser(l) = &mut b.behaviour {
+            l.owner = Some((e.x, e.y));
+        }
         out.events.push(Event::Sound(Cue::at(
             super::laser::sound(variant),
             PRIORITY_FRAME,
@@ -533,6 +545,33 @@ mod tests {
                 out.blasts[0].push
             ),
             (48, 10, 15)
+        );
+    }
+
+    /// `olho-laser.md`: atira (passo 6) antes de seguir o alvo (passo 7): o raio sai da boca
+    /// da posição de antes do passo de seguir.
+    #[test]
+    fn shot_leaves_from_the_position_before_following() {
+        let on = |_: i32| None;
+        // Jake um pouco à esquerda do eixo vertical da posição 5, andando para a esquerda
+        let (mut j, w) = ctx_with_jake(104, 150);
+        j.body.vx = -10;
+        let mut c = ctx(&j, &w, &on);
+        let mut e = eye(100, 0, 400);
+        if let Behaviour::LaserEye(s) = &mut e.behaviour {
+            s.pos = 5;
+            s.firing = true;
+            s.interval = 0;
+            s.shots = 3;
+        }
+        let mut out = Out::default();
+        tick(&mut e, &mut c, &mut out);
+        assert_eq!(state(&e).pos, 4, "seguiu o alvo");
+        assert_eq!(out.spawn.len(), 2, "atirou");
+        assert_eq!(
+            (out.spawn[0].x, out.spawn[0].y),
+            (100 + MUZZLE1[5].0, MUZZLE1[5].1),
+            "boca da posição 5"
         );
     }
 }

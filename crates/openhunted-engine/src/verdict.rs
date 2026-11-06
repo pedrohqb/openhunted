@@ -23,9 +23,15 @@ pub fn objectives_met(entities: &[Entity], jake: Option<&Jake>) -> bool {
         .iter()
         .filter(|e| e.objective & OBJ_DESTROY != 0)
         .all(|e| !e.alive || e.health <= 0);
+    // Ruling (`logica-fase.md`): só contam os tipos com comportamento implementado; os que
+    // ainda são `Static` nunca ligariam e travariam a fase.
+    // TODO: tipos "acionar" ainda estáticos nas fases solo: 13, 27, 63, 64, 74 e 80–85.
     let activated = entities
         .iter()
-        .filter(|e| e.objective & OBJ_ACTIVATE != 0 && !matches!(e.behaviour, Behaviour::Exit(_)))
+        .filter(|e| {
+            e.objective & OBJ_ACTIVATE != 0
+                && !matches!(e.behaviour, Behaviour::Exit(_) | Behaviour::Static)
+        })
         .all(|e| e.on);
     destroyed && activated
 }
@@ -100,6 +106,7 @@ mod tests {
         use crate::behaviour::test_support::logic;
         let mut piece = logic(crate::entity::CAR_PIECE, 0, 0, &[]);
         piece.objective = OBJ_ACTIVATE;
+        piece.behaviour = Behaviour::CarPiece;
         let mut exit = logic(crate::entity::EXIT, 0, 0, &[]);
         exit.objective = OBJ_ACTIVATE;
         exit.behaviour = Behaviour::Exit(Default::default());
@@ -111,5 +118,25 @@ mod tests {
             objectives_met(&ents, None),
             "apanhada: cumpre (a saída não conta)"
         );
+    }
+
+    /// Ruling: objetos "acionar" de tipos ainda sem comportamento (`Static`) não contam — a
+    /// fase se vence só com a saída.
+    #[test]
+    fn static_activate_objectives_do_not_block_the_win() {
+        use crate::behaviour::test_support::logic;
+        let mut exit = logic(crate::entity::EXIT, 0, 0, &[]);
+        exit.objective = OBJ_ACTIVATE;
+        exit.behaviour = Behaviour::Exit(Default::default());
+        exit.on = true;
+        let mut ents = vec![exit];
+        for kind in [13, 27, 63, 64, 74, 80, 85] {
+            let mut e = logic(kind, 0, 0, &[]);
+            e.objective = OBJ_ACTIVATE;
+            assert!(matches!(e.behaviour, Behaviour::Static));
+            ents.push(e);
+        }
+        assert!(objectives_met(&ents, None));
+        assert_eq!(evaluate(&ents, None), Some(Outcome::Victory));
     }
 }

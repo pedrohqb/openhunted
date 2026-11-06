@@ -43,7 +43,7 @@ fn solid(e: &Entity) -> bool {
     e.alive && e.solid_shapes && e.flags & 0x80003 == 0x80001 && e.flags & 0x20 == 0
 }
 
-/// Raios em voo contra os objetos sólidos da camada (o olho que atira fica de fora): a
+/// Raios em voo contra os objetos sólidos da camada (só o olho que atirou fica de fora): a
 /// vítima leva o dano do raio (natureza explosão: barril explode) e o raio para.
 pub fn laser_hits(entities: &mut [Entity], out: &mut Out) {
     let bolts: Vec<usize> = (0..entities.len())
@@ -56,12 +56,16 @@ pub fn laser_hits(entities: &mut [Entity], out: &mut Out) {
             continue;
         };
         let layer = entities[bi].layer;
+        let owner = match &entities[bi].behaviour {
+            Behaviour::Laser(s) => s.owner,
+            _ => None,
+        };
         let victim = (0..entities.len()).find(|&i| {
             let e = &entities[i];
             i != bi
                 && solid(e)
                 && e.layer == layer
-                && e.kind != LASER_EYE
+                && !(e.kind == LASER_EYE && owner == Some((e.x, e.y)))
                 && !matches!(
                     e.behaviour,
                     Behaviour::Laser(_) | Behaviour::Bullet(_) | Behaviour::Casing(_)
@@ -90,20 +94,38 @@ pub fn laser_hits(entities: &mut [Entity], out: &mut Out) {
 }
 
 /// Fogo e cerca contra os demais objetos que cruzam a área (o Jake já foi tratado).
+/// A faísca da cerca pega pelo centro x (como no Jake) e, com acerto, recarrega a cerca.
 pub fn apply_hazards(entities: &mut [Entity], hazards: &[Hazard]) {
     for h in hazards {
+        let mut hit = false;
         for e in entities
             .iter_mut()
             .filter(|e| e.alive && e.layer == h.layer)
         {
-            if e.bounds().is_some_and(|b| b.overlaps(&h.rect)) {
+            if !matches!(e.behaviour, Behaviour::Barrel(_)) {
+                continue;
+            }
+            let inside = e.bounds().is_some_and(|b| match h.source {
+                Some(_) => super::fence::in_spark(&h.rect, &b),
+                None => b.overlaps(&h.rect),
+            });
+            if inside {
                 // a cerca faz o barril explodir (linha (40, 28): natureza 2)
                 let mut p = h.damage;
                 if p.electric {
                     p.explosion = true;
                 }
-                if matches!(e.behaviour, Behaviour::Barrel(_)) {
-                    hurt(e, &p);
+                hurt(e, &p);
+                hit = true;
+            }
+        }
+        let Some(src) = h.source.filter(|_| hit) else {
+            continue;
+        };
+        for e in entities.iter_mut().filter(|e| (e.x, e.y) == src) {
+            if let Behaviour::Fence(st) = &mut e.behaviour {
+                if st.master.is_none() {
+                    st.recharge = super::fence::RECHARGE;
                 }
             }
         }
@@ -159,7 +181,10 @@ mod tests {
         let mut eye = logic(LASER_EYE, 0, 0, &[]);
         eye.flags = 0x80809;
         eye.solid_shapes = true;
-        let bolt = super::super::laser::bolt((10, 10), (8, 0), 0, 0);
+        let mut bolt = super::super::laser::bolt((10, 10), (8, 0), 0, 0);
+        if let Behaviour::Laser(l) = &mut bolt.behaviour {
+            l.owner = Some((0, 0));
+        }
         let mut ents = vec![eye, bolt, barrel(14)];
         let mut out = Out::default();
         laser_hits(&mut ents, &mut out);
@@ -190,6 +215,7 @@ mod tests {
                 fire: true,
                 ..Default::default()
             },
+            source: None,
         };
         apply_hazards(&mut ents, &[fire]);
         let fired: Vec<bool> = ents
@@ -197,5 +223,68 @@ mod tests {
             .map(|e| matches!(&e.behaviour, Behaviour::Barrel(b) if b.hurt.fire))
             .collect();
         assert_eq!(fired, vec![true, false]);
+    }
+
+    /// A cerca contra barris segue a regra do Jake (`0x41494b`): centro x a ≤ 8 px da faísca;
+    /// com acerto, a cerca entra na recarga de 10 tiques.
+    #[test]
+    fn fence_hits_barrels_by_centre_and_recharges() {
+        use crate::behaviour::fence::{FenceState, RECHARGE};
+        let mut fence = logic(crate::entity::FENCE, 500, 0, &[0]);
+        fence.behaviour = Behaviour::Fence(FenceState::new(0));
+        let zap = Hazard {
+            rect: Rect {
+                x: 32,
+                y: 0,
+                w: 17,
+                h: 45,
+            },
+            layer: 0,
+            damage: Pending {
+                amount: 5,
+                electric: true,
+                ..Default::default()
+            },
+            source: Some((500, 0)),
+        };
+        // caixa cruza a faixa, mas o centro (26) está a 14 px do ponto (40): não pega
+        let mut ents = vec![barrel(10), fence];
+        apply_hazards(&mut ents, &[zap]);
+        let hurt = |e: &Entity| matches!(&e.behaviour, Behaviour::Barrel(b) if b.hurt.amount > 0);
+        let recharge = |e: &Entity| match &e.behaviour {
+            Behaviour::Fence(f) => f.recharge,
+            _ => unreachable!(),
+        };
+        assert!(!hurt(&ents[0]));
+        assert_eq!(recharge(&ents[1]), 0);
+        // centrado (40): explode e a cerca recarrega
+        ents[0] = barrel(24);
+        apply_hazards(&mut ents, &[zap]);
+        assert!(hurt(&ents[0]));
+        assert_eq!(recharge(&ents[1]), RECHARGE);
+    }
+
+    /// Só o olho que disparou fica de fora: o raio de um olho acerta o outro (a `T_J_007` tem
+    /// dois).
+    #[test]
+    fn bolt_hits_another_eye_but_not_its_own() {
+        let mk = |x: i32| {
+            let mut eye = logic(LASER_EYE, x, 0, &[]);
+            eye.flags = 0x80809;
+            eye.solid_shapes = true;
+            eye.behaviour = Behaviour::LaserEye(super::super::laser_eye::LaserEyeState::new(&[0]));
+            eye
+        };
+        let mut bolt = super::super::laser::bolt((10, 10), (8, 0), 0, 0);
+        if let Behaviour::Laser(l) = &mut bolt.behaviour {
+            l.owner = Some((0, 0));
+        }
+        // o raio cruza o próprio olho (0, 0) e o outro (12, 0)
+        let mut ents = vec![mk(0), bolt, mk(12)];
+        laser_hits(&mut ents, &mut Out::default());
+        let hurt =
+            |e: &Entity| matches!(&e.behaviour, Behaviour::LaserEye(s) if !s.hurt.is_empty());
+        assert!(!hurt(&ents[0]), "acertou o próprio olho");
+        assert!(hurt(&ents[2]), "não acertou o outro olho");
     }
 }

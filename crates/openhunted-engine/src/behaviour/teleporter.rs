@@ -23,6 +23,8 @@ pub struct TeleporterState {
     pub until: u32,
     /// O último passageiro (`+0x278`) ainda está em cima: não leva de novo até ele sair.
     pub last_on: bool,
+    /// Pediu viagem neste tique; a cena confirma (`settle`) depois de achar o destino.
+    pub asked: bool,
 }
 
 /// Pedido de viagem: o teletransporte (posição, largura, camada) e os ids de destino.
@@ -36,14 +38,19 @@ pub struct Request {
 }
 
 pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
-    let touching = e.layer == ctx.jake_layer
+    // o passageiro conta pela caixa do corpo mesmo invisível: em viagem ele não "saiu"
+    let jake = ctx.jake.filter(|j| !j.is_dead());
+    let travelling = jake.is_some_and(|j| j.is_teleporting());
+    let touching_raw = e.layer == ctx.jake_layer
         && e.bounds()
-            .zip(ctx.jake_bounds())
+            .zip(jake.map(|j| j.body.bounds()))
             .is_some_and(|(t, j)| t.overlaps(&j));
+    let touching = touching_raw && ctx.jake_bounds().is_some();
     let w = e.sprite_rect().or(e.bounds()).map_or(0, |r| r.w);
     let Behaviour::Teleporter(st) = &mut e.behaviour else {
         return;
     };
+    st.asked = false;
     if let Some(n) = st.transit {
         let n = n + 1;
         if n >= TRANSIT_TICKS {
@@ -57,10 +64,11 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         }
         return;
     }
-    if !touching {
+    if !touching_raw && !travelling {
         st.last_on = false;
     }
-    if !touching || st.last_on || ctx.tick <= st.until {
+    // um pedido por tique: vale o primeiro da lista
+    if !touching || st.last_on || ctx.tick <= st.until || out.teleport.is_some() {
         if let Some(sp) = e.sprite.as_mut() {
             let anim = sp.anim.clone();
             sp.player.tick(&anim);
@@ -76,10 +84,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     if targets.is_empty() {
         return;
     }
-    st.transit = Some(0);
-    st.last_on = true;
-    st.until = ctx.tick;
-    e.on = true;
+    st.asked = true;
     out.teleport = Some(Request {
         x: e.x,
         y: e.y,
@@ -87,7 +92,34 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         layer: e.layer,
         targets,
     });
+}
+
+/// Confirma o pedido do tique (`0x4136ef`): com destino (`dest`, índice), o teletransporte
+/// que pediu liga (`0x40`), toca o feixe e fica ocupado pela viagem, e o destino recebe a
+/// espera; sem destino, nada muda nele [ruling: no original o sorteio é na metade da viagem;
+/// aqui, sem destino, não há viagem].
+pub fn settle(entities: &mut [Entity], dest: Option<usize>, tick: u32) {
+    let Some(src) = entities
+        .iter()
+        .position(|e| matches!(&e.behaviour, Behaviour::Teleporter(s) if s.asked))
+    else {
+        return;
+    };
+    let e = &mut entities[src];
+    if let Behaviour::Teleporter(st) = &mut e.behaviour {
+        st.asked = false;
+        if dest.is_none() {
+            return;
+        }
+        st.transit = Some(0);
+        st.last_on = true;
+        st.until = tick;
+    }
+    e.on = true;
     super::restart(e, LABEL_BEAM);
+    if let Some(i) = dest.filter(|&i| i != src) {
+        arrive(&mut entities[i], tick);
+    }
 }
 
 /// Destino da viagem: sorteia um id da lista entre os que existem; o clone vai ao centro x do
@@ -120,10 +152,12 @@ pub fn destination(
     Some(((dx, dy), i))
 }
 
-/// O destino que é outro teletransporte ganha espera e lembra o passageiro.
+/// O destino que é outro teletransporte ganha 40 tiques de espera, contados de quando o
+/// clone muda de lugar (metade da viagem, `0x41347e`), e lembra o passageiro (`+0x278`).
+/// `tick` é o da partida.
 pub fn arrive(dest: &mut Entity, tick: u32) {
     if let Behaviour::Teleporter(st) = &mut dest.behaviour {
-        st.until = tick + DEST_COOLDOWN;
+        st.until = tick + crate::jake::TELEPORT_MOVE + DEST_COOLDOWN;
         st.last_on = true;
     }
 }
@@ -132,6 +166,7 @@ pub fn arrive(dest: &mut Entity, tick: u32) {
 mod tests {
     use super::*;
     use crate::behaviour::test_support::{ctx, ctx_with_jake, logic, zone};
+    use crate::entity::Entity;
     use crate::entity::TELEPORTER;
 
     fn teleporter() -> Entity {
@@ -158,6 +193,7 @@ mod tests {
         tick(&mut t, &c, &mut out);
         let req = out.teleport.clone().expect("viagem");
         assert_eq!(req.targets, vec![1]);
+        settle(std::slice::from_mut(&mut t), Some(0), 5);
         // a zona id 1 da T_J_005 em (438, 98), 32 × 16: centro x 454
         let mut z = zone(438, 98, 32, 16, &[32, 16]);
         z.id = 1;
@@ -179,5 +215,61 @@ mod tests {
         c.tick = 100;
         tick(&mut t, &c, &mut o);
         assert!(o.teleport.is_some());
+    }
+
+    /// Achado da revisão: o par I_J_104 (id 1 ↔ 2) mandava o Jake de volta para sempre. O
+    /// destino só conta os 40 tiques a partir da mudança de lugar e não esquece o passageiro
+    /// enquanto ele viaja.
+    #[test]
+    fn destination_remembers_the_travelling_passenger() {
+        let on = |_: i32| None;
+        // o Jake em viagem, longe do destino (ainda no lugar de partida)
+        let (mut j, w) = ctx_with_jake(0, 328);
+        j.start_teleport((370, 0));
+        let mut d = teleporter();
+        arrive(&mut d, 10);
+        let mut c = ctx(&j, &w, &on);
+        c.tick = 11;
+        tick(&mut d, &c, &mut Out::default());
+        let Behaviour::Teleporter(st) = &d.behaviour else {
+            unreachable!()
+        };
+        assert!(st.last_on, "esqueceu o passageiro em viagem");
+        // espera de 40 tiques contada da mudança de lugar (metade da viagem)
+        assert_eq!(st.until, 10 + crate::jake::TELEPORT_MOVE + DEST_COOLDOWN);
+    }
+
+    /// Sem destino válido o teletransporte não toca o feixe nem fica 42 tiques ocupado; dois
+    /// pedidos no mesmo tique: vale o primeiro.
+    #[test]
+    fn no_destination_leaves_the_source_idle_and_first_request_wins() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(370, 328);
+        let mut c = ctx(&j, &w, &on);
+        c.tick = 5;
+        let mut a = teleporter();
+        let mut b = teleporter();
+        b.x += 1;
+        let mut out = Out::default();
+        tick(&mut a, &c, &mut out);
+        tick(&mut b, &c, &mut out);
+        assert_eq!(out.teleport.as_ref().map(|r| r.x), Some(374));
+        let busy =
+            |e: &Entity| matches!(&e.behaviour, Behaviour::Teleporter(s) if s.transit.is_some());
+        assert!(
+            !busy(&a) && !busy(&b) && !a.on,
+            "ocupado antes de achar o destino"
+        );
+        // sem destino: cancela
+        let mut ents = vec![a, b];
+        settle(&mut ents, None, 5);
+        assert!(!busy(&ents[0]) && !ents[0].on);
+        // com destino: parte
+        let mut out = Out::default();
+        tick(&mut ents[0], &c, &mut out);
+        assert!(out.teleport.is_some());
+        settle(&mut ents, Some(1), 5);
+        assert!(busy(&ents[0]) && ents[0].on);
+        assert!(!busy(&ents[1]));
     }
 }

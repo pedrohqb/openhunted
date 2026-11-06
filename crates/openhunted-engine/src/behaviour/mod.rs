@@ -117,6 +117,9 @@ pub struct Hazard {
     pub rect: Rect,
     pub layer: i32,
     pub damage: Pending,
+    /// Faísca de cerca (posição do poste principal): pega pelo centro x da vítima e, com
+    /// acerto, põe a cerca na recarga (`0x41494b`). `None` = fogo (cruzar a área basta).
+    pub source: Option<(i32, i32)>,
 }
 
 /// Ângulo de 16 bits de (dx, dy) com y para baixo (`0x46718e`, atan2): 0 = direita,

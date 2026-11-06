@@ -120,7 +120,14 @@ e percorre a lista de objetivos `0x497314` (encadeada por `+0x2ac`; [inferido] o
 | 8 | **sobreviver** | vida ≤ 0: jogador → 2 quando todos os jogadores morreram; não jogador → 2 na hora |
 
 Nas 100 fases: exatamente uma saída (tipo 5, `+0x1ac = 2`) e o jogador com `+0x1ac = 8`;
-inimigos a matar têm 4. Na `T_J_001`, só a saída e o Jake. [confirmado nos dados]
+inimigos a matar têm 4. Na `T_J_001`, só a saída e o Jake. [confirmado nos dados] Mas a
+saída **não** é o único objeto com o bit 2: ~40 fases têm outros "acionar" (tipos 9, 13,
+26–28, 37, 63, 64, 73, 74, 80–85; a `I_J_107`, seis granadas tipo 26). [contradiz a leitura
+de que só a saída o tem; conferido nos dados]
+
+Ruling: no porte, o bit 2 só conta para objetos de tipo com comportamento implementado
+(não `Static`); os tipos 13, 27, 63, 64, 74 e 80–85 ainda estáticos travariam 19 fases solo
+(`verdict.rs`, TODO). Coletáveis apanhados ficam ligados (`itens.md`, passo 11).
 
 Depois:
 

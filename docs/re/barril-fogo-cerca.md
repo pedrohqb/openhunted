@@ -110,7 +110,10 @@ sem reação nem efeito. Por tique em que o Jake está dentro: −1 (a armadura 
   y ± 5, rótulo 3, ligada em `+0x274`; liga `0x20000`.
 
 Variantes (`+0x26c` passo, `+0x270`, `+0x264` curso, `+0x268`): A (1, 32, 50, 7),
-B (2, 15, 50, 3), C (3, 0, 100, 6); copiadas por `0x414739` a cada tique (variante < 3).
+B (2, 15, 50, 3), C (3, 0, 100, 6); copiadas por `0x414739` a cada tique só com variante
+< 3. Com variante 3 ou 4 o objeto fica com os próprios valores: `values[1]` = curso
+(`+0x264`), `values[2]` = `+0x268`, `values[3]` = passo (`+0x26c`), `values[4]` = `+0x270`
+(ex.: `[3, 50, 7, 1, 32]` → passo 1, curso 50). [confirmado]
 
 ### Atualização (`0x004140ab`) [confirmado]
 
