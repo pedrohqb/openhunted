@@ -1275,6 +1275,9 @@ impl Scene {
             if let Some(h) = out.heal {
                 j.health = h;
             }
+            if let Some(p) = out.poison {
+                j.poison = p;
+            }
             if let Some(inv) = out.inventory.take() {
                 j.inventory = inv;
             }

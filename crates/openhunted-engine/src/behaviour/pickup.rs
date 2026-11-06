@@ -112,6 +112,23 @@ pub fn collect_star(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     }
 }
 
+/// Veneno (33, 35: +1 em `+0x270`) e antídoto (37: zera; recusado sem veneno), da tabela
+/// `0x00471d10`. `None` se o item não é desses.
+pub fn take_poison(kind: u32, poison: &mut i32) -> Option<bool> {
+    match kind {
+        33 | 35 => {
+            *poison += 1;
+            Some(true)
+        }
+        37 if *poison == 0 => Some(false),
+        37 => {
+            *poison = 0;
+            Some(true)
+        }
+        _ => None,
+    }
+}
+
 /// Aceita e aplica o item à vida `h` (`0x0040b6ed` + `0x0040b57b`); `false` = recusado.
 pub fn take(kind: u32, h: &mut Health) -> bool {
     let (hp, armor) = effect(kind);
@@ -192,6 +209,19 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
                 crate::sound::PRIORITY_PICKUP,
             )));
             // apanhado fica ligado (`+0x178 = 0x40`, `itens.md` passo 11)
+            e.on = true;
+            e.alive = false;
+        }
+        return;
+    }
+    let mut poison = out.poison.unwrap_or(jake.poison);
+    if let Some(ok) = take_poison(e.kind, &mut poison) {
+        if ok {
+            out.poison = Some(poison);
+            out.events.push(Event::Sound(crate::sound::Cue::ui(
+                SOUND_PICKUP,
+                crate::sound::PRIORITY_PICKUP,
+            )));
             e.on = true;
             e.alive = false;
         }
@@ -321,5 +351,63 @@ mod tests {
             tick(&mut item, &ctx(&j, &w, &on), &mut Out::default());
             assert!(!item.alive && item.on, "tipo {kind}");
         }
+    }
+
+    #[test]
+    fn campaign_ammo_keys_and_flags() {
+        use crate::jake::{FISTS, ROCKETS, SHOTGUN, STARS};
+        let mut inv = Inventory::from_points(&[(0, 0), (1, 20)]);
+        assert_eq!(inv.weapon, FISTS);
+        assert_eq!(take_weapon(SHELLS_ITEM, 10, &mut inv), Some(true));
+        assert_eq!(
+            inv.slots[SHOTGUN],
+            (0, 10),
+            "cartuchos sem a arma não ligam o \"tem\""
+        );
+        assert_eq!(take_weapon(SHOTGUN_ITEM, 20, &mut inv), Some(true));
+        assert_eq!(inv.slots[SHOTGUN], (1, 30));
+        assert_eq!(inv.weapon, SHOTGUN, "a espingarda é melhor que os punhos");
+        assert_eq!(take_weapon(ROCKETS_ITEM, 3, &mut inv), Some(true));
+        assert_eq!(take_weapon(ROCKET_ITEM, 5, &mut inv), Some(true));
+        assert_eq!((inv.slots[ROCKETS], inv.weapon), ((1, 8), ROCKETS));
+        assert_eq!(take_weapon(STAR_ITEM, 10, &mut inv), Some(true));
+        assert_eq!(inv.slots[STARS], (1, 10));
+        assert_eq!(inv.weapon, ROCKETS, "as estrelas são piores");
+        // chave 63 → par 14; bandeira 85 → par 12
+        assert_eq!(take_weapon(63, 0, &mut inv), Some(true));
+        assert_eq!(take_weapon(85, 0, &mut inv), Some(true));
+        assert_eq!((inv.slots[14], inv.slots[12]), ((1, 1), (1, 1)));
+        assert_eq!(pickup_sound(63), SOUND_KEY);
+        assert_eq!(pickup_sound(SHELLS_ITEM), SOUND_PICKUP);
+    }
+
+    #[test]
+    fn poison_and_antidote() {
+        let mut p = 0;
+        assert_eq!(take_poison(37, &mut p), Some(false), "sem veneno, recusa");
+        assert_eq!(take_poison(33, &mut p), Some(true));
+        assert_eq!(take_poison(35, &mut p), Some(true));
+        assert_eq!(p, 2);
+        assert_eq!(take_poison(37, &mut p), Some(true));
+        assert_eq!(p, 0);
+        assert_eq!(take_poison(HEALTH_ITEM, &mut p), None);
+        // no Jake: perde `veneno` a cada 20 tiques, sem a armadura absorver
+        let (mut j, w) = ctx_with_jake(100, 0);
+        j.health.armor = 50;
+        j.poison = 2;
+        let hp = j.health.hp;
+        for _ in 0..40 {
+            j.tick(0, &w);
+        }
+        assert_eq!((j.health.hp, j.health.armor), (hp - 4, 50));
+        // apanhar o veneno no contato
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(100, 0);
+        let mut item = logic(33, 100, 0, &[]);
+        item.flags = 0x803a9;
+        let mut out = Out::default();
+        tick(&mut item, &ctx(&j, &w, &on), &mut out);
+        assert_eq!(out.poison, Some(1));
+        assert!(!item.alive);
     }
 }

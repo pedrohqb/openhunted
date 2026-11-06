@@ -320,6 +320,8 @@ pub const ALL_LABELS: [u16; 48] = [
 ];
 /// Alcance do soco além da caixa do Jake (`0x0043accb`, segmento até x + l + 5).
 pub const PUNCH_REACH: i32 = 5;
+/// Período do veneno em tiques.
+pub const POISON_PERIOD: u32 = 20;
 /// Tiques do choque elétrico.
 const SHOCK_TICKS: u32 = 10;
 /// Escala mínima ao entrar na porta (numerador sobre a altura do quadro de referência).
@@ -465,6 +467,10 @@ pub struct Jake {
     pub switched: bool,
     /// Tiques restantes da pose "pronto" depois da troca (`+0x26c`).
     switch_pose: u32,
+    /// Veneno (`+0x270`): quanto perde a cada 20 tiques.
+    pub poison: i32,
+    /// Tiques desde a criação (o veneno age em `tique % 20 = 0`).
+    clock: u32,
 }
 
 impl Jake {
@@ -501,6 +507,8 @@ impl Jake {
             punch: None,
             switched: false,
             switch_pose: 0,
+            poison: 0,
+            clock: 0,
         }
     }
 
@@ -1057,6 +1065,15 @@ impl Jake {
         if self.state == State::Dead {
             self.advance = false;
             return;
+        }
+        self.clock = self.clock.wrapping_add(1);
+        // veneno (`0x004231f9`, passo 3): a cada 20 tiques, `+0x270` de dano de veneno
+        if self.poison > 0 && self.clock % POISON_PERIOD == 0 && self.is_active() {
+            self.pending.add(&Pending {
+                amount: self.poison,
+                poison: true,
+                ..Default::default()
+            });
         }
         self.take_damage(self.ticks);
         if !self.controllable() {
