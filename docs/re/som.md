@@ -85,6 +85,17 @@ Floating" não sai por aqui.
 Outros grupos/quadros servem ao cenário (`0x431fd6` toca por rótulo de animação de célula,
 `0x4328e3`) [inferido].
 
+## Dados conferidos na M4c
+
+- Os 280 `SX_*.WAV` da versão 1.00 são PCM mono de 8 bits: 277 a 11 025 Hz e um a cada
+  18 000, 22 050 e 44 100 Hz.
+- Lista 86 (`OEX.ANM`): todos os valores têm prioridade 9 e nenhum é laço. Os rótulos 1, 2,
+  3 e 4 começam nos quadros 0, 29, 58 e 72: a explosão 1 soa no 2º quadro (3080), as demais
+  no 1º (3084, 3082+3083, 3086), e a 4 repete 3081 nos quadros 74, 77, 82 e 86. O 15 (faísca)
+  começa no 148.
+- Lista 1 (Jake) também tem passos e esforços (5100–5112, 5034, 5043–5050…, prioridades 0,
+  3, 5, 10 ou 12) — ainda não tocados pelo OpenHunted.
+
 ## Falas
 
 `0x40b9eb(obj, fala_jake, fala_outro, vol, …)` escolhe a fala pelo tipo do objeto e não
