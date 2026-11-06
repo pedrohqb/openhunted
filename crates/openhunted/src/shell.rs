@@ -55,6 +55,10 @@ pub struct Held {
     pub down: bool,
     pub jump: bool,
     pub shoot: bool,
+    /// Furtivo/andar (X, bit 0x400).
+    pub stealth: bool,
+    /// Soco (Z, bit 0x40000).
+    pub punch: bool,
 }
 
 /// Para onde o CANCEL do briefing volta (o estado anterior, `0x47f53c`).
@@ -511,7 +515,7 @@ impl App {
             return;
         };
         if v.has_jake() {
-            use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
+            use openhunted_engine::input::{DOWN, JUMP, LEFT, PUNCH, RIGHT, SHOOT, STEALTH, UP};
             let mut bits = 0;
             for (on, bit) in [
                 (h.left, LEFT),
@@ -520,6 +524,8 @@ impl App {
                 (h.down, DOWN),
                 (h.jump, JUMP),
                 (h.shoot, SHOOT),
+                (h.stealth, STEALTH),
+                (h.punch, PUNCH),
             ] {
                 if on {
                     bits |= bit;

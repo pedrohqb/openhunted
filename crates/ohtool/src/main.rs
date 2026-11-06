@@ -65,9 +65,13 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         ticks: u32,
         /// Entrada do Jake durante os ticks: letras L (esquerda), R (direita), U, D, J (pular),
-        /// S (atirar); repetidas ou uma só para todos (ex.: "L" ou "LLLJ").
+        /// S (atirar), X (furtivo); uma por tique ou uma só para todos (ex.: "L" ou "LLLJ").
+        /// Com vírgulas, um grupo de letras por tique, `N*` repete (ex.: "UL,UL,20*R,J").
         #[arg(long, default_value = "")]
         input: String,
+        /// Mostra o estado do Jake a cada tique.
+        #[arg(long)]
+        trace: bool,
     },
 }
 
@@ -162,6 +166,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             overlay,
             ticks,
             input,
+            trace,
         } => {
             use openhunted_engine::{
                 Assets, Framebuffer, SCREEN_H, SCREEN_W, Scene, background_index, clamp_camera,
@@ -182,19 +187,53 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 'D' => openhunted_engine::input::DOWN,
                 'J' => openhunted_engine::input::JUMP,
                 'S' => openhunted_engine::input::SHOOT,
+                'X' => openhunted_engine::input::STEALTH,
                 _ => 0,
             };
-            let seq: Vec<char> = input.chars().collect();
+            let seq: Vec<u32> = if input.contains(',') {
+                input
+                    .split(',')
+                    .flat_map(|tok| {
+                        let (n, letters) = match tok.split_once('*') {
+                            Some((n, l)) => (n.trim().parse().unwrap_or(1), l),
+                            None => (1, tok),
+                        };
+                        let b = letters.chars().map(bits).fold(0, |a, x| a | x);
+                        std::iter::repeat_n(b, n)
+                    })
+                    .collect()
+            } else {
+                input.chars().map(bits).collect()
+            };
             for t in 0..ticks as usize {
-                let c = if seq.len() == 1 {
+                let b = if seq.len() == 1 {
                     seq[0]
                 } else {
-                    seq.get(t).copied().unwrap_or(' ')
+                    seq.get(t).copied().unwrap_or(0)
                 };
-                scene.tick(bits(c));
+                scene.tick(b);
+                if let (true, Some(j)) = (trace, scene.jake.as_ref()) {
+                    eprintln!(
+                        "{t:4} {b:#06x} ({}, {}) v=({}, {}) {:?} q{} camada {}",
+                        j.body.x,
+                        j.body.y,
+                        j.body.vx,
+                        j.body.vy,
+                        j.state(),
+                        j.frame(),
+                        j.layer()
+                    );
+                }
             }
-            if let Some(c) = scene.jake.as_ref().and_then(|_| scene.focus()) {
-                eprintln!("jake em {:?}", c);
+            if let Some(j) = scene.jake.as_ref() {
+                eprintln!(
+                    "jake em {:?}, corpo ({}, {}), estado {:?}, camada {}",
+                    scene.focus().unwrap_or_default(),
+                    j.body.x,
+                    j.body.y,
+                    j.state(),
+                    j.layer()
+                );
             }
             let view = (SCREEN_W as i32, SCREEN_H as i32);
             let cam = clamp_camera((scene.width, scene.height), view, camera);

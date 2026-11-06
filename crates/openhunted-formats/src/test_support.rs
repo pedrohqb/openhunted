@@ -397,3 +397,33 @@ pub fn mklev() -> Vec<u8> {
     v.extend_from_slice(&body);
     v
 }
+
+/// Uma entrada sintética de esqueleto: (ângulo, (dx, dy), raízes por quadro, juntas por quadro).
+pub type SynthSkeletonEntry = (u16, (i16, i16), Vec<(i16, i16)>, usize);
+
+/// Monta um esqueleto `.SKE` com o identificador, a largura/altura de referência e as
+/// entradas dadas; as juntas valem 4, 5, 6… (i16 a i16, na ordem do arquivo).
+pub fn mkske(id: i16, size: (i16, i16), entries: &[SynthSkeletonEntry]) -> Vec<u8> {
+    let mut v = b"Hunter Hunted Skeleton File.\r\n\0\x1a".to_vec();
+    v.extend(le16(&[
+        i32::from(id),
+        entries.len() as i32,
+        i32::from(size.0),
+        i32::from(size.1),
+    ]));
+    for (angle, (dx, dy), roots, m) in entries {
+        v.extend(le16(&[
+            roots.len() as i32,
+            i32::from(*angle),
+            i32::from(*dx),
+            i32::from(*dy),
+        ]));
+        for &(x, y) in roots {
+            v.extend(le16(&[i32::from(x), i32::from(y)]));
+        }
+        v.extend(le16(&[*m as i32]));
+        let k = roots.len() * m * 3;
+        v.extend(le16(&(0..k as i32).map(|i| i + 4).collect::<Vec<_>>()));
+    }
+    v
+}

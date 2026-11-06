@@ -17,6 +17,7 @@ pub mod level_body;
 mod lists;
 pub mod palette;
 mod riff;
+pub mod ske;
 pub mod sound;
 pub mod source;
 #[cfg(any(test, feature = "test-support"))]
@@ -37,6 +38,7 @@ pub use interface::{Control, Interface};
 pub use level::{Level, MissionInfo, parse_mission_list};
 pub use level_body::{Cell, Decoration, LevelObject, Prop, parse_body};
 pub use palette::Palette;
+pub use ske::{Skeleton, SkeletonEntry};
 pub use sound::Sound;
 pub use source::{DataSource, DirSource, IsoSource, normalize_path};
 pub use text::parse_text_list;

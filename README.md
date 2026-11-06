@@ -11,6 +11,18 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M6b: os demais movimentos do Jake.** O esqueleto `JAKE.SKE` é lido e move o Jake como no
+original: o andar furtivo (X), o impulso do pulo estendido, os pulos parado e para cima (com a
+tabela de velocidades e o controle no ar), as aterrissagens que deslizam, a escalada, o
+engatinhar e a barra; o desenho acompanha o deslocamento da captura. CIMA diante de uma
+corda, escada ou rede (zona PR 4) agarra e escala (em pé ou no ar, sem PULAR), na vertical,
+de lado e nas diagonais; PULAR solta em pulo. As portas de camada (zonas 1 e 2) levam o Jake
+de uma camada à outra com CIMA/BAIXO, e o cenário sólido passa a ser o da camada nova. CIMA
+sem zona esconde o Jake contra a parede; BAIXO agacha e engatinha (sob teto baixo não
+levanta); o pulo para cima contra um teto de cenário pendura na barra (mão ante mão, puxar o
+corpo). BAIXO+ATIRAR com vida acima de 25 é o especial: custa 3 de vida e destrói ou fere o
+que estiver a menos de 70 px.
+
 **M5: as telas em volta do jogo.** O jogo abre no menu principal original (`SMAIN.ITF`, com
 fogo, faíscas e botões animados, mouse ou teclado); "New Game" começa a campanha solo na
 primeira missão do `ENGLEVEL.TXT`, com o briefing (`SLEVD.ITF`: título e descrição, rolagem,
@@ -35,7 +47,8 @@ Etapas anteriores: M1 formatos (a biblioteca `openhunted-formats` lê os dados d
 estado em [`docs/formats/`](docs/formats/README.md)); M2 visualizador de fase; M3a o Jake
 corre e pula; M3b objetos sólidos e presença por modo de jogo.
 
-Ainda não há: as outras armas, o soco e a troca de arma; inimigos ativos, escadas, furtividade,
+Ainda não há: as outras armas, o soco e a troca de arma; inimigos ativos (e o efeito do
+esconderijo sobre eles), empurrar blocos (zona 0x20), o equilíbrio na beirada (162/163),
 música, os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, a
 abertura (logotipo, filme, história, créditos), os demais botões do menu (carregar, escolher
 missão, opções, dispositivos, heróis, ajuda, dois jogadores), tesouros e segredos, gravação de
@@ -67,8 +80,10 @@ nada; no menu, sai do jogo). No briefing, CIMA/BAIXO rolam o texto longo. Na tel
 resultado, uma tecla salta a contagem.
 
 No jogo: setas movem o Jake, espaço pula (correndo, o pulo escolhe a distância conforme o chão
-adiante), Ctrl atira (segurando, rajadas; com as setas mira para cima e nas diagonais) e CIMA
-usa a saída quando ele está parado diante dela; a câmera o acompanha. P ou Pause pausa (Enter,
+adiante; com CIMA, para cima), Ctrl atira (segurando, rajadas; com as setas mira para cima e
+nas diagonais; BAIXO+Ctrl é o especial), X anda furtivo, Z é o soco (ainda sem efeito), CIMA
+usa a saída quando ele está parado diante dela, agarra cordas e escadas, passa pelas portas
+de camada ou o esconde, e BAIXO agacha (e engatinha com as setas) ou desce de camada; a câmera o acompanha. P ou Pause pausa (Enter,
 espaço ou OKAY retomam). A dica do tutorial pausa o jogo e fecha ao soltar uma tecla. Esc não
 faz nada (como no original). Em fases sem o Jake, as setas rolam a tela, PageUp/PageDown pulam
 uma tela e Home/End vão às pontas. Tab mostra as caixas de colisão e os objetos de lógica. O

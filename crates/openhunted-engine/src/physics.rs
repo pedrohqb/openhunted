@@ -51,11 +51,41 @@ impl Rect {
 #[derive(Debug, Clone, Default)]
 pub struct World {
     solids: Vec<Rect>,
+    /// Os primeiros `scenery` sólidos são do cenário (células); os demais, de objetos.
+    scenery: usize,
 }
 
+/// Bits de contato (`+0x220`, `docs/re/personagem.md`): 2 = cenário, 1 = objeto.
+pub const CONTACT_SCENERY: u32 = 2;
+pub const CONTACT_OBJECT: u32 = 1;
+
 impl World {
+    /// Mundo só de cenário.
     pub fn new(solids: Vec<Rect>) -> Self {
-        Self { solids }
+        let scenery = solids.len();
+        Self { solids, scenery }
+    }
+
+    /// Cenário (`cells`) mais as caixas dos objetos sólidos (`objects`).
+    pub fn with_objects(cells: Vec<Rect>, objects: Vec<Rect>) -> Self {
+        let scenery = cells.len();
+        let mut solids = cells;
+        solids.extend(objects);
+        Self { solids, scenery }
+    }
+
+    /// Máscara de contato de `r`: `CONTACT_SCENERY` se cruza o cenário, `CONTACT_OBJECT`
+    /// se cruza um objeto sólido (0 = livre).
+    pub fn contact(&self, r: &Rect) -> u32 {
+        let (cells, objects) = self.solids.split_at(self.scenery.min(self.solids.len()));
+        let mut bits = 0;
+        if cells.iter().any(|s| s.overlaps(r)) {
+            bits |= CONTACT_SCENERY;
+        }
+        if objects.iter().any(|s| s.overlaps(r)) {
+            bits |= CONTACT_OBJECT;
+        }
+        bits
     }
 
     pub fn solids(&self) -> &[Rect] {

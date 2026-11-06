@@ -9,6 +9,7 @@ use openhunted_formats::{Animation, Border, BorderBox, Level, LevelObject, Resul
 
 use crate::behaviour::{self, Ctx, Event, Out, Outcome};
 use crate::entity::{BOX, Behaviour, Entity, from_object, object_scale, object_start};
+use crate::jake::{Env, Skel, SpecialBlast, Zone, zone};
 use crate::objects::{SOLO, flags, is_player_start, present};
 use crate::physics::{Rect, SUB, World};
 use crate::rng::Rng;
@@ -115,8 +116,10 @@ pub struct Scene {
     /// Animações e BRDs dos projéteis, carregados na montagem.
     projectile_anims: HashMap<String, Rc<Animation>>,
     projectile_borders: HashMap<String, Border>,
-    /// Zonas PR de tipo 0x40 (diante das saídas): (camada, retângulo em px da fase).
-    exit_zones: Vec<(i32, Rect)>,
+    /// Zonas PR das células (tipo em bits: camadas, corda, saída…), em px da fase.
+    pub prop_zones: Vec<Zone>,
+    /// Número de camadas da fase (`grid_z`).
+    pub layers: i32,
     streak: Streak,
     prev_input: u32,
     /// Linhas do `WIZARD.RES` (dicas), se houver.
@@ -233,7 +236,8 @@ impl Scene {
             explosion_anim: None,
             projectile_anims: HashMap::new(),
             projectile_borders: HashMap::new(),
-            exit_zones: Vec::new(),
+            prop_zones: Vec::new(),
+            layers: 1,
             streak: Streak::default(),
             prev_input: 0,
             hints: Vec::new(),
@@ -274,7 +278,8 @@ impl Scene {
             explosion_anim: None,
             projectile_anims: HashMap::new(),
             projectile_borders: HashMap::new(),
-            exit_zones: Vec::new(),
+            prop_zones: Vec::new(),
+            layers: 1,
             streak: Streak::default(),
             prev_input: 0,
             hints: Vec::new(),
@@ -355,20 +360,23 @@ impl Scene {
                     Err(e) => s.warnings.push(format!("{}: {e}", d.animation)),
                 }
             }
-            for pr in cell
-                .props
-                .iter()
-                .filter(|p| p.kind == behaviour::exit::EXIT_PROP)
-            {
-                s.exit_zones.push((
-                    cz,
-                    Rect {
-                        x: cx.saturating_add(pr.rect[0]),
+            for pr in &cell.props {
+                // espelhada com a célula, como as caixas do BRD (`0x00405775`)
+                let x = if cell.mirrored {
+                    CELL.saturating_sub(pr.rect[0]).saturating_sub(pr.rect[2])
+                } else {
+                    pr.rect[0]
+                };
+                s.prop_zones.push(Zone {
+                    layer: cz,
+                    kind: pr.kind as u16,
+                    rect: Rect {
+                        x: cx.saturating_add(x),
                         y: cy.saturating_add(pr.rect[1]),
                         w: pr.rect[2],
                         h: pr.rect[3],
                     },
-                ));
+                });
             }
             objects.extend(cell.objects.iter());
         }
@@ -396,6 +404,24 @@ impl Scene {
                             .get(ref_frame)
                             .map_or((0, 0), |f| (i32::from(f.width), i32::from(f.height)));
                         let scale = object_scale(ta, tb, rw, rh);
+                        let sc = |v: i32| v * scale.0 / scale.1.max(1);
+                        let skel = assets
+                            .archive()
+                            .get("JAKE.SKE")
+                            .and_then(openhunted_formats::Skeleton::parse)
+                            .ok()
+                            .map(|k| Skel::new(Rc::new(k), (sc(rw), sc(rh))));
+                        let brd = |name: &str, fallback: Rect| {
+                            assets
+                                .archive()
+                                .get(name)
+                                .and_then(Border::parse)
+                                .ok()
+                                .and_then(|b| border_bounds(&b))
+                                .unwrap_or(fallback)
+                        };
+                        let crawl = brd("JK_CRAWL.BRD", crate::jake::CRAWL_BOX);
+                        let bar = brd("JK_BARUP.BRD", crate::jake::BAR_BOX);
                         let boxr = assets
                             .archive()
                             .get(&o.names[1])
@@ -407,11 +433,15 @@ impl Scene {
                         jake_flags = flags(o);
                         let player = AnimPlayer::at_label(&a, 1).unwrap_or(player);
                         let field = |i: usize| o.fields.get(i).copied().unwrap_or(0);
-                        s.jake = Some(
-                            Jake::new(o.x, o.y, boxr, label_lengths(&a))
-                                .with_health(field(14), field(15))
-                                .with_inventory(crate::jake::Inventory::from_points(&o.points)),
-                        );
+                        let mut j = Jake::new(o.x, o.y, boxr, label_lengths(&a))
+                            .with_health(field(14), field(15))
+                            .with_inventory(crate::jake::Inventory::from_points(&o.points))
+                            .with_layer(jake_layer)
+                            .with_boxes(crawl, bar);
+                        if let Some(k) = skel {
+                            j = j.with_skeleton(k);
+                        }
+                        s.jake = Some(j);
                         s.jake_sprite = Some(Sprite {
                             layer: Layer::Object,
                             anim: a,
@@ -441,21 +471,9 @@ impl Scene {
             s.entities.push(e);
         }
         s.sprites.sort_by_key(|p| p.layer);
-        s.jake_layer = jake_layer;
         s.jake_flags = jake_flags;
-        s.cell_solids = s
-            .borders
-            .iter()
-            .filter(|(_, _, z, b)| *z == jake_layer && b.kind == BOX)
-            .map(|(cx, cy, _, b)| Rect {
-                x: cx.saturating_add(i32::from(b.x)),
-                y: cy.saturating_add(i32::from(b.y)),
-                w: i32::from(b.width),
-                h: i32::from(b.height),
-            })
-            .collect();
-        s.cell_world = World::new(s.cell_solids.clone());
-        s.rebuild_world();
+        s.layers = i32::from(level.grid_z).max(1);
+        s.set_jake_layer(jake_layer);
         s.time_limit = i32::from(level.field_1004.max(0));
         s.timer = s.time_limit * TIMER_TICKS_PER_SECOND;
         if let Ok(res) = assets.archive().get("WIZARD.RES") {
@@ -517,6 +535,19 @@ impl Scene {
                     OVERLAY_OBJECT,
                 );
             }
+            for z in self
+                .prop_zones
+                .iter()
+                .filter(|z| z.layer == self.jake_layer)
+            {
+                fb.rect(
+                    z.rect.x.saturating_sub(camera.0),
+                    z.rect.y.saturating_sub(camera.1),
+                    z.rect.w,
+                    z.rect.h,
+                    OVERLAY_MARKER,
+                );
+            }
             for m in &self.markers {
                 fb.rect(
                     m.x.saturating_sub(4).saturating_sub(camera.0),
@@ -547,10 +578,22 @@ impl Scene {
     pub fn tick(&mut self, input: u32) {
         let input = if self.outcome.is_some() { 0 } else { input };
         if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
-            j.tick(input, &self.world);
+            let env = Env {
+                world: &self.world,
+                zones: &self.prop_zones,
+                layers: self.layers,
+            };
+            j.tick_in(input, &env);
             j.respawn_if_outside((self.width, self.height));
             sp.x = j.body.x;
             sp.y = j.body.y;
+        }
+        let layer = self.jake.as_ref().map(|j| j.layer());
+        if let Some(l) = layer.filter(|&l| l != self.jake_layer) {
+            self.set_jake_layer(l);
+        }
+        if let Some(b) = self.jake.as_mut().and_then(|j| j.special.take()) {
+            self.apply_special(b);
         }
         self.spawn_shots();
         if self.outcome.is_none() {
@@ -580,20 +623,18 @@ impl Scene {
         }
         self.prev_input = input;
         if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
-            sp.x = j.body.x;
-            sp.y = j.body.y;
+            // deslocamento do desenho pelo esqueleto (`+0x16c/+0x170`)
+            let (ox, oy) = j.draw_offset();
+            sp.x = j.body.x.saturating_add(ox);
+            sp.y = j.body.y.saturating_add(oy);
             // A arte do Jake olha para a esquerda: espelha quando ele olha para a direita.
-            sp.mirror = j.facing_right();
+            sp.mirror = j.sprite_mirrored();
             if let Some(num) = j.scale_override() {
                 sp.scale.0 = num;
             }
-            if j.label_changed() {
-                if let Some(p) = AnimPlayer::at_label(&sp.anim, j.label()) {
-                    sp.player = p;
-                }
-            } else if j.advance() {
-                let anim = sp.anim.clone();
-                sp.player.tick(&anim);
+            if let Some(mut p) = AnimPlayer::at_label(&sp.anim, j.label()) {
+                p.seek(j.frame());
+                sp.player = p;
             }
         }
         for sp in self.sprites.iter_mut().filter(|sp| !sp.frozen) {
@@ -842,10 +883,9 @@ impl Scene {
             return;
         };
         let jb = j.body.bounds();
-        let in_zone = self
-            .exit_zones
-            .iter()
-            .any(|(z, r)| *z == self.jake_layer && r.overlaps(&jb));
+        let in_zone = self.prop_zones.iter().any(|z| {
+            z.layer == self.jake_layer && z.kind & zone::EXIT != 0 && z.rect.overlaps(&jb)
+        });
         if !in_zone {
             return;
         }
@@ -946,6 +986,49 @@ impl Scene {
         &self.cell_world
     }
 
+    /// Põe o Jake na camada `layer` (`+0x17c`): as caixas das células passam a ser as dessa
+    /// camada e o mundo é refeito.
+    pub fn set_jake_layer(&mut self, layer: i32) {
+        self.jake_layer = layer;
+        self.cell_solids = self
+            .borders
+            .iter()
+            .filter(|(_, _, z, b)| *z == layer && b.kind == BOX)
+            .map(|(cx, cy, _, b)| Rect {
+                x: cx.saturating_add(i32::from(b.x)),
+                y: cy.saturating_add(i32::from(b.y)),
+                w: i32::from(b.width),
+                h: i32::from(b.height),
+            })
+            .collect();
+        self.cell_world = World::new(self.cell_solids.clone());
+        self.rebuild_world();
+    }
+
+    /// Especial BAIXO+ATIRAR (`0x00427643`): objetos vivos da camada a menos de 70 px do
+    /// centro do Jake. Projéteis somem; os demais levam o dano (as minas morrem).
+    fn apply_special(&mut self, b: SpecialBlast) {
+        for e in self.entities.iter_mut().filter(|e| {
+            e.alive && e.layer == b.layer && e.flags & 0x80003 == 0x80001 && e.present()
+        }) {
+            if !b.reaches(e.center()) {
+                continue;
+            }
+            match SpecialBlast::effect(e.kind) {
+                crate::jake::SpecialEffect::Destroy => e.alive = false,
+                crate::jake::SpecialEffect::Knockdown => {}
+                crate::jake::SpecialEffect::Damage => {
+                    if let Behaviour::Mine(_) = e.behaviour {
+                        if e.health > 0 {
+                            self.kills += 1;
+                        }
+                        e.health = 0;
+                    }
+                }
+            }
+        }
+    }
+
     /// Refaz o mundo do Jake: caixas das células mais as dos objetos sólidos vivos da camada
     /// dele (formas relativas à posição atual do objeto).
     pub fn rebuild_world(&mut self) {
@@ -963,8 +1046,8 @@ impl Scene {
                 }));
             }
         }
-        self.object_solids = solids[n..].to_vec();
-        self.world = World::new(solids);
+        self.object_solids = solids.split_off(n);
+        self.world = World::with_objects(solids, self.object_solids.clone());
     }
 
     /// Tique das entidades: estado dos gatilhos congelado antes do tique; cada entidade age
@@ -1253,6 +1336,101 @@ mod tests {
         assert!(j.health.hp < 50 && j.health.hp > 0, "vida {}", j.health.hp);
     }
 
+    /// Especial BAIXO+ATIRAR: a mina a menos de 70 px do centro do Jake morre (conta como
+    /// abatida), a de longe não; o Jake perde 3 de vida.
+    #[test]
+    fn down_shoot_special_kills_near_mines() {
+        use crate::behaviour::mine::MineState;
+        use crate::input::{DOWN, SHOOT};
+        let (mut l, mut a) = platform_level(0, 0x80089);
+        let mine = |x: i32| {
+            let mut m = object(crate::entity::MINE, x, 10, "OAN.ANM");
+            m.fields = vec![0, 0, 0, 0x80801, 0];
+            m.fields.resize(16, 0);
+            m.fields[14] = 1;
+            m
+        };
+        l.objects.push(mine(100));
+        l.objects.push(mine(900));
+        let mut s = Scene::build(&l, &mut a).unwrap();
+        for _ in 0..30 {
+            s.tick(0);
+        }
+        let hp = s.jake.as_ref().unwrap().health.hp;
+        let jc = s.focus().unwrap();
+        for e in s
+            .entities
+            .iter_mut()
+            .filter(|e| e.kind == crate::entity::MINE)
+        {
+            e.behaviour = Behaviour::Mine(MineState::new(0));
+            e.y = jc.1;
+        }
+        s.entities[1].x = jc.0 + 40;
+        s.tick(DOWN | SHOOT);
+        s.tick(DOWN | SHOOT);
+        let alive: Vec<bool> = s
+            .entities
+            .iter()
+            .filter(|e| e.kind == crate::entity::MINE)
+            .map(|e| e.alive && e.health > 0)
+            .collect();
+        assert_eq!(alive, vec![false, true]);
+        assert_eq!(s.kills, 1);
+        s.tick(0);
+        assert_eq!(s.jake.as_ref().unwrap().health.hp, hp - 3);
+    }
+
+    /// A camada da cena acompanha a do Jake: os sólidos das células passam a ser os da
+    /// camada nova.
+    #[test]
+    fn jake_layer_change_switches_cell_solids() {
+        let mut s = Scene::empty(256, 128);
+        s.borders = vec![
+            (
+                0,
+                0,
+                0,
+                BorderBox {
+                    kind: BOX,
+                    x: 0,
+                    y: 100,
+                    width: 128,
+                    height: 10,
+                },
+            ),
+            (
+                0,
+                0,
+                1,
+                BorderBox {
+                    kind: BOX,
+                    x: 0,
+                    y: 50,
+                    width: 128,
+                    height: 10,
+                },
+            ),
+            (
+                128,
+                0,
+                1,
+                BorderBox {
+                    kind: BOX,
+                    x: 0,
+                    y: 50,
+                    width: 128,
+                    height: 10,
+                },
+            ),
+        ];
+        s.set_jake_layer(0);
+        assert_eq!(s.cell_world().solids().len(), 1);
+        s.set_jake_layer(1);
+        assert_eq!((s.jake_layer, s.cell_world().solids().len()), (1, 2));
+        assert_eq!(s.world.solids()[0].y, 50);
+    }
+
     /// Fase sintética com o Jake, uma saída (OAN.ANM como animação, rótulo 1) à esquerda
     /// dele e uma zona PR 0x40 diante dela.
     fn exit_level(zone: bool) -> (Level, Assets) {
@@ -1321,12 +1499,12 @@ mod tests {
         s.tick(0);
         assert_eq!(s.outcome, Some(Outcome::Victory));
         assert!(s.events.contains(&Event::Outcome(Outcome::Victory)));
-        // sem a zona PR, CIMA não faz nada
+        // sem a zona PR, CIMA não usa a saída: o Jake se esconde (164, M6b)
         let (l, a) = exit_level(false);
         let mut s = settle_scene(&l, a);
         s.tick(UP);
         assert!(!s.entities.iter().find(|e| e.kind == 5).unwrap().on);
-        assert_eq!(s.jake.as_ref().unwrap().state(), State::Idle);
+        assert_eq!(s.jake.as_ref().unwrap().state(), State::Hide);
     }
 
     #[test]

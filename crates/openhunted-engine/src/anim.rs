@@ -110,6 +110,11 @@ impl AnimPlayer {
         self.frame + 1 >= self.end
     }
 
+    /// Vai ao quadro `i` da sequência (limitado ao último).
+    pub fn seek(&mut self, i: usize) {
+        self.frame = self.start + i.min(self.len().saturating_sub(1));
+    }
+
     /// Avança um quadro sem voltar ao início; devolve `true` se já estava no fim.
     pub fn tick_once(&mut self) -> bool {
         if self.is_last() {

@@ -277,7 +277,9 @@ fn real_levels() {
 
 #[test]
 fn every_resource_parses_by_type() {
-    use openhunted_formats::{Animation, Bitmap, Border, Font, Interface, Palette, Sound};
+    use openhunted_formats::{
+        Animation, Bitmap, Border, Font, Interface, Palette, Skeleton, Sound,
+    };
     let path = data_or_skip!();
     let ar = open_real_archive(&path);
     let mut undecoded = BTreeMap::new();
@@ -296,6 +298,7 @@ fn every_resource_parses_by_type() {
             "BRD" => Border::parse(data).map(|_| ()),
             "ITF" => Interface::parse(data).map(|_| ()),
             "PFT" => Font::parse(data).map(|_| ()),
+            "SKE" => Skeleton::parse(data).map(|_| ()),
             "RES" => Ok(()),
             other => {
                 *undecoded.entry(other.to_string()).or_insert(0) += 1;
@@ -305,7 +308,7 @@ fn every_resource_parses_by_type() {
         ok.unwrap_or_else(|err| panic!("{}: {err}", e.name));
     }
     // Pendentes para as próximas etapas (listados em docs/formats/README.md).
-    let expected: BTreeMap<String, i32> = [("SKE", 2), ("TBL", 3), ("VCR", 1)]
+    let expected: BTreeMap<String, i32> = [("TBL", 3), ("VCR", 1)]
         .iter()
         .map(|(k, v)| (k.to_string(), *v))
         .collect();
@@ -438,4 +441,43 @@ fn real_solo_levels_have_one_player() {
         assert_eq!(starts, vec![kind], "{}", m.file);
     }
     assert_eq!(solo, 65);
+}
+
+#[test]
+fn real_skeletons() {
+    use openhunted_formats::{Animation, Skeleton};
+    let path = data_or_skip!();
+    let ar = open_real_archive(&path);
+    for (name, anm, id, n, size) in [
+        ("JAKE.SKE", "JAKE.ANM", 1, 197, (20, 57)),
+        ("MINOTAUR.SKE", "MINOTAUR.ANM", 2, 164, (28, 50)),
+    ] {
+        let s = Skeleton::parse(ar.get(name).unwrap()).unwrap();
+        assert_eq!((s.id, s.entries.len(), (s.width, s.height)), (id, n, size));
+        let full: Vec<_> = s.entries.iter().filter(|e| e.frames() > 0).collect();
+        assert!(full.iter().all(|e| e.joints_per_frame == 18), "{name}");
+        // as entradas com quadros correspondem a rótulos do .ANM (salvo a 2 do Jake)
+        let a = Animation::parse(ar.get(anm).unwrap()).unwrap();
+        let labels: Vec<u16> = a.labels.iter().map(|l| l.id).collect();
+        let orphan = s
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(i, e)| e.frames() > 0 && !labels.contains(&(*i as u16)))
+            .count();
+        assert!(orphan <= 1, "{name}: {orphan} entradas sem rótulo");
+    }
+    let s = Skeleton::parse(ar.get("JAKE.SKE").unwrap()).unwrap();
+    assert_eq!(s.entries.iter().filter(|e| e.frames() > 0).count(), 85);
+    // a 2 (sem rótulo no JAKE.ANM) é igual à 149 (andar furtivo)
+    assert_eq!(s.entries[2], s.entries[149]);
+    // subir (30): 42 px por ciclo na escala do Jake padrão, ver docs/re/ske.md
+    let e = s.entry(30).unwrap();
+    assert_eq!(e.frames(), 13);
+    let climb: i32 = e
+        .roots
+        .windows(2)
+        .map(|w| (i32::from(w[1].1) - i32::from(w[0].1)) * 47 / 57)
+        .sum();
+    assert!((climb - 21).abs() <= 2, "subida em unidades/2: {climb}");
 }

@@ -8,3 +8,5 @@ pub const RIGHT: u32 = 0x8;
 pub const SHOOT: u32 = 0x100;
 pub const JUMP: u32 = 0x200;
 pub const STEALTH: u32 = 0x400;
+/// Soco (tecla Z). O soco ainda não existe: o bit chega ao Jake e é ignorado.
+pub const PUNCH: u32 = 0x40000;

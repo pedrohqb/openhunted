@@ -694,3 +694,261 @@ fn bullets_never_cross_cell_walls() {
     }
     assert!(checked > 10, "poucas paredes testadas: {checked}");
 }
+
+/// Tira as minas (e os demais objetos que ferem) para testar só o movimento.
+fn without_mines(s: &mut Scene) {
+    for e in s.entities.iter_mut() {
+        if matches!(e.behaviour, Behaviour::Mine(_)) {
+            e.alive = false;
+        }
+    }
+    s.rebuild_world();
+}
+
+/// Põe o Jake em (x, y), parado, e deixa assentar.
+fn place_jake(s: &mut Scene, x: i32, y: i32) {
+    let j = s.jake.as_mut().unwrap();
+    j.body = openhunted_engine::Body::new(x, y, j.body.boxr);
+    for _ in 0..20 {
+        s.tick(0);
+    }
+}
+
+/// Roda `n` tiques com a entrada `input`, registrando o caminho do Jake.
+fn run(s: &mut Scene, n: usize, input: u32) {
+    for _ in 0..n {
+        s.tick(input);
+        if std::env::var_os("OH_TRACE").is_some() {
+            let j = s.jake.as_ref().unwrap();
+            eprintln!(
+                "{input:#06x} ({}, {}) {:?} q{} camada {}",
+                j.body.x,
+                j.body.y,
+                j.state(),
+                j.frame(),
+                j.layer()
+            );
+        }
+    }
+}
+
+/// T_J_003: no fundo da fase (célula (4, 4)), CIMA diante da rede (zona 4, x 561–593,
+/// y 434–619) agarra (3 → 30) e sobe pelo esqueleto; com os pés acima do piso da sala de
+/// cima (y = 500), PULAR+CIMA+DIREITA solta da rede no pulo longo e ele pousa na
+/// plataforma (x 618–746).
+#[test]
+fn t_j_003_jake_climbs_the_net() {
+    use openhunted_engine::State;
+    use openhunted_engine::input::{JUMP, RIGHT, UP};
+    use openhunted_engine::jake::Climb;
+    let Some((mut s, _)) = load("T_J_003.LEV") else {
+        return;
+    };
+    without_mines(&mut s);
+    place_jake(&mut s, 560, 560);
+    let j = s.jake.as_ref().unwrap();
+    assert!(j.body.on_ground, "{:?}", j.body);
+    let feet = |s: &Scene| {
+        let b = s.jake.as_ref().unwrap().body.bounds();
+        b.y + b.h
+    };
+    let y0 = feet(&s);
+    run(&mut s, 8, UP);
+    assert_eq!(
+        s.jake.as_ref().unwrap().state(),
+        State::Climb(Climb::Vertical)
+    );
+    let mut ticks = 0;
+    while feet(&s) >= 490 {
+        run(&mut s, 1, UP);
+        ticks += 1;
+        let st = s.jake.as_ref().unwrap().state();
+        assert_eq!(
+            st,
+            State::Climb(Climb::Vertical),
+            "soltou-se em y {}",
+            feet(&s)
+        );
+        assert!(ticks < 200, "não sobe: pés em {}", feet(&s));
+    }
+    // ≈ 42 px por ciclo de 13 tiques (esqueleto, k = 2)
+    assert!(
+        (y0 - feet(&s)) * 13 / ticks <= 45,
+        "{} px em {ticks} tiques",
+        y0 - feet(&s)
+    );
+    run(&mut s, 1, JUMP | UP | RIGHT);
+    run(&mut s, 40, RIGHT);
+    run(&mut s, 10, 0);
+    let j = s.jake.as_ref().unwrap();
+    assert!(j.body.on_ground, "{:?} {:?}", j.state(), j.body);
+    assert!(feet(&s) <= 500, "não ficou em cima: pés em {}", feet(&s));
+    assert!(j.body.x > 618, "não chegou à plataforma: x {}", j.body.x);
+}
+
+/// Anda até a caixa do Jake cruzar a zona PR mais próxima do tipo `kind` na camada dele.
+fn walk_to_zone(s: &mut Scene, kind: u16) {
+    use openhunted_engine::input::{LEFT, RIGHT};
+    for _ in 0..100 {
+        let env = openhunted_engine::jake::Env {
+            world: &s.world,
+            zones: &s.prop_zones,
+            layers: s.layers,
+        };
+        let j = s.jake.as_ref().unwrap();
+        if j.zones_under(&env) & kind != 0 {
+            run(s, 1, 0);
+            return;
+        }
+        let b = j.body.bounds();
+        let cx = b.x + b.w / 2;
+        let target = s
+            .prop_zones
+            .iter()
+            .filter(|z| z.layer == j.layer() && z.kind & kind != 0)
+            .map(|z| z.rect.x + z.rect.w / 2)
+            .min_by_key(|x| (x - cx).abs())
+            .expect("zona");
+        run(s, 1, if target < cx { LEFT } else { RIGHT });
+    }
+    let j = s.jake.as_ref().unwrap();
+    panic!("zona {kind:#x} não alcançada: {:?} {:?}", j.state(), j.body);
+}
+
+/// T_J_007: sobe a escada (x 553–585) do corredor de baixo à sala da linha 2, anda à
+/// esquerda até a porta da camada (zona 2, x ≈ 451) e aperta BAIXO → camada 1 (estado 11,
+/// a camada muda no 4º tique); na camada 1, à direita até a zona 2 de x ≈ 579 e BAIXO →
+/// camada 2; ali, CIMA na zona 1 do mesmo ponto volta à camada 1.
+#[test]
+fn t_j_007_layer_doors() {
+    use openhunted_engine::State;
+    use openhunted_engine::input::{DOWN, JUMP, LEFT, UP};
+    use openhunted_engine::jake::zone;
+    let Some((mut s, _)) = load("T_J_007.LEV") else {
+        return;
+    };
+    without_mines(&mut s);
+    place_jake(&mut s, 556, 440);
+    assert!(s.jake.as_ref().unwrap().body.on_ground);
+    let feet = |s: &Scene| {
+        let b = s.jake.as_ref().unwrap().body.bounds();
+        b.y + b.h
+    };
+    run(&mut s, 8, UP);
+    for _ in 0..200 {
+        if feet(&s) < 366 {
+            break;
+        }
+        run(&mut s, 1, UP);
+    }
+    run(&mut s, 1, JUMP | UP | LEFT);
+    run(&mut s, 30, 0);
+    assert!(s.jake.as_ref().unwrap().body.on_ground);
+    assert!(feet(&s) <= 372, "não subiu: pés em {}", feet(&s));
+    walk_to_zone(&mut s, zone::LAYER_DOWN);
+    assert!((440..=470).contains(&s.jake.as_ref().unwrap().body.x));
+    let solids0 = s.cell_world().solids().len();
+    run(&mut s, 1, DOWN);
+    assert!(matches!(
+        s.jake.as_ref().unwrap().state(),
+        State::LayerDown(_)
+    ));
+    run(&mut s, 2, DOWN);
+    assert_eq!(s.jake.as_ref().unwrap().layer(), 0);
+    run(&mut s, 1, DOWN);
+    assert_eq!(s.jake.as_ref().unwrap().layer(), 1, "muda no 4º tique");
+    assert_eq!(s.jake_layer, 1);
+    assert_ne!(
+        s.cell_world().solids().len(),
+        solids0,
+        "sólidos da camada 1"
+    );
+    run(&mut s, 10, 0);
+    assert_eq!(s.jake.as_ref().unwrap().state(), State::Idle);
+    walk_to_zone(&mut s, zone::LAYER_DOWN);
+    run(&mut s, 8, DOWN);
+    assert_eq!((s.jake.as_ref().unwrap().layer(), s.jake_layer), (2, 2));
+    run(&mut s, 10, 0);
+    run(&mut s, 8, UP);
+    assert_eq!((s.jake.as_ref().unwrap().layer(), s.jake_layer), (1, 1));
+}
+
+/// Fuzz da M6b: em toda fase solo com Jake, entradas aleatórias com CIMA, BAIXO, FURTIVO,
+/// ATIRAR e combinações (corda, camadas, esconder, agachar, barra, especial) não causam
+/// pânico nem põem o Jake dentro de um sólido da camada corrente que ele ainda não
+/// intersectava (a troca de camada recomeça a conta).
+#[test]
+fn random_moves_never_enter_solids() {
+    use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, STEALTH, UP};
+    if std::env::var_os("OPENHUNTED_DATA").is_none() {
+        return;
+    }
+    let choices = [
+        0,
+        LEFT,
+        RIGHT,
+        UP,
+        DOWN,
+        UP | LEFT,
+        UP | RIGHT,
+        DOWN | LEFT,
+        DOWN | RIGHT,
+        LEFT | STEALTH,
+        RIGHT | STEALTH,
+        JUMP,
+        UP | JUMP,
+        LEFT | JUMP,
+        RIGHT | UP | JUMP,
+        DOWN | SHOOT,
+        JUMP | DOWN,
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    for level in mission_files() {
+        let (mut s, _) = load(&level).unwrap();
+        if s.jake.is_none() {
+            continue;
+        }
+        let mut seed: u32 = 0x9e37_79b9;
+        let mut input = 0;
+        let mut layer = s.jake_layer;
+        let mut inside = overlapped(&s, &s.jake.as_ref().unwrap().body.bounds());
+        for t in 0..1500 {
+            if t % 9 == 0 {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                input = choices[(seed >> 16) as usize % choices.len()];
+            }
+            s.tick(input);
+            let j = s.jake.as_ref().unwrap();
+            assert_eq!(j.layer(), s.jake_layer, "{level}: camada da cena");
+            let now = overlapped(&s, &j.body.bounds());
+            if s.jake_layer == layer {
+                assert!(
+                    now.iter().all(|i| inside.contains(i)),
+                    "{level}: entrou num sólido no tique {t} ({:?}, {:?})",
+                    j.state(),
+                    j.body
+                );
+            }
+            layer = s.jake_layer;
+            inside = now;
+            let st = format!("{:?}", j.state());
+            seen.insert(st.split(['(', ' ']).next().unwrap_or_default().to_string());
+        }
+    }
+    for st in [
+        "Stealth",
+        "Climb",
+        "Crouch",
+        "Crawl",
+        "Hide",
+        "Hidden",
+        "Special",
+        "LayerDown",
+        "LayerUp",
+        "JumpUp",
+        "StandJump",
+        "Land",
+    ] {
+        assert!(seen.contains(st), "{st} nunca visitado: {seen:?}");
+    }
+}

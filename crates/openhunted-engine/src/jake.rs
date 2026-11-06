@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Máquina de estados do Jake, fatia M3a (`docs/re/personagem.md`): parado, correr, pulos
-//! balísticos, queda e aterrissagem.
+//! Máquina de estados do Jake: parado, correr, pulos e quedas (M3a, `docs/re/personagem.md`)
+//! e, na M6b, o deslocamento pelo esqueleto (`docs/re/ske.md`), cordas, camadas, esconder,
+//! agachar, barra e o especial (`docs/re/jake-movimentos.md`, `jake-escalada.md`,
+//! `escada-camadas.md`, `furtividade.md`). Os estados novos estão em `jake/moves.rs`.
+
+mod moves;
 
 use std::collections::HashMap;
+
+pub use moves::{BAR_BOX, CRAWL_BOX, Env, Skel, SpecialBlast, SpecialEffect, Zone, zone};
 
 use crate::damage::{Health, Pending, apply};
 use crate::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
@@ -28,6 +34,26 @@ pub enum JumpKind {
     Extended,
 }
 
+/// Aterrissagens (`docs/re/jake-movimentos.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Landing {
+    /// Depois da queda controlada (25 → 26) ou de ser derrubado.
+    Fall,
+    /// Depois do pulo médio (29 → 35).
+    Medium,
+    /// Depois do pulo longo (28 → 34).
+    Long,
+    /// Depois do pulo estendido ou da queda descontrolada (80/76 → 77).
+    Hard,
+}
+
+/// Escalada: vertical/diagonal (30, `MNCLIMB1`) ou de lado (32, `MNCLIMB2`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Climb {
+    Vertical,
+    Side,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
     Idle,
@@ -37,8 +63,44 @@ pub enum State {
     RunUp,
     Jump(JumpKind),
     Fall,
-    /// Aterrissagem; `true` se veio de uma queda.
-    Land(bool),
+    /// Queda descontrolada (76, fim do pulo estendido no ar).
+    WildFall,
+    /// Aterrissagem (26, 35, 34 ou 77).
+    Land(Landing),
+    /// Levantar após a queda descontrolada (78).
+    GetUp,
+    /// Sacudir a poeira (79).
+    Shake,
+    /// Andar furtivo (estado 2, rótulo 149).
+    Stealth,
+    /// Pulo para cima (16); `true` = saindo da corda (17).
+    JumpUp(bool),
+    /// Especial BAIXO+ATIRAR (estado 9, rótulo 9); tiques nele.
+    Special(u32),
+    /// Diante da corda (3) e soltar/descer dela (8: o 3 ao contrário).
+    Grab,
+    LetGo,
+    /// Escalando: 30 (vertical e diagonais) ou 32 (para o lado).
+    Climb(Climb),
+    /// Troca de camada: 11 (BAIXO, camada + 1) e 12 (CIMA, camada − 1), com o contador
+    /// `+0x268`.
+    LayerDown(i32),
+    LayerUp(i32),
+    /// Agachar (85), engatinhar (86), levantar (87: o 85 ao contrário).
+    Crouch,
+    Crawl,
+    StandUp,
+    /// Esconder-se (164), escondido (165), sair (166: o 164 ao contrário).
+    Hide,
+    Hidden,
+    Unhide,
+    /// Barra: pendurado (103), mão ante mão (107), puxar (105), em cima (104), descer (106:
+    /// o 105 ao contrário).
+    BarHang,
+    BarMove,
+    BarPull,
+    BarUp,
+    BarDown,
     /// Empurrado (estado 168, `0x00423366`).
     Pushed,
     /// Derrubado em voo (estados 81/82, `0x004235fc`); `true` = jogado para a direita.
@@ -183,7 +245,7 @@ pub const DIE_KNOCKED_RIGHT: u16 = 77;
 pub const DIE_KNOCKED_LEFT: u16 = 179;
 pub const DIE_POISON: u16 = 171;
 /// Todos os rótulos usados pelos estados (para conferir contra o `JAKE.ANM` real).
-pub const ALL_LABELS: [u16; 26] = [
+pub const ALL_LABELS: [u16; 48] = [
     1,
     10,
     100,
@@ -195,6 +257,11 @@ pub const ALL_LABELS: [u16; 26] = [
     25,
     26,
     35,
+    34,
+    76,
+    77,
+    78,
+    79,
     168,
     81,
     82,
@@ -210,13 +277,31 @@ pub const ALL_LABELS: [u16; 26] = [
     22,
     18,
     19,
+    149,
+    16,
+    17,
+    9,
+    3,
+    30,
+    32,
+    11,
+    85,
+    86,
+    164,
+    165,
+    103,
+    104,
+    105,
+    107,
+    DIE_POISON,
 ];
 /// Tiques do choque elétrico.
 const SHOCK_TICKS: u32 = 10;
 /// Escala mínima ao entrar na porta (numerador sobre a altura do quadro de referência).
 const EXIT_MIN_SCALE: i32 = 30;
 
-/// Rótulo do `JAKE.ANM` e campo c (avança um quadro a cada c+1 tiques) de cada estado.
+/// Rótulo do `JAKE.ANM` e campo c (avança um quadro a cada c+1 tiques) de cada estado
+/// (tabela `0x473300`, colunas `+0x10` e `+0x18`).
 fn anim_of(s: State) -> (u16, u32) {
     match s {
         State::Idle => (1, 1),
@@ -228,8 +313,13 @@ fn anim_of(s: State) -> (u16, u32) {
         State::Jump(JumpKind::Long) => (28, 0),
         State::Jump(JumpKind::Extended) => (80, 0),
         State::Fall => (25, 0),
-        State::Land(true) => (26, 0),
-        State::Land(false) => (35, 0),
+        State::WildFall => (76, 0),
+        State::Land(Landing::Fall) => (26, 0),
+        State::Land(Landing::Medium) => (35, 0),
+        State::Land(Landing::Long) => (34, 0),
+        State::Land(Landing::Hard) => (77, 0),
+        State::GetUp => (78, 0),
+        State::Shake => (79, 1),
         State::Pushed => (168, 0),
         State::KnockedDown(true) => (81, 0),
         State::KnockedDown(false) => (82, 0),
@@ -241,7 +331,57 @@ fn anim_of(s: State) -> (u16, u32) {
         State::Recover => (22, 0),
         State::Ready(_) => (18, 0),
         State::Holster => (19, 0),
+        State::Stealth => (149, 0),
+        State::JumpUp(false) => (16, 0),
+        State::JumpUp(true) => (17, 0),
+        State::Special(_) => (9, 0),
+        State::Grab | State::LetGo => (3, 0),
+        State::Climb(Climb::Vertical) => (30, 0),
+        State::Climb(Climb::Side) => (32, 0),
+        State::LayerDown(_) => (11, 0),
+        State::LayerUp(_) => (12, 0),
+        State::Crouch | State::StandUp => (85, 0),
+        State::Crawl => (86, 0),
+        State::Hide | State::Unhide => (164, 0),
+        State::Hidden => (165, 0),
+        State::BarHang => (103, 0),
+        State::BarMove => (107, 1),
+        State::BarPull | State::BarDown => (105, 0),
+        State::BarUp => (104, 0),
     }
+}
+
+/// Estados que tocam o rótulo de trás para a frente (`0x00423894`).
+fn reversed(s: State) -> bool {
+    matches!(
+        s,
+        State::LetGo | State::StandUp | State::Unhide | State::BarDown
+    )
+}
+
+/// Como a animação avança neste tique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnimMode {
+    /// Pelo estado: para a frente em laço, ou para trás nos estados de `reversed`.
+    Auto,
+    /// Parada no quadro.
+    Hold,
+    /// Para trás em laço.
+    Reverse,
+    /// Dois quadros por tique (sem passar do último).
+    Double,
+    /// Direto ao quadro dado (limitado ao último).
+    Target(usize),
+}
+
+/// Pedido de velocidade pelo esqueleto neste tique (`0x00406fc0`): fator k e eixos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SkeReq {
+    k: i32,
+    x: bool,
+    y: bool,
+    /// Diagonal da corda: vx = diag · vy.
+    diag: i32,
 }
 
 /// O Jake controlável.
@@ -268,6 +408,23 @@ pub struct Jake {
     pub shots: Vec<Shot>,
     /// Apertou ATIRAR sem munição neste tique (a cena emite o som).
     pub no_ammo: bool,
+    /// Quadro corrente dentro do rótulo do estado (`+0x184`).
+    frame: usize,
+    anim_mode: AnimMode,
+    ske_req: Option<SkeReq>,
+    /// Esqueleto (`JAKE.SKE`) com a escala do Jake; sem ele, nada se move pelo esqueleto.
+    skel: Option<Skel>,
+    /// Camada (`+0x17c`).
+    layer: i32,
+    /// Caixas de colisão: padrão (`JK_DEFLT`), engatinhando (`JK_CRAWL`) e na barra
+    /// (`JK_BARUP`).
+    box_default: Rect,
+    box_crawl: Rect,
+    box_bar: Rect,
+    /// Gerador para o sorteio do 79 (`rand & 3`).
+    rng: u32,
+    /// Especial disparado neste tique (a cena aplica nos objetos).
+    pub special: Option<SpecialBlast>,
 }
 
 impl Jake {
@@ -290,6 +447,48 @@ impl Jake {
             inventory: Inventory::from_points(&[]),
             shots: Vec::new(),
             no_ammo: false,
+            frame: 0,
+            anim_mode: AnimMode::Auto,
+            ske_req: None,
+            skel: None,
+            layer: 0,
+            box_default: boxr,
+            box_crawl: moves::CRAWL_BOX,
+            box_bar: moves::BAR_BOX,
+            rng: 0x4a41_4b45,
+            special: None,
+        }
+    }
+
+    /// Usa o esqueleto (deslocamento e velocidades dos estados que o seguem).
+    pub fn with_skeleton(mut self, skel: Skel) -> Self {
+        self.skel = Some(skel);
+        self
+    }
+
+    /// Caixas de engatinhar e de pendurar na barra (dos BRDs do jogo).
+    pub fn with_boxes(mut self, crawl: Rect, bar: Rect) -> Self {
+        self.box_crawl = crawl;
+        self.box_bar = bar;
+        self
+    }
+
+    /// Camada inicial.
+    pub fn with_layer(mut self, layer: i32) -> Self {
+        self.layer = layer;
+        self
+    }
+
+    /// Camada corrente (`+0x17c`).
+    pub fn layer(&self) -> i32 {
+        self.layer
+    }
+
+    /// Quadro corrente dentro do rótulo (o cadáver fica no último).
+    pub fn frame(&self) -> usize {
+        match self.state {
+            State::Dead => self.len_of(self.death_label) - 1,
+            _ => self.frame,
         }
     }
 
@@ -301,6 +500,11 @@ impl Jake {
     /// Começa (ou recomeça) uma rajada com a mira da entrada; sem munição, avisa uma vez
     /// (na borda da tecla) e devolve `false`, deixando o controle normal seguir.
     fn start_fire(&mut self, input: u32) -> bool {
+        if moves::wants_special(input) && self.health.hp > moves::SPECIAL_MIN_HP {
+            self.body.vx = 0;
+            self.set(State::Special(0));
+            return true;
+        }
         if self.inventory.pistol_ammo() <= 0 {
             self.no_ammo = self.prev_input & SHOOT == 0;
             return false;
@@ -309,6 +513,7 @@ impl Jake {
         let aim = Aim::from_input(input);
         self.state = State::Fire { aim, t: 0 };
         self.ticks = 0;
+        self.frame = 0;
         self.label_changed = true;
         true
     }
@@ -378,8 +583,6 @@ impl Jake {
         } else if t > 12 {
             self.set(State::Recover);
         }
-        step(&mut self.body, world, true);
-        self.finish_tick();
     }
 
     /// Vida e armadura iniciais (campos `fields[14]`/`[15]` do objeto).
@@ -499,14 +702,107 @@ impl Jake {
             self.state = s;
             self.ticks = 0;
             self.label_changed = true;
+            self.frame = if reversed(s) {
+                self.len_of(anim_of(s).0) - 1
+            } else {
+                0
+            };
         }
     }
 
-    /// A animação do estado já tocou inteira.
+    /// Troca de estado mantendo o quadro (o 27 vira 16 "no mesmo quadro").
+    fn set_keep_frame(&mut self, s: State) {
+        let f = self.frame;
+        self.set(s);
+        self.frame = f.min(self.len_of(anim_of(s).0) - 1);
+    }
+
+    /// Número de quadros de um rótulo (ao menos 1).
+    fn len_of(&self, label: u16) -> usize {
+        self.lengths.get(&label).copied().unwrap_or(1).max(1)
+    }
+
+    /// A animação do estado chegou ao fim e avançaria neste tique (o modo "parar no fim" de
+    /// `0x00406c71` devolve 1).
     fn anim_done(&self) -> bool {
         let (label, c) = anim_of(self.state);
-        let n = self.lengths.get(&label).copied().unwrap_or(1).max(1) as u32;
-        self.ticks >= n.saturating_mul(c + 1)
+        if self.label_changed || self.ticks % (c + 1) != 0 {
+            return false;
+        }
+        if reversed(self.state) {
+            self.frame == 0
+        } else {
+            self.frame + 1 >= self.len_of(label)
+        }
+    }
+
+    /// Avança o quadro conforme o modo pedido neste tique (antes da física, como o original,
+    /// que anima e depois pede a velocidade do quadro).
+    fn animate(&mut self) {
+        let (label, c) = anim_of(self.state);
+        let n = self.len_of(label);
+        self.advance = false;
+        self.frame = self.frame.min(n - 1);
+        if self.label_changed || self.ticks % (c + 1) != 0 {
+            return;
+        }
+        let before = self.frame;
+        let mode = match self.anim_mode {
+            AnimMode::Auto if reversed(self.state) => AnimMode::Reverse,
+            m => m,
+        };
+        self.frame = match mode {
+            AnimMode::Hold => before,
+            AnimMode::Auto => (before + 1) % n,
+            AnimMode::Reverse => (before + n - 1) % n,
+            AnimMode::Double => (before + 2).min(n - 1),
+            AnimMode::Target(t) => t.min(n - 1),
+        };
+        self.advance = self.frame != before;
+    }
+
+    /// Velocidade pedida pelo esqueleto (`0x00406fc0`): k · Δ da raiz no quadro corrente.
+    fn apply_ske(&mut self) {
+        let (Some(req), Some(sk)) = (self.ske_req, self.skel.as_ref()) else {
+            return;
+        };
+        let back = reversed(self.state) || self.anim_mode == AnimMode::Reverse;
+        let (mut dx, dy) = sk.delta(anim_of(self.state).0, self.frame, back, self.facing_right);
+        if moves::mirrored_art(self.state) {
+            dx = -dx;
+        }
+        if req.x {
+            self.body.vx = req.k * dx * SUB;
+        }
+        if req.y {
+            self.body.vy = req.k * dy * SUB;
+        }
+        if req.diag != 0 {
+            self.body.vx = req.diag * self.body.vy;
+        }
+    }
+
+    /// Deslocamento do desenho em px (`+0x16c/+0x170`, `0x00406ea2` sem o bit 0x10): o
+    /// sprite vai a `(x − 0x16c, y − 0x170)`. Somar ao corpo para desenhar.
+    pub fn draw_offset(&self) -> (i32, i32) {
+        let Some(sk) = self.skel.as_ref() else {
+            return (0, 0);
+        };
+        let (label, frame) = match self.state {
+            State::Dead => return (0, 0),
+            _ => (self.label(), self.frame),
+        };
+        let (mut ox, oy) = sk.offset(label, frame, self.facing_right);
+        if moves::mirrored_art(self.state) {
+            ox = -ox;
+        }
+        (-ox, -oy)
+    }
+
+    /// O sprite olha para a direita (a arte olha para a esquerda; os estados de arte
+    /// espelhada, como o 149, olham para o outro lado: `0x00422fce`).
+    pub fn sprite_mirrored(&self) -> bool {
+        self.facing_right != moves::mirrored_art(self.state)
     }
 
     fn dir(&self) -> i32 {
@@ -577,10 +873,19 @@ impl Jake {
         false
     }
 
-    /// Um tique (50 ms) com a máscara de entrada `input`.
+    /// Um tique (50 ms) com a máscara de entrada `input`, sem zonas PR (só cenário).
     pub fn tick(&mut self, input: u32, world: &World) {
+        self.tick_in(input, &Env::new(world));
+    }
+
+    /// Um tique com o ambiente completo: sólidos, zonas PR e número de camadas.
+    pub fn tick_in(&mut self, input: u32, env: &Env) {
+        let world = env.world;
         self.label_changed = false;
         self.no_ammo = false;
+        self.special = None;
+        self.anim_mode = AnimMode::Auto;
+        self.ske_req = None;
         if self.state == State::Dead {
             self.advance = false;
             return;
@@ -593,22 +898,42 @@ impl Jake {
         let pressed = |bit: u32| input & bit != 0;
         let jump_edge = pressed(JUMP) && self.prev_input & JUMP == 0;
         let side = self.wanted_side(input);
-        let airborne = matches!(self.state, State::Jump(_) | State::Fall);
+        let airborne = matches!(self.state, State::Jump(_) | State::Fall | State::WildFall);
         if let (false, Some(right)) = (airborne, side) {
             self.facing_right = right;
         }
         let moving = side.is_some();
         let shooting = pressed(SHOOT) && self.body.on_ground;
+        let can_fire = matches!(
+            self.state,
+            State::Idle
+                | State::Run
+                | State::Push
+                | State::Land(_)
+                | State::Stealth
+                | State::GetUp
+                | State::Shake
+                | State::Recover
+                | State::Ready(_)
+                | State::Holster
+        ) || (matches!(
+            self.state,
+            State::Crouch
+                | State::Crawl
+                | State::StandUp
+                | State::Hide
+                | State::Hidden
+                | State::Unhide
+        ) && self.free_above(world, 30));
+        let fired = !matches!(self.state, State::Fire { .. })
+            && can_fire
+            && shooting
+            && self.start_fire(input);
         match self.state {
-            State::Fire { aim, t } => {
-                self.tick_fire(input, world, aim, t);
-                self.prev_input = input;
-                return;
-            }
+            _ if fired => {}
+            State::Fire { aim, t } => self.tick_fire(input, world, aim, t),
             State::Recover | State::Ready(_) | State::Holster => {
-                if shooting && self.start_fire(input) {
-                    // nova rajada
-                } else if moving || jump_edge || pressed(UP) || pressed(DOWN) {
+                if moving || jump_edge || pressed(UP) || pressed(DOWN) {
                     self.set(State::Idle);
                 } else {
                     match self.state {
@@ -620,80 +945,39 @@ impl Jake {
                     }
                 }
                 self.body.vx = 0;
-                step(&mut self.body, world, true);
-                self.finish_tick();
-                self.prev_input = input;
-                return;
             }
-            _ => {}
-        }
-        let can_fire = matches!(
-            self.state,
-            State::Idle | State::Run | State::Push | State::Land(_)
-        );
-        if can_fire && shooting && self.start_fire(input) {
-            step(&mut self.body, world, true);
-            self.finish_tick();
-            self.prev_input = input;
-            return;
-        }
-        match self.state {
             State::Idle | State::Run | State::Push => {
-                if jump_edge && self.body.on_ground {
-                    if moving {
-                        match self.choose_jump(world) {
-                            JumpKind::Extended => self.set(State::RunUp),
-                            k => self.launch(k),
-                        }
-                    } else {
-                        self.body.vx = 0;
-                        self.set(State::StandJump);
-                    }
-                } else if moving {
-                    self.body.vx = RUN * self.dir();
-                    let next = if self.body.hit_wall {
-                        State::Push
-                    } else {
-                        State::Run
-                    };
-                    self.set(next);
-                } else {
-                    self.body.vx = 0;
-                    self.set(State::Idle);
-                }
-            }
-            State::StandJump => {
-                self.body.vx = 0;
-                if self.anim_done() {
-                    self.set(State::Idle);
-                }
+                self.decide_standing(input, env, jump_edge, side);
             }
             State::RunUp => {
-                // Impulso no lugar: o pulo sai do ponto onde o chão adiante foi sondado (o
-                // deslocamento do esqueleto, SKE, ainda não é aplicado).
-                self.body.vx = 0;
+                // Impulso (`0x00425382`): vx pelo esqueleto com k = 2, mantendo a vertical;
+                // no fim, o pulo estendido sai de onde o impulso levou o Jake.
                 if self.anim_done() {
                     self.launch(JumpKind::Extended);
+                } else {
+                    self.ske_req = Some(SkeReq {
+                        k: 2,
+                        x: true,
+                        y: false,
+                        diag: 0,
+                    });
                 }
             }
-            State::Jump(_) | State::Fall => {
-                // No ar, o lado oposto inverte a velocidade horizontal.
-                let opposite = match side {
-                    Some(right) => (right && self.body.vx < 0) || (!right && self.body.vx > 0),
-                    None => false,
-                };
-                if opposite {
-                    self.body.vx = -self.body.vx;
-                    self.facing_right = self.body.vx > 0;
+            State::Jump(kind) => {
+                if self.try_grab_in_air(input, env) {
+                } else if kind == JumpKind::Extended && self.anim_done() {
+                    // fim do 80 ainda no ar → queda descontrolada (76)
+                    self.set(State::WildFall);
+                } else {
+                    self.air_reverse(side);
                 }
             }
-            State::Land(_) => {
-                self.body.vx = 0;
-                if self.anim_done() {
-                    self.set(State::Idle);
+            State::Fall | State::WildFall => {
+                if !self.try_grab_in_air(input, env) {
+                    self.air_reverse(side);
                 }
             }
-            _ => unreachable!("estado passivo tratado em tick_passive"),
+            _ => self.tick_move(input, env, jump_edge, side),
         }
         if matches!(self.state, State::Run | State::Push) {
             // −1 px por tique enquanto corre (sobe degraus pequenos), se houver espaço.
@@ -705,29 +989,52 @@ impl Jake {
                 self.body.y = self.body.y.saturating_sub(1);
             }
         }
+        self.animate();
+        self.apply_ske();
         let was_rising = self.body.vy < 0;
-        step(&mut self.body, world, true);
+        step(&mut self.body, world, moves::gravity(self.state));
         match self.state {
-            State::Jump(_) | State::Fall if self.body.on_ground && !was_rising => {
+            State::Jump(_) | State::Fall | State::WildFall
+                if self.body.on_ground && !was_rising =>
+            {
                 self.body.vx = 0;
                 self.body.vy = 0;
-                let from_fall = self.state == State::Fall;
-                self.set(State::Land(from_fall));
+                let landing = match self.state {
+                    State::Jump(JumpKind::Medium) => Landing::Medium,
+                    State::Jump(JumpKind::Long) => Landing::Long,
+                    State::Fall => Landing::Fall,
+                    _ => Landing::Hard,
+                };
+                self.set(State::Land(landing));
             }
-            State::Idle | State::Run | State::Push | State::RunUp
-                if !self.body.on_ground && self.body.vy >= FALL_SPEED =>
-            {
+            State::JumpUp(_) if self.body.hit_ceiling && self.ceiling_is_bar(world) => {
+                self.body.vx = 0;
+                self.body.vy = 0;
+                self.set(State::BarHang);
+            }
+            s if moves::can_fall(s) && !self.body.on_ground && self.body.vy >= FALL_SPEED => {
                 self.set(State::Fall)
             }
             _ => {}
         }
+        self.fit_box(world);
         self.finish_tick();
         self.prev_input = input;
     }
 
+    /// No ar, o lado oposto inverte a velocidade horizontal.
+    fn air_reverse(&mut self, side: Option<bool>) {
+        let opposite = match side {
+            Some(right) => (right && self.body.vx < 0) || (!right && self.body.vx > 0),
+            None => false,
+        };
+        if opposite {
+            self.body.vx = -self.body.vx;
+            self.facing_right = self.body.vx > 0;
+        }
+    }
+
     fn finish_tick(&mut self) {
-        let c = anim_of(self.state).1;
-        self.advance = !self.label_changed && self.ticks % (c + 1) == 0;
         self.ticks = self.ticks.saturating_add(1);
     }
 
@@ -741,6 +1048,7 @@ impl Jake {
                     }
                 }
                 self.state = State::EnteringExit(n + 1);
+                self.animate();
                 self.finish_tick();
                 return;
             }
@@ -766,7 +1074,7 @@ impl Jake {
                 if self.body.on_ground && !was_rising {
                     self.body.vx = 0;
                     self.body.vy = 0;
-                    self.set(State::Land(true));
+                    self.set(State::Land(Landing::Fall));
                 }
             }
             State::Dying(_) => {
@@ -780,6 +1088,7 @@ impl Jake {
             }
             _ => {}
         }
+        self.animate();
         self.finish_tick();
     }
 

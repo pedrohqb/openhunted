@@ -169,6 +169,8 @@ fn run() -> Result<(), String> {
             down: held(&[Scancode::Down]),
             jump: held(&[Scancode::Space]),
             shoot: held(&[Scancode::LCtrl, Scancode::RCtrl]),
+            stealth: held(&[Scancode::X]),
+            punch: held(&[Scancode::Z]),
         });
         let status = app.status();
         if status != shown {

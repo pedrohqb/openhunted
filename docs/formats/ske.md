@@ -51,5 +51,6 @@ decifrada, o jogo não a usa no movimento].
 
 ## Versão 1.00
 
-`ohtool extract --type SKE` grava os arquivos como estão; `ohtool info` ainda não decodifica
-o conteúdo.
+`ohtool extract --type SKE` grava os arquivos como estão. A biblioteca lê o formato
+(`openhunted_formats::Skeleton`, teste `real_skeletons`); o motor usa as raízes no Jake
+(`crates/openhunted-engine/src/jake/moves.rs`).
