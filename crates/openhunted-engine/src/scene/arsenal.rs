@@ -149,7 +149,10 @@ impl Scene {
                     && flight(v).is_none()
                     && !matches!(
                         v.behaviour,
-                        Behaviour::Bullet(_) | Behaviour::Casing(_) | Behaviour::Explosion(_)
+                        Behaviour::Bullet(_)
+                            | Behaviour::Casing(_)
+                            | Behaviour::Explosion(_)
+                            | Behaviour::EnemyShot(_)
                     )
                     && !(kind == crate::entity::GRENADE && behaviour::grenade::ignores(v.kind))
                     && v.bounds().is_some_and(|b| b.overlaps(&sw))
@@ -209,7 +212,10 @@ impl Scene {
         if let Some(vi) = victim.filter(|_| !direct.is_empty()) {
             let v = &mut self.entities[vi];
             let mine_alive = matches!(v.behaviour, Behaviour::Mine(_)) && v.health > 0;
-            if behaviour::interact::hurt(v, &direct) && mine_alive && v.health <= 0 {
+            // os inimigos da M7a creditam o jogador na própria morte (`enemy::hurt`)
+            let hit =
+                behaviour::enemy::hurt(v, &direct, true) || behaviour::interact::hurt(v, &direct);
+            if hit && mine_alive && v.health <= 0 {
                 self.kills += 1;
             }
         }
@@ -245,7 +251,7 @@ impl Scene {
 
     /// Acerto do soco (`0x0043afe1`): cada objeto da camada (presente, `0x80001`, sem
     /// `0x8000`) cuja caixa cruza a do golpe leva a linha `(1, 0, 0)`; só quem trata dano
-    /// (`interact::hurt`) reage.
+    /// (`enemy::hurt`, com crédito, e `interact::hurt`) reage.
     pub(super) fn apply_punch(&mut self, r: Rect) {
         let right = self.jake.as_ref().is_some_and(|j| j.facing_right());
         let p = Pending {
@@ -264,7 +270,7 @@ impl Scene {
                 continue;
             }
             let mine_alive = matches!(e.behaviour, Behaviour::Mine(_)) && e.health > 0;
-            if behaviour::interact::hurt(e, &p) {
+            if behaviour::enemy::hurt(e, &p, true) || behaviour::interact::hurt(e, &p) {
                 if mine_alive && e.health <= 0 {
                     self.kills += 1;
                 }
@@ -495,6 +501,35 @@ mod tests {
                 .any(|e| e.kind == crate::entity::EXPLOSION)
                 || t < 60
         );
+    }
+
+    /// Os projéteis das armas novas ferem os inimigos da M7a com crédito ao jogador: um
+    /// foguete mata a mina saltadora (tipo 11) e conta.
+    #[test]
+    fn rocket_kills_a_hop_mine_for_the_player() {
+        use crate::behaviour::hop_mine::{HEALTH, HopMineState};
+        for w in [crate::jake::ROCKETS, crate::jake::SHOTGUN] {
+            let mut s = range(100, w);
+            // caixa alta (40 px) pousada no chão, na altura da boca da arma
+            let mut m = logic(crate::entity::HOP_MINE, 220, 60, &[0, 0, 0, 0, 0, 4, 0, 5]);
+            m.flags = 0x80801;
+            m.health = HEALTH;
+            m.solid_shapes = true;
+            m.boxes = vec![Rect {
+                x: 0,
+                y: 0,
+                w: 17,
+                h: 40,
+            }];
+            m.behaviour = Behaviour::HopMine(HopMineState::default());
+            s.entities.push(m);
+            s.tick(crate::input::SHOOT);
+            for _ in 0..12 {
+                s.tick(0);
+            }
+            assert_eq!(count(&s, crate::entity::HOP_MINE), 0, "arma {w}");
+            assert_eq!(s.kills, 1, "arma {w}");
+        }
     }
 
     /// O soco fere quem cruza a caixa do golpe, com o som 5062; os de fora não.

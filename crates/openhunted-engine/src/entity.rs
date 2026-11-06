@@ -5,10 +5,12 @@
 use openhunted_formats::{Animation, Border, LevelObject};
 
 use crate::behaviour::{
-    barrel::BarrelState, bullet::BulletState, casing::CasingState, door::DoorState,
-    exit::ExitState, explosion::ExplosionState, fence::FenceState, fire::FireState,
-    graffiti::GraffitiState, hint::HintState, laser::LaserState, laser_eye::LaserEyeState,
-    mine::MineState, pickup::PickupState, teleporter::TeleporterState, zone::ZoneState,
+    barrel::BarrelState, bruiser::BruiserState, bullet::BulletState, casing::CasingState,
+    door::DoorState, enemy_shot::EnemyShotState, exit::ExitState, explosion::ExplosionState,
+    fence::FenceState, fire::FireState, graffiti::GraffitiState, hint::HintState,
+    hop_mine::HopMineState, laser::LaserState, laser_eye::LaserEyeState, mine::MineState,
+    mine_generator::MineGeneratorState, pickup::PickupState, security_robot::SecurityRobotState,
+    sentinel::SentinelState, teleporter::TeleporterState, zone::ZoneState,
 };
 use crate::objects::flags;
 use crate::physics::Rect;
@@ -38,6 +40,15 @@ pub const FENCE: u32 = 40;
 pub const FIRE: u32 = 42;
 pub const TELEPORTER: u32 = 46;
 pub const LASER_EYE: u32 = 104;
+/// Inimigos da M7a: Bruiser (7), robô de segurança `OSR` (8), sentinela `OSE` (10), mina
+/// saltadora `OHS` (11) e gerador de minas `OHG` (103).
+pub const BRUISER: u32 = 7;
+pub const SECURITY_ROBOT: u32 = 8;
+pub const SENTINEL: u32 = 10;
+pub const HOP_MINE: u32 = 11;
+pub const MINE_GENERATOR: u32 = 103;
+/// Inimigos cujo quadro o comportamento escolhe (sprite congelado).
+pub const ENEMIES: [u32; 5] = [BRUISER, SECURITY_ROBOT, SENTINEL, HOP_MINE, MINE_GENERATOR];
 /// Paredes e portas `OH` (tipos 50–52).
 pub const DOORS: std::ops::RangeInclusive<u32> = 50..=52;
 /// Itens de coleta genérica tratados: armas e munição (12–14, 16–18, 26, 27), vida e comida
@@ -111,6 +122,12 @@ pub enum Behaviour {
     Grenade(crate::behaviour::grenade::GrenadeState),
     Piston(crate::behaviour::piston::PistonState),
     Switch(crate::behaviour::switch::SwitchState),
+    Sentinel(SentinelState),
+    HopMine(HopMineState),
+    MineGenerator(MineGeneratorState),
+    SecurityRobot(Box<SecurityRobotState>),
+    Bruiser(Box<BruiserState>),
+    EnemyShot(EnemyShotState),
 }
 
 #[derive(Debug, Clone)]
@@ -218,7 +235,8 @@ pub fn object_start(o: &LevelObject, a: &Animation) -> (usize, AnimPlayer, bool)
     let frozen = matches!(
         o.kind,
         GRAFFITI | LASER_EYE | BARREL | FENCE | TELEPORTER | PISTON | SWITCH
-    ) || DOORS.contains(&o.kind);
+    ) || DOORS.contains(&o.kind)
+        || ENEMIES.contains(&o.kind);
     let state = o.fields.get(5).copied().unwrap_or(0);
     let label = match o.kind {
         // A saída força o rótulo 8 (`0x0040e393`).
@@ -412,6 +430,15 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
             }
             Behaviour::Switch(crate::behaviour::switch::SwitchState::default())
         }
+        SENTINEL => Behaviour::Sentinel(SentinelState::new(&o.values)),
+        HOP_MINE => Behaviour::HopMine(HopMineState::default()),
+        MINE_GENERATOR => Behaviour::MineGenerator(MineGeneratorState::new(value(0))),
+        SECURITY_ROBOT => Behaviour::SecurityRobot(Box::new(SecurityRobotState::new(
+            &o.values,
+            field(5),
+            o.x.wrapping_mul(31).wrapping_add(o.y),
+        ))),
+        BRUISER => Behaviour::Bruiser(Box::new(BruiserState::new(&o.values))),
         TELEPORTER => Behaviour::Teleporter(TeleporterState::default()),
         k if DOORS.contains(&k) => {
             if boxes.is_empty() {
@@ -432,6 +459,18 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
         if health == 0 {
             health = m.variant().health;
         }
+    }
+    if health == 0 {
+        health = match o.kind {
+            SENTINEL => crate::behaviour::sentinel::HEALTH,
+            HOP_MINE => crate::behaviour::hop_mine::HEALTH,
+            BRUISER => crate::behaviour::bruiser::HEALTH,
+            MINE_GENERATOR => match &behaviour {
+                Behaviour::MineGenerator(g) => g.variant().health,
+                _ => 0,
+            },
+            _ => 0,
+        };
     }
     let mut f = flags(o);
     if DOORS.contains(&o.kind) {

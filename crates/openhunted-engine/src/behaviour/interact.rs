@@ -10,6 +10,10 @@ use crate::entity::{Behaviour, Entity, LASER_EYE};
 /// Soma dano pendente a um objeto que o trata: mina (vida), barril e olho-laser (pendente,
 /// lido no próximo tique deles). Devolve `true` se o objeto leva dano.
 pub fn hurt(e: &mut Entity, p: &Pending) -> bool {
+    // inimigos da M7a: explosões e raios não dão crédito ao jogador
+    if super::enemy::hurt(e, p, false) {
+        return true;
+    }
     match &mut e.behaviour {
         Behaviour::Mine(_) => {
             e.health -= p.amount.max(1);
@@ -66,6 +70,8 @@ pub fn laser_hits(entities: &mut [Entity], out: &mut Out) {
                 && solid(e)
                 && e.layer == layer
                 && !(e.kind == LASER_EYE && owner == Some((e.x, e.y)))
+                // os raios não ferem os robôs de segurança, que os disparam (spec M7a)
+                && e.kind != crate::entity::SECURITY_ROBOT
                 && !matches!(
                     e.behaviour,
                     Behaviour::Laser(_) | Behaviour::Bullet(_) | Behaviour::Casing(_)

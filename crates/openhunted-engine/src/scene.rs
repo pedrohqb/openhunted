@@ -144,6 +144,10 @@ pub struct Scene {
     pub time_limit: i32,
     /// Portas de célula (células de índice `…38…`).
     pub cell_doors: Vec<cell_door::CellDoor>,
+    /// Tiques de terremoto que ainda fazem o Jake cambalear (`+0x274`, `0x418229`).
+    pub quake: u32,
+    /// Último tique de cada som com limite global de repetição (sentinelas, robôs).
+    sound_clock: HashMap<u16, u32>,
 }
 
 /// Tiques por segundo do cronômetro (`0x43c95c`).
@@ -319,6 +323,8 @@ impl Scene {
             timer: 0,
             time_limit: 0,
             cell_doors: Vec::new(),
+            quake: 0,
+            sound_clock: HashMap::new(),
         }
     }
 
@@ -363,6 +369,8 @@ impl Scene {
             timer: 0,
             time_limit: 0,
             cell_doors: Vec::new(),
+            quake: 0,
+            sound_clock: HashMap::new(),
         };
         let mut scenery = 0usize;
         let mut jake_layer = 0;
@@ -637,7 +645,11 @@ impl Scene {
             s.hints = openhunted_formats::parse_text_list(res);
         }
         s.explosion_anim = assets.animation("OEX.ANM").ok();
-        for name in ["OBU.ANM", "OBS00.ANM"].into_iter().chain(arsenal::ANIMS) {
+        for name in ["OBU.ANM", "OBS00.ANM"]
+            .into_iter()
+            .chain(arsenal::ANIMS)
+            .chain(behaviour::enemy::ANIMS)
+        {
             if let Ok(a) = assets.animation(name) {
                 s.projectile_anims.insert(name.to_string(), a);
             }
@@ -645,6 +657,7 @@ impl Scene {
         for name in ["OBU00.BRD", "OBU01.BRD", "OBU02.BRD", "OBS.BRD"]
             .into_iter()
             .chain(arsenal::BORDERS)
+            .chain(behaviour::enemy::BORDERS)
         {
             if let Ok(b) = assets.archive().get(name).and_then(Border::parse) {
                 s.projectile_borders.insert(name.to_string(), b);
@@ -654,7 +667,9 @@ impl Scene {
             .entities
             .iter()
             .filter(|e| {
-                e.alive && matches!(e.behaviour, Behaviour::Mine(_) | Behaviour::LaserEye(_))
+                e.alive
+                    && (matches!(e.behaviour, Behaviour::Mine(_) | Behaviour::LaserEye(_))
+                        || crate::entity::ENEMIES.contains(&e.kind))
             })
             .count() as i32;
         Ok(s)
@@ -1066,6 +1081,24 @@ impl Scene {
                 }
                 self.entities[vi].health -= behaviour::bullet::DAMAGE;
                 self.entities[vi].health = 0;
+            } else if behaviour::enemy::hurt(
+                &mut self.entities[vi],
+                &crate::damage::Pending {
+                    amount: behaviour::bullet::DAMAGE,
+                    ..Default::default()
+                },
+                by_player,
+            ) {
+                // linha (19, 8): "Bullet hits metal" no robô de segurança
+                if self.entities[vi].kind == crate::entity::SECURITY_ROBOT {
+                    let c = self.entities[vi].center();
+                    out.events.push(Event::Sound(Cue::at(
+                        behaviour::security_robot::SOUND_BULLET,
+                        crate::sound::PRIORITY_FRAME,
+                        c,
+                        self.entities[vi].layer,
+                    )));
+                }
             } else {
                 let fresh = matches!(&self.entities[vi].behaviour,
                     Behaviour::LaserEye(s) if s.hurt.is_empty());
@@ -1264,7 +1297,10 @@ impl Scene {
                     let fresh = matches!(&e.behaviour,
                         Behaviour::LaserEye(s) if s.hurt.is_empty());
                     let eye = matches!(e.behaviour, Behaviour::LaserEye(_));
-                    let hit = behaviour::interact::hurt(e, &b.damage(e.center()));
+                    let dmg = b.damage(e.center());
+                    // os inimigos da M7a creditam o jogador na própria morte
+                    let hit =
+                        behaviour::enemy::hurt(e, &dmg, true) || behaviour::interact::hurt(e, &dmg);
                     let mine_died =
                         matches!(e.behaviour, Behaviour::Mine(_)) && before > 0 && e.health <= 0;
                     if mine_died || (hit && eye && fresh) {
@@ -1299,6 +1335,7 @@ impl Scene {
     /// Tique das entidades: estado dos gatilhos congelado antes do tique; cada entidade age
     /// em ordem de lista; depois as saídas (dano ao Jake, novas entidades, eventos).
     fn tick_entities(&mut self) {
+        behaviour::mine_generator::sync(&mut self.entities);
         let snapshot: Vec<(i32, bool)> = self
             .entities
             .iter()
@@ -1345,6 +1382,16 @@ impl Scene {
                     Behaviour::Grenade(_) => behaviour::grenade::tick(e, &ctx, &mut out),
                     Behaviour::Piston(_) => behaviour::piston::tick(e, &ctx, &mut out),
                     Behaviour::Switch(_) => behaviour::switch::tick(e),
+                    Behaviour::Sentinel(_) => behaviour::sentinel::tick(e, &mut ctx, &mut out),
+                    Behaviour::HopMine(_) => behaviour::hop_mine::tick(e, &mut ctx, &mut out),
+                    Behaviour::MineGenerator(_) => {
+                        behaviour::mine_generator::tick(e, &mut ctx, &mut out)
+                    }
+                    Behaviour::SecurityRobot(_) => {
+                        behaviour::security_robot::tick(e, &mut ctx, &mut out)
+                    }
+                    Behaviour::Bruiser(_) => behaviour::bruiser::tick(e, &mut ctx, &mut out),
+                    Behaviour::EnemyShot(_) => behaviour::enemy_shot::tick(e, &mut ctx, &mut out),
                     _ => {}
                 }
             }
@@ -1387,9 +1434,167 @@ impl Scene {
                 j.hurt(out.jake_damage);
             }
         }
+        self.kills += out.kills;
+        self.apply_quake(out.quake);
+        self.spawn_enemy_objects(&mut out);
         self.entities.extend(out.spawn);
-        self.events.extend(out.events);
+        let events = self.throttle_sounds(out.events);
+        self.events.extend(events);
         self.rebuild_world();
+    }
+
+    /// Terremoto do Bruiser: enquanto durar, o Jake no chão cambaleia (choque sem dano,
+    /// estado 15).
+    fn apply_quake(&mut self, quake: Option<u32>) {
+        if let Some(q) = quake {
+            self.quake = self.quake.max(q);
+        }
+        if self.quake == 0 {
+            return;
+        }
+        self.quake -= 1;
+        if let Some(j) = self
+            .jake
+            .as_mut()
+            .filter(|j| j.is_active() && j.body.on_ground)
+        {
+            j.hurt(crate::damage::Pending {
+                electric: true,
+                ..Default::default()
+            });
+        }
+    }
+
+    /// Sons com intervalo mínimo global entre todos os objetos do tipo (o zumbido da
+    /// sentinela, 200 ms em `0x488820`; o "security hovering", 250 ms em `0x488834`).
+    fn throttle_sounds(&mut self, events: Vec<Event>) -> Vec<Event> {
+        let tick = self.tick_count;
+        events
+            .into_iter()
+            .filter(|ev| {
+                let Some(id) = ev.sound_id() else {
+                    return true;
+                };
+                let Some(gap) = behaviour::enemy::throttle(id) else {
+                    return true;
+                };
+                match self.sound_clock.get(&id) {
+                    Some(&t) if tick.saturating_sub(t) < gap => false,
+                    _ => {
+                        self.sound_clock.insert(id, tick);
+                        true
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// Cria os objetos que os inimigos pediram (projéteis, minas do gerador, fogo do
+    /// Bruiser), com as animações e BRDs carregados na montagem.
+    fn spawn_enemy_objects(&mut self, out: &mut Out) {
+        for sp in std::mem::take(&mut out.enemy_spawns) {
+            let e = match sp {
+                behaviour::enemy::Spawn::Shot {
+                    kind,
+                    at,
+                    vel,
+                    layer,
+                } => {
+                    let mut e = behaviour::enemy_shot::entity(kind, at, vel, layer);
+                    let (anim, brd, target) = behaviour::enemy_shot::art(kind);
+                    let (label, mirror) = behaviour::bullet::label_and_mirror(vel.0, vel.1);
+                    // o foguete tem os rótulos por direção; as balas, um só
+                    let label = if kind == behaviour::enemy_shot::ROCKET {
+                        label
+                    } else {
+                        1
+                    };
+                    let brd = if kind == behaviour::enemy_shot::ROCKET && label == 2 {
+                        "ORO01.BRD"
+                    } else {
+                        brd
+                    };
+                    self.attach_sprite(&mut e, anim, label, mirror & 1 != 0, target, Some(brd));
+                    e
+                }
+                behaviour::enemy::Spawn::Mine {
+                    at,
+                    variant,
+                    layer,
+                    owner,
+                } => {
+                    let mut e = behaviour::mine_generator::mine(at, variant, layer, owner);
+                    self.attach_sprite(&mut e, "OHM00.ANM", 1, false, 25, Some("OHM00.BRD"));
+                    e
+                }
+                behaviour::enemy::Spawn::Fire {
+                    base,
+                    height,
+                    layer,
+                } => {
+                    let fh = self
+                        .assets_anim("OFI.ANM")
+                        .and_then(|a| a.frames.first().map(|f| i32::from(f.height)))
+                        .unwrap_or(1);
+                    let mut e = behaviour::bruiser::fire(base, height, layer, fh);
+                    if let Some(anim) = self.assets_anim("OFI.ANM") {
+                        let player = AnimPlayer::from_frame(&anim, 0);
+                        e.sprite = Some(Sprite {
+                            layer: Layer::Object,
+                            anim,
+                            player,
+                            x: e.x,
+                            y: e.y,
+                            frozen: false,
+                            scale: (height, fh.max(1)),
+                            mirror: false,
+                        });
+                    }
+                    e
+                }
+            };
+            out.spawn.push(e);
+        }
+    }
+
+    /// Põe o sprite (rótulo, espelho, tamanho-alvo `+0x1f0` sobre a medida do quadro) e as
+    /// caixas do BRD num objeto criado pela cena; sem a animação, fica sem sprite.
+    fn attach_sprite(
+        &mut self,
+        e: &mut Entity,
+        anim: &str,
+        label: u16,
+        mirror: bool,
+        target: i32,
+        brd: Option<&str>,
+    ) {
+        if let Some(b) = brd.and_then(|n| self.assets_border(n)) {
+            let boxes = crate::entity::border_boxes(&b);
+            if !boxes.is_empty() {
+                e.boxes = boxes;
+            }
+        }
+        let Some(anim) = self.assets_anim(anim) else {
+            return;
+        };
+        let player = AnimPlayer::at_label(&anim, label)
+            .or_else(|| AnimPlayer::at_label(&anim, 1))
+            .unwrap_or_else(|| AnimPlayer::from_frame(&anim, 0));
+        let Some(f) = anim.frames.get(player.frame()) else {
+            return;
+        };
+        let (fw, fh) = (i32::from(f.width).max(1), i32::from(f.height).max(1));
+        let scale = (target, fw.max(fh));
+        e.sprite = Some(Sprite {
+            layer: Layer::Object,
+            anim,
+            player,
+            x: e.x,
+            y: e.y,
+            frozen: false,
+            scale,
+            mirror,
+        });
     }
 }
 
