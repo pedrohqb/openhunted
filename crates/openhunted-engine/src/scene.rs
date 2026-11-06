@@ -1202,7 +1202,10 @@ impl Scene {
                     let fresh = matches!(&e.behaviour,
                         Behaviour::LaserEye(s) if s.hurt.is_empty());
                     let eye = matches!(e.behaviour, Behaviour::LaserEye(_));
-                    let hit = behaviour::interact::hurt(e, &b.damage(e.center()));
+                    let dmg = b.damage(e.center());
+                    // os inimigos da M7a creditam o jogador na própria morte
+                    let hit =
+                        behaviour::enemy::hurt(e, &dmg, true) || behaviour::interact::hurt(e, &dmg);
                     let mine_died =
                         matches!(e.behaviour, Behaviour::Mine(_)) && before > 0 && e.health <= 0;
                     if mine_died || (hit && eye && fresh) {
