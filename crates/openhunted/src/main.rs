@@ -5,10 +5,12 @@
 //! Uso: `openhunted --data <CD, pasta Hunter/ ou .iso> [--level T_J_001.LEV] [--frames N]`
 //! Teclas: setas movem o Jake, espaço pula, Ctrl atira (segurando, rajadas; com as setas,
 //! mira para cima e nas diagonais) e CIMA usa a saída (a câmera o acompanha);
-//! qualquer tecla solta fecha a dica do tutorial. Sem Jake na fase, as setas
+//! qualquer tecla solta fecha a dica do tutorial. Os efeitos sonoros tocam pelo dispositivo
+//! de áudio padrão (sem ele, o jogo segue mudo). Sem Jake na fase, as setas
 //! rolam a tela, PageUp/PageDown pulam uma tela e Home/End vão às pontas. Tab mostra a colisão e
 //! os objetos de lógica, Esc sai.
 
+mod audio;
 mod viewer;
 
 use std::path::PathBuf;
@@ -78,6 +80,11 @@ fn run() -> Result<(), String> {
     let mut viewer = Viewer::load(&args.data, &args.level).map_err(|e| e.to_string())?;
 
     let sdl = sdl3::init().map_err(|e| e.to_string())?;
+    // Som: sem dispositivo de áudio, avisa uma vez e segue mudo.
+    match audio::SdlOut::open(&sdl) {
+        Ok(out) => viewer.set_sound(audio::Sfx::new(Box::new(out))),
+        Err(e) => eprintln!("aviso: sem áudio ({e}); o jogo segue sem som"),
+    }
     let video = sdl.video().map_err(|e| e.to_string())?;
     let window = video
         .window(

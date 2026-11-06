@@ -63,6 +63,8 @@ pub struct Viewer {
     modal: Option<Modal>,
     /// Dicas à espera (duas no mesmo tique: uma de cada vez).
     queued: std::collections::VecDeque<Modal>,
+    /// Efeitos sonoros (sem eles, o jogo corre mudo).
+    sfx: Option<crate::audio::Sfx>,
 }
 
 impl Viewer {
@@ -114,7 +116,26 @@ impl Viewer {
             frame_tiles: Vec::new(),
             modal: None,
             queued: std::collections::VecDeque::new(),
+            sfx: None,
         }
+    }
+
+    /// Liga os efeitos sonoros: os sons de cada tique vão a `sfx`.
+    pub fn set_sound(&mut self, sfx: crate::audio::Sfx) {
+        self.sfx = Some(sfx);
+    }
+
+    /// Toca os sons de um tique, ouvidos do centro da câmera na camada do Jake.
+    fn play_sounds(&mut self, cues: &[openhunted_engine::sound::Cue]) {
+        let Some(sfx) = self.sfx.as_mut() else { return };
+        if cues.is_empty() {
+            return;
+        }
+        let listener = (
+            self.camera.0 + SCREEN_W as i32 / 2,
+            self.camera.1 + SCREEN_H as i32 / 2,
+        );
+        sfx.tick(self.assets.archive(), cues, listener, self.scene.jake_layer);
     }
 
     pub fn modal(&self) -> Option<&Modal> {
@@ -220,8 +241,11 @@ impl Viewer {
                 self.camera = clamp_camera((self.scene.width, self.scene.height), view, want);
             }
             let mut opened = false;
+            let mut cues = Vec::new();
             for ev in self.scene.events.drain(..) {
-                if let Event::Hint { text, left_of_jake } = ev {
+                if let Event::Sound(c) = ev {
+                    cues.push(c);
+                } else if let Event::Hint { text, left_of_jake } = ev {
                     let m = Modal {
                         text,
                         left_of_jake,
@@ -234,8 +258,9 @@ impl Viewer {
                     }
                     opened = true;
                 }
-                // sons e veredito: nada a fazer aqui por enquanto
+                // veredito: nada a fazer aqui por enquanto
             }
+            self.play_sounds(&cues);
             if opened {
                 self.pending_ms = 0;
                 break;
@@ -482,6 +507,44 @@ mod tests {
         v.advance(600);
         v.key_released();
         assert!(v.modal().is_none());
+    }
+
+    #[test]
+    fn sounds_reach_the_sink_heard_from_the_camera() {
+        use crate::audio::tests::{Log, wav_bytes};
+        use openhunted_engine::sound::Cue;
+        let wav = wav_bytes();
+        let (map, vols) = mkarchive(&[(
+            "RESOURCE.001",
+            &[("SX_3774.WAV", &wav), ("SX_3040.WAV", &wav)],
+        )]);
+        let assets =
+            Assets::new(ResourceArchive::from_map(&map, |_| Ok(vols[0].1.clone())).unwrap());
+        let mut v = Viewer::new(Scene::empty(2000, 480), assets, &Palette([[0u8; 3]; 256]));
+        v.advance(50); // sem destino: nada acontece
+        let log = Log::default();
+        v.set_sound(crate::audio::Sfx::new(Box::new(log.clone())));
+        v.apply(Action::PageRight);
+        let (cx, cy) = (v.camera().0 + SCREEN_W as i32 / 2, SCREEN_H as i32 / 2);
+        v.scene.events.push(Event::Hint {
+            text: "Oi".into(),
+            left_of_jake: true,
+        });
+        v.scene.events.push(Event::Sound(Cue::ui(3774, 0)));
+        v.scene
+            .events
+            .push(Event::Sound(Cue::at(3040, 9, (cx - 384, cy), 0)));
+        v.scene
+            .events
+            .push(Event::Sound(Cue::at(3040, 9, (cx, cy), 1)));
+        assert_eq!(v.advance(50), 1);
+        assert!(v.modal().is_some());
+        assert_eq!(
+            *log.0.borrow(),
+            vec![(3774, 0, 100, 0), (3040, 9, 50, -64)],
+            "a dica abre e o som dela toca; o tiro à esquerda da câmera, pela metade; \
+             outra camada não se ouve"
+        );
     }
 
     #[test]

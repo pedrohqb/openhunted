@@ -3,6 +3,9 @@
 //! (uso interno: `cargo run -p openhunted --example shots -- DADOS SAIDA`).
 
 #[allow(dead_code)]
+#[path = "../src/audio.rs"]
+mod audio;
+#[allow(dead_code)]
 #[path = "../src/viewer.rs"]
 mod viewer;
 
