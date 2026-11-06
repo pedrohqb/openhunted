@@ -44,8 +44,12 @@ pub const BAR_BOX: Rect = Rect {
 
 /// Vida mínima para o especial (`tiro-jake.md`: "vida > 25").
 pub const SPECIAL_MIN_HP: i32 = 25;
-/// O especial custa 3 de vida ao próprio Jake (`+0x24c = 3`).
+/// Cada tique do efeito do especial custa 3 de vida ao próprio Jake (`+0x24c = 3`).
 pub const SPECIAL_SELF_DAMAGE: i32 = 3;
+/// Último tique do especial (registro `0x47d7bc`: janela 0..5 e `+0x18 = 5`).
+pub const SPECIAL_LAST_TICK: u32 = 5;
+/// Dano do especial nos "demais" por tique (linha `(1, 0, 9)` do `DAMAGE.TBL`).
+pub const SPECIAL_DAMAGE: i32 = 15;
 /// Alcance do especial: distância entre centros < 70 px (`0x00427643`).
 pub const SPECIAL_RADIUS: i32 = 70;
 
@@ -115,6 +119,19 @@ impl SpecialBlast {
             1 | 2 => SpecialEffect::Knockdown,
             19..=21 | 25..=27 | 29 | 36 | 99 | 100 | 106 | 108 => SpecialEffect::Destroy,
             _ => SpecialEffect::Damage,
+        }
+    }
+
+    /// Dano aos "demais" (`0x0043d629(jake, alvo, 9)`): a linha `(1, 0, 9)` do `DAMAGE.TBL`
+    /// (natureza 0, reação 2, 15 de dano, empurrão fixo (2, 0) pelo lado). O módulo 20 do
+    /// empurrão (`+0x20`) não é modelado.
+    pub fn damage(&self, c: (i32, i32)) -> Pending {
+        let dir = if c.0 >= self.center.0 { 1 } else { -1 };
+        Pending {
+            amount: SPECIAL_DAMAGE,
+            shove: true,
+            push: (2 * dir, 0),
+            ..Default::default()
         }
     }
 
@@ -629,25 +646,7 @@ impl Jake {
                 }
             }
             State::Stealth => self.decide_or_idle(input, env, jump_edge, side),
-            State::Special(t) => {
-                self.body.vx = 0;
-                if t == 0 {
-                    let b = self.body.bounds();
-                    self.special = Some(SpecialBlast {
-                        center: (b.x + b.w / 2, b.y + b.h / 2),
-                        layer: self.layer,
-                    });
-                    self.hurt(Pending {
-                        amount: SPECIAL_SELF_DAMAGE,
-                        ..Default::default()
-                    });
-                }
-                if self.anim_done() {
-                    self.set(State::Idle);
-                } else {
-                    self.state = State::Special(t + 1);
-                }
-            }
+            State::Special(_) => self.tick_special(input),
             State::Grab => {
                 self.body.vx = 0;
                 if pressed(SHOOT) {
@@ -681,6 +680,40 @@ impl Jake {
             }
             _ => self.decide_or_idle(input, env, jump_edge, side),
         }
+    }
+
+    /// Especial (`0x0043b895`): CIMA ou um lado só (`test [0x487a2c], 0xd`) voltam na hora
+    /// ao `0x0043b43e`; senão `t = +0x260 + 1` e, na janela 0..5 do registro `0x47d7bc`, o
+    /// efeito `0x00427643` a cada tique (3 de vida ao Jake por tique, alvos a cada tique);
+    /// com `t > 5` (`+0x18`) volta ao `0x0043b43e`, que com BAIXO+ATIRAR recomeça o 9 no
+    /// mesmo tique. As duas setas de lado juntas contam como nenhuma (como em
+    /// `wants_special`), senão o original recursaria sem fim.
+    pub(super) fn tick_special(&mut self, input: u32) {
+        let State::Special(t) = self.state else {
+            return;
+        };
+        self.body.vx = 0;
+        let sides = input & (LEFT | RIGHT);
+        let one_side = sides == LEFT || sides == RIGHT;
+        let t = t + 1;
+        if input & UP != 0 || one_side || t > SPECIAL_LAST_TICK {
+            self.state = State::Special(t);
+            let shoot = input & SHOOT != 0 && self.body.on_ground;
+            if !(shoot && self.start_fire(input)) {
+                self.set(State::Idle);
+            }
+            return;
+        }
+        self.state = State::Special(t);
+        let b = self.body.bounds();
+        self.special = Some(SpecialBlast {
+            center: (b.x + b.w / 2, b.y + b.h / 2),
+            layer: self.layer,
+        });
+        self.hurt(Pending {
+            amount: SPECIAL_SELF_DAMAGE,
+            ..Default::default()
+        });
     }
 
     /// Escalar (`0x0042710a`).
@@ -1605,24 +1638,55 @@ mod tests {
         let w = World::new(vec![floor(100)]);
         let mut j = jake(&w, 0);
         j.health = Health { hp: 50, armor: 0 };
+        // o tique da entrada já aplica o efeito (`0x43b43e` chama o `0x43b895`: t = 1)
         j.tick(DOWN | SHOOT, &w);
-        assert_eq!((j.state(), j.label()), (State::Special(0), 9));
-        j.tick(DOWN | SHOOT, &w);
+        assert_eq!((j.state(), j.label()), (State::Special(1), 9));
         let b = j.special.expect("especial");
         let jb = j.body.bounds();
         assert_eq!(b.center, (jb.x + jb.w / 2, jb.y + jb.h / 2));
         assert!(b.reaches((b.center.0 + 69, b.center.1)));
         assert!(!b.reaches((b.center.0 + 50, b.center.1 + 50)));
-        j.tick(0, &w);
-        assert_eq!(j.health.hp, 47, "custa 3 de vida");
-        assert!(j.special.is_none(), "uma vez só");
-        for _ in 0..8 {
+        // janela 0..5 do registro `0x47d7bc`: efeito em t = 1..5, mesmo soltando as teclas
+        for t in 2..=5 {
             j.tick(0, &w);
+            assert_eq!(j.state(), State::Special(t));
+            assert!(j.special.is_some(), "efeito no t = {t}");
         }
+        // t = 6 > 5 (`+0x18`): volta ao `0x43b43e`; sem ATIRAR, parado
+        j.tick(0, &w);
         assert_eq!(j.state(), State::Idle);
+        assert!(j.special.is_none());
+        j.tick(0, &w);
+        assert_eq!(
+            j.health.hp,
+            50 - 5 * SPECIAL_SELF_DAMAGE,
+            "3 de vida por tique"
+        );
+        // segurando BAIXO+ATIRAR repete enquanto a vida passar de 25
+        let mut j = jake(&w, 0);
+        j.health = Health { hp: 50, armor: 0 };
+        let mut hits = 0;
+        for _ in 0..20 {
+            j.tick(DOWN | SHOOT, &w);
+            hits += usize::from(j.special.is_some());
+        }
+        assert_eq!(hits, 10, "dois ciclos de 5: no 11º tique a vida é 20");
+        assert!(j.health.hp <= SPECIAL_MIN_HP);
+        // CIMA ou um lado interrompem na hora
+        for stop in [UP, RIGHT, LEFT] {
+            let mut j = jake(&w, 0);
+            j.health = Health { hp: 50, armor: 0 };
+            j.tick(DOWN | SHOOT, &w);
+            j.tick(stop, &w);
+            assert!(!matches!(j.state(), State::Special(_)), "{stop:#x}");
+            assert!(j.special.is_none());
+        }
         assert_eq!(SpecialBlast::effect(19), SpecialEffect::Destroy);
         assert_eq!(SpecialBlast::effect(1), SpecialEffect::Knockdown);
         assert_eq!(SpecialBlast::effect(102), SpecialEffect::Damage);
+        let d = b.damage((b.center.0 - 10, b.center.1));
+        assert_eq!((d.amount, d.shove, d.push), (SPECIAL_DAMAGE, true, (-2, 0)));
+        assert!(!d.explosion, "natureza 0: o barril não explode");
         // com vida ≤ 25 é o tiro para baixo comum
         let mut j = jake(&w, 0).with_inventory(crate::jake::Inventory::from_points(&[
             (0, 0),

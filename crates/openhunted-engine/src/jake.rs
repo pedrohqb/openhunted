@@ -520,6 +520,7 @@ impl Jake {
         if moves::wants_special(input) && self.health.hp > moves::SPECIAL_MIN_HP {
             self.body.vx = 0;
             self.set(State::Special(0));
+            self.tick_special(input);
             return true;
         }
         if self.inventory.pistol_ammo() <= 0 {

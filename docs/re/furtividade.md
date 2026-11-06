@@ -50,9 +50,21 @@ quando `+0x180` ∈ {54, 55, 56}. O teste é pelo **estado**, não por um bit de
 ## Especial: BAIXO+ATIRAR (estado 9, efeito `0x00427643`) [confirmado]
 
 Entra pela mira (`tiro-jake.md`: BAIXO com `desc+0x0c ≠ 0` e vida > 25), estado 9
-(`0x0043b895`), registro `0x47d7bc` (janela 0..5). O efeito:
+(`0x0043b895`), registro `0x47d7bc` (`8, 0, 5, …`, `+0x18 = 5`). A cada tique do 9:
 
-1. O próprio Jake: `+0x24c = 3` (dano pendente), tipo `+0x252 |= 0` (comum), sem empurrão
+- CIMA ou um lado (`test [0x487a2c], 0xd`) → `0x0043b43e` na hora (tiro com a mira nova
+  se ATIRAR, senão o repouso); as duas setas de lado juntas valem como nenhuma (Ruling:
+  `wants_special` as aceita, e o original recursaria).
+- Senão anima (`0x00423835`), `t = ++[+0x260]` (zerado ao entrar: o `0x0043b43e` põe
+  `+0x180 = 0` antes de chamar o `0x0043b895`, então o tique da entrada já é o `t = 1`).
+- `t > 5` (`+0x18`) → `0x0043b43e`: com BAIXO+ATIRAR e vida > 25 recomeça o 9 no mesmo
+  tique; o 9 dura 6 tiques, não a animação inteira.
+- `0 ≤ t ≤ 5` (`+0x04`, `+0x08`) → o efeito `0x00427643`: **5 tiques** por uso, cada um
+  com o dano abaixo (≈ 15 de vida ao Jake por uso; os alvos são atingidos até 5 vezes).
+
+O efeito:
+
+1. O próprio Jake: `+0x24c = 3` (dano pendente, consumido no tique), tipo `+0x252 |= 0` (comum), sem empurrão
    (`+0x244 = +0x248 = 0`); `0x004081ae(jake, 0x27, 4)` [inferido: piscar].
 2. Centro = centro da caixa do Jake (`0x004351b5`). Para cada objeto da lista `0x488e7c`
    (não o Jake, mesma camada, `+0x178 & 0x80003 = 0x80001`, presente no modo, vaga de
@@ -64,7 +76,7 @@ Entra pela mira (`tiro-jake.md`: BAIXO com `desc+0x0c ≠ 0` e vida > 25), estad
 |---|---|
 | 1, 2 (jogadores) | `+0x250 = 4` (derrubar, `dano-vida.md`), `+0x24c = 4·(19600 − d)/19600` (= 3), `+0x244 = ±15` (para longe do Jake), `+0x248 = 20`; com os dois jogadores e alvo com vida, `alvo+0x1b0 = jake+0x19c` (crédito) |
 | 19–21, 25–27, 29, 36, 99, 100, 106, 108 (entre eles os projéteis 19, 20, 21, 26, 27 de `tiro-jake.md` e o raio laser 36 de `olho-laser.md`) | `0x0043d629(jake, alvo, 8)` e **destrói** o alvo (`0x00435b63`) |
-| demais | `0x0043d629(jake, alvo, 9)` (dano pela tabela, variante 9) |
+| demais | `0x0043d629(jake, alvo, 9)`: linha `(1, 0, 9)` do `DAMAGE.TBL` (natureza 0, reação 2, **15** de dano, empurrão (2, 0) pelo lado, módulo 20). O barril (sem linha própria na variante 9) não explode; o olho-laser morre com qualquer dano; minas perdem 15 por tique |
 
 ## Soco: caixa e acerto (`0x0043accb`, `0x0043afe1`) [confirmado]
 

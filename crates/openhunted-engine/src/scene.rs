@@ -1139,7 +1139,7 @@ impl Scene {
     }
 
     /// Especial BAIXO+ATIRAR (`0x00427643`): objetos vivos da camada a menos de 70 px do
-    /// centro do Jake. Projéteis somem; os demais levam o dano (as minas morrem).
+    /// centro do Jake. Projéteis somem; os demais levam o dano da variante 9 (15 por tique).
     fn apply_special(&mut self, b: SpecialBlast) {
         for e in self.entities.iter_mut().filter(|e| {
             e.alive && e.layer == b.layer && e.flags & 0x80003 == 0x80001 && e.present()
@@ -1151,11 +1151,17 @@ impl Scene {
                 crate::jake::SpecialEffect::Destroy => e.alive = false,
                 crate::jake::SpecialEffect::Knockdown => {}
                 crate::jake::SpecialEffect::Damage => {
-                    if let Behaviour::Mine(_) = e.behaviour {
-                        if e.health > 0 {
-                            self.kills += 1;
-                        }
-                        e.health = 0;
+                    // pelo mesmo caminho das balas: mina (vida), barril (natureza 0: nada) e
+                    // olho-laser (qualquer dano mata); a cerca não trata dano (como antes)
+                    let before = e.health;
+                    let fresh = matches!(&e.behaviour,
+                        Behaviour::LaserEye(s) if s.hurt.is_empty());
+                    let eye = matches!(e.behaviour, Behaviour::LaserEye(_));
+                    let hit = behaviour::interact::hurt(e, &b.damage(e.center()));
+                    let mine_died =
+                        matches!(e.behaviour, Behaviour::Mine(_)) && before > 0 && e.health <= 0;
+                    if mine_died || (hit && eye && fresh) {
+                        self.kills += 1;
                     }
                 }
             }
@@ -1479,7 +1485,7 @@ mod tests {
     }
 
     /// Especial BAIXO+ATIRAR: a mina a menos de 70 px do centro do Jake morre (conta como
-    /// abatida), a de longe não; o Jake perde 3 de vida.
+    /// abatida), a de longe não; o Jake perde 3 de vida por tique do efeito (5 tiques).
     #[test]
     fn down_shoot_special_kills_near_mines() {
         use crate::behaviour::mine::MineState;
@@ -1509,7 +1515,10 @@ mod tests {
             e.y = jc.1;
         }
         s.entities[1].x = jc.0 + 40;
+        s.entities[1].health = 20;
+        // linha (1, qualquer, 9) do `DAMAGE.TBL`: 15 por tique do efeito
         s.tick(DOWN | SHOOT);
+        assert_eq!(s.entities[1].health, 5);
         s.tick(DOWN | SHOOT);
         let alive: Vec<bool> = s
             .entities
@@ -1519,8 +1528,14 @@ mod tests {
             .collect();
         assert_eq!(alive, vec![false, true]);
         assert_eq!(s.kills, 1);
-        s.tick(0);
-        assert_eq!(s.jake.as_ref().unwrap().health.hp, hp - 3);
+        for _ in 0..5 {
+            s.tick(0);
+        }
+        assert_eq!(
+            s.jake.as_ref().unwrap().health.hp,
+            hp - 15,
+            "3 por tique, 5 tiques"
+        );
     }
 
     /// A camada da cena acompanha a do Jake: os sólidos das células passam a ser os da
