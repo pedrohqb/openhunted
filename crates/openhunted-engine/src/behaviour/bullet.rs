@@ -21,6 +21,9 @@ pub struct BulletState {
     pub vy: i32,
     /// Posição antes do último deslocamento (para o teste de acerto varrer o caminho).
     pub prev: Option<(i32, i32)>,
+    /// Disparada pelo jogador (as mortes que ela causa entram nas estatísticas). Quando os
+    /// inimigos atirarem, as balas deles nascem com `false`.
+    pub player_shot: bool,
 }
 
 /// Caixa varrida pela bala no último tique (união da caixa anterior com a atual), para o

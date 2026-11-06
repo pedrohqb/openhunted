@@ -18,7 +18,9 @@ GO/CANCEL) sobre o primeiro quadro da fase. A partida ocupa 640×405 com a barra
 original embaixo (`INVBAR01.BMP`: vida, rosto, armadura, armas com munição, cronômetro de
 rolo); P ou Pause pausa ("GAME PAUSED"). No fim, a tela de resultado (`SMISS.ITF`) conta
 mortos, pontos e bônus de vitória, guarda o recorde da missão na sessão e oferece REPLAY,
-NEXT (a próxima missão solo, mesmo que ainda não seja jogável) e MAIN MENU.
+NEXT (a próxima missão solo) e MAIN MENU. Decisão do port: enquanto o Garathe não existe, o
+NEXT pula as missões sem o Jake controlável (as do Garathe); uma fase aberta com `--level` fora
+da lista de missões não grava recorde e o NEXT dela volta ao menu.
 
 **M4c: efeitos sonoros.** **M4b: a pistola.** **M4a: a primeira missão é jogável de ponta a ponta.** Na `T_J_001`, o
 Jake corre, pula e cai, colide com o cenário e com os objetos sólidos, apanha a vida e a
@@ -71,7 +73,8 @@ adiante), Ctrl atira (segurando, rajadas; com as setas mira para cima e nas diag
 usa a saída quando ele está parado diante dela; a câmera o acompanha. P ou Pause pausa (Enter,
 espaço ou OKAY retomam). A dica do tutorial pausa o jogo e fecha ao soltar uma tecla. Esc não
 faz nada (como no original). Em fases sem o Jake, as setas rolam a tela, PageUp/PageDown pulam
-uma tela e Home/End vão às pontas. Tab mostra as caixas de colisão e os objetos de lógica. O
+uma tela, Home/End vão às pontas e Esc volta ao menu (sem personagem, a fase nunca acaba).
+Quando a janela perde o foco, o jogo pausa. Só o botão esquerdo do mouse clica. Tab mostra as caixas de colisão e os objetos de lógica. O
 som sai pelo dispositivo de áudio padrão; sem ele, o jogo avisa uma vez e segue mudo.
 
 Para renderizar sem janela: `ohtool --data … render T_J_001.LEV --out quadro.png [--camera X,Y]`.

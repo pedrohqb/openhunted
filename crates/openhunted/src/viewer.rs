@@ -341,13 +341,14 @@ impl Viewer {
         let mut lines;
         loop {
             lines = wrap(font, text, 4 * h - 16);
-            if (lines.len() as i32) * (th + 2) <= h - 8 || h >= SCREEN_H as i32 - 40 {
+            if (lines.len() as i32) * (th + 2) <= h - 8 || h >= VIEW_H - 40 {
                 break;
             }
             h += th;
         }
         let w = 4 * h;
-        let y = (SCREEN_H as i32 - h) / 2;
+        // centrada na vista do jogo (640×405), acima da barra de estado
+        let y = (VIEW_H - h) / 2;
         let x = match (self.scene.jake.as_ref(), self.modal.as_ref()) {
             (Some(j), Some(m)) => {
                 let jb = j.body.bounds();
@@ -611,6 +612,16 @@ mod tests {
             "a dica abre e o som dela toca; o tiro à esquerda da câmera, pela metade; \
              outra camada não se ouve"
         );
+    }
+
+    #[test]
+    fn hint_box_is_centred_on_the_game_view() {
+        use openhunted_formats::test_support::mkpft;
+        let glyphs: Vec<(u32, Vec<u8>)> = (0..3).map(|_| (2, vec![1; 4])).collect();
+        let font = Font::parse(&mkpft('a' as u32, &glyphs)).unwrap();
+        let v = viewer(640, 480);
+        let (_, y, _, h, _) = v.modal_box(&font, "aa bb cc");
+        assert_eq!(y, (VIEW_H - h) / 2);
     }
 
     #[test]
