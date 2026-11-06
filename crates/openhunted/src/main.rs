@@ -189,6 +189,19 @@ fn run() -> Result<(), String> {
             shoot: held(&[Scancode::LCtrl, Scancode::RCtrl]),
             stealth: held(&[Scancode::X]),
             punch: held(&[Scancode::Z]),
+            prev_weapon: held(&[Scancode::PageUp]),
+            next_weapon: held(&[Scancode::PageDown]),
+            select: [
+                Scancode::_1,
+                Scancode::_2,
+                Scancode::_3,
+                Scancode::_4,
+                Scancode::_5,
+                Scancode::_6,
+            ]
+            .iter()
+            .position(|&k| keys.is_scancode_pressed(k))
+            .map_or(0, |i| i as u8 + 1),
         });
         let status = app.status();
         if status != shown {

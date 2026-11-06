@@ -152,24 +152,23 @@ impl Viewer {
     /// O que a barra de estado mostra. Sem o Jake (fases do Garathe, ainda sem personagem
     /// controlável), a barra do Garathe zerada.
     pub fn hud_state(&self) -> HudState {
-        let (character, health, armor, slots, weapon) = match self.scene.jake.as_ref() {
-            Some(j) => {
-                let s = j.inventory.slots;
-                // arma corrente: a pistola, se ele a tem; senão os punhos
-                let w = if s[openhunted_engine::jake::PISTOL].0 != 0 {
-                    openhunted_engine::jake::PISTOL
-                } else {
-                    1
-                };
-                (Character::Jake, j.health.hp, j.health.armor, s, w)
-            }
-            None => (Character::Garathe, 0, 0, [(0, 0); 30], 1),
+        let (character, health, armor, slots, weapon, face_alt) = match self.scene.jake.as_ref() {
+            Some(j) => (
+                Character::Jake,
+                j.health.hp,
+                j.health.armor,
+                j.inventory.slots,
+                j.inventory.weapon,
+                // rosto 93 com veneno (`+0x270 ≠ 0`)
+                j.poison != 0,
+            ),
+            None => (Character::Garathe, 0, 0, [(0, 0); 30], 1, false),
         };
         HudState {
             character,
             health,
             armor,
-            face_alt: false,
+            face_alt,
             slots,
             weapon,
             timer: self.scene.timer,
@@ -215,12 +214,18 @@ impl Viewer {
     /// Texto do HUD.
     pub fn hud_text(&self) -> Option<String> {
         self.scene.jake.as_ref().map(|j| {
-            format!(
-                "VIDA {}  ARMADURA {}  PISTOLA {}",
-                j.health.hp,
-                j.health.armor,
-                j.inventory.pistol_ammo()
-            )
+            let w = j.inventory.weapon;
+            let name = openhunted_engine::jake::weapons::name(w);
+            if w == openhunted_engine::jake::FISTS {
+                format!("VIDA {}  ARMADURA {}  {name}", j.health.hp, j.health.armor)
+            } else {
+                format!(
+                    "VIDA {}  ARMADURA {}  {name} {}",
+                    j.health.hp,
+                    j.health.armor,
+                    j.inventory.ammo(w)
+                )
+            }
         })
     }
 

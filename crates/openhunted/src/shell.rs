@@ -60,6 +60,11 @@ pub struct Held {
     pub stealth: bool,
     /// Soco (Z, bit 0x40000).
     pub punch: bool,
+    /// Arma anterior / próxima (PgUp / PgDn, bits 0x800 / 0x1000).
+    pub prev_weapon: bool,
+    pub next_weapon: bool,
+    /// Escolha direta da arma (teclas 1–6; 0 = nenhuma). Extensão do port.
+    pub select: u8,
 }
 
 /// Para onde o CANCEL do briefing volta (o estado anterior, `0x47f53c`).
@@ -548,7 +553,10 @@ impl App {
             return;
         };
         if v.has_jake() {
-            use openhunted_engine::input::{DOWN, JUMP, LEFT, PUNCH, RIGHT, SHOOT, STEALTH, UP};
+            use openhunted_engine::input::{
+                DOWN, JUMP, LEFT, NEXT_WEAPON, PREV_WEAPON, PUNCH, RIGHT, SELECT_MASK,
+                SELECT_SHIFT, SHOOT, STEALTH, UP,
+            };
             let mut bits = 0;
             for (on, bit) in [
                 (h.left, LEFT),
@@ -559,11 +567,14 @@ impl App {
                 (h.shoot, SHOOT),
                 (h.stealth, STEALTH),
                 (h.punch, PUNCH),
+                (h.prev_weapon, PREV_WEAPON),
+                (h.next_weapon, NEXT_WEAPON),
             ] {
                 if on {
                     bits |= bit;
                 }
             }
+            bits |= (u32::from(h.select) << SELECT_SHIFT) & SELECT_MASK;
             v.set_input(bits);
         } else {
             for (on, act) in [
