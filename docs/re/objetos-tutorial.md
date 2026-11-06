@@ -139,3 +139,7 @@ estado 1 = coletável no rótulo 1; estados 0/2 são a granada lançada).
 - Rótulo 0 da peça do carro (missão já vencida): desenha algo?
 - Sentido do gatilho no fechamento das portas `OH`; papel do gatilho de célula `(2, 11)`.
 - Comportamento do Bruiser (tipo 7).
+- Derrubada do barril em qualquer objeto (não só no Jake) e o atrito depois dela.
+- Linha de visão do olho-laser através de objetos sólidos (hoje só as células barram).
+- Porta `OH` da `I_J_107` que nasce sobre o Jake; e o "rótulo 0 → o primeiro da animação"
+  das `OH`: é o primeiro rótulo do `.ANM` ou o de menor número? (pergunta de RE)

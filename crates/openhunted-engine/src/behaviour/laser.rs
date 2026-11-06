@@ -48,6 +48,8 @@ pub struct LaserState {
     pub prev: Option<(i32, i32)>,
     /// Ponto de partida (a cauda do traço).
     pub tail: (i32, i32),
+    /// Posição do olho que disparou (o único que o raio atravessa).
+    pub owner: Option<(i32, i32)>,
 }
 
 impl LaserState {
@@ -104,6 +106,7 @@ pub fn bolt(at: (i32, i32), vel: (i32, i32), layer: i32, variant: usize) -> Enti
             dying: None,
             prev: None,
             tail: at,
+            owner: None,
         }),
     }
 }

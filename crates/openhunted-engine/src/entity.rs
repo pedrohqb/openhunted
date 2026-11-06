@@ -326,7 +326,7 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
             solid_shapes = false;
             Behaviour::Fire(st)
         }
-        FENCE => Behaviour::Fence(FenceState::new(value(0))),
+        FENCE => Behaviour::Fence(FenceState::from_values(&o.values)),
         GRAFFITI => {
             let lines = assets
                 .archive()

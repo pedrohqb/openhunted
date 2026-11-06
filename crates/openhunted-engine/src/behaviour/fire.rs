@@ -141,6 +141,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         rect: r,
         layer: e.layer,
         damage: burn,
+        source: None,
     });
 }
 
