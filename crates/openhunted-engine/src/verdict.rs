@@ -25,7 +25,7 @@ pub fn objectives_met(entities: &[Entity], jake: Option<&Jake>) -> bool {
         .all(|e| !e.alive || e.health <= 0);
     // Ruling (`logica-fase.md`): só contam os tipos com comportamento implementado; os que
     // ainda são `Static` nunca ligariam e travariam a fase.
-    // TODO: tipos "acionar" ainda estáticos nas fases solo: 13, 27, 63, 64, 74 e 80–85.
+    // Desde a M7b, os "acionar" das fases solo (13, 27, 63, 64, 74, 80–85) agem.
     let activated = entities
         .iter()
         .filter(|e| {
