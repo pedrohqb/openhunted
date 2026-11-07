@@ -361,6 +361,53 @@ mod tests {
         assert_eq!(body_check(r(40, 0, 20, 50), r(0, 0, 20, 50)).push, (-40, 0));
     }
 
+    /// Pouso duro 30 (`0x42951f`): com 20 px livres, decisão em pé; sem eles, só anima (não
+    /// rasteja) e no fim vai a 31. 31 e 35 (`0x429555`, `0x42a248`): teto a
+    /// menos de 20 px ou BAIXO → rastejar 36; senão decisão; fim → parado.
+    #[test]
+    fn hard_landing_does_not_crawl_but_get_up_does() {
+        let w = floor_world();
+        let mut j = garathe(&w, 0);
+        j.set(State::Land(Landing::Hard));
+        j.tick(DOWN, &w);
+        assert_eq!(
+            j.state(),
+            State::Crouch,
+            "no 30, BAIXO passa pela decisão (37)"
+        );
+        let mut j = garathe(&w, 0);
+        j.set(State::Land(Landing::Hard));
+        let mut n = 0;
+        while j.state() == State::Land(Landing::Hard) && n < 20 {
+            j.tick(0, &w);
+            n += 1;
+        }
+        assert_eq!(j.state(), State::GetUp, "fim do 30 → 31");
+        j.tick(DOWN, &w);
+        assert_eq!(j.state(), State::Crawl, "31 com BAIXO → 36");
+        // teto baixo (10 px acima da cabeça): o 30 segue, o 31 rasteja
+        let head = 44 + BOX.y;
+        let low = World::new(
+            w.solids()
+                .iter()
+                .copied()
+                .chain([Rect {
+                    x: -100,
+                    y: head - 30,
+                    w: 300,
+                    h: 20,
+                }])
+                .collect(),
+        );
+        let mut j = garathe(&w, 0);
+        j.set(State::Land(Landing::Hard));
+        j.tick(0, &low);
+        assert_eq!(j.state(), State::Land(Landing::Hard));
+        j.set(State::GetUp);
+        j.tick(0, &low);
+        assert_eq!(j.state(), State::Crawl);
+    }
+
     #[test]
     fn runs_at_fifteen_and_walks_in_fighting_stance() {
         let w = floor_world();
