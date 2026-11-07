@@ -69,7 +69,7 @@ pub struct Profile {
     pub take_bit: i32,
     /// Esqueleto e id esperado.
     pub ske: &'static str,
-    pub ske_id: u16,
+    pub ske_id: i16,
     /// BRDs de rastejar e da barra.
     pub crawl_brd: &'static str,
     pub bar_brd: &'static str,

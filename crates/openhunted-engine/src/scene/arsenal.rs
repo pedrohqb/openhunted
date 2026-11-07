@@ -15,8 +15,18 @@ pub const PUNCH_PUSH: i32 = 2;
 pub const SOUND_PUNCH: u16 = 5062;
 
 /// Animações e BRDs dos projéteis das armas 3–6 (`docs/re/projeteis.md`, tabela de tipos).
-pub const ANIMS: [&str; 5] = ["OBK.ANM", "ORO.ANM", "ONS.ANM", "OGR.ANM", "OSH00.ANM"];
-pub const BORDERS: [&str; 8] = [
+pub const ANIMS: [&str; 7] = [
+    "OBK.ANM",
+    "ORO.ANM",
+    "ONS.ANM",
+    "OGR.ANM",
+    "OSH00.ANM",
+    "OKN.ANM",
+    "OWB.ANM",
+];
+pub const BORDERS: [&str; 10] = [
+    "OKN01.BRD",
+    "OWB.BRD",
     "OBK00.BRD",
     "OBK01.BRD",
     "OBK02.BRD",
@@ -103,7 +113,25 @@ impl Scene {
                     clinked: false,
                 }),
             ),
-            ShotKind::Bullet | ShotKind::Casing | ShotKind::Knife | ShotKind::Whip => return None,
+            ShotKind::Knife => (
+                crate::entity::KNIFE,
+                "OKN.ANM",
+                star::KNIFE_LABEL_FLY,
+                u8::from(s.vx < 0),
+                "OKN01.BRD",
+                3,
+                Behaviour::Star(star::StarState::knife(vx, vy)),
+            ),
+            ShotKind::Whip => (
+                crate::entity::WHIP_SHOT,
+                "OWB.ANM",
+                1,
+                0,
+                "OWB.BRD",
+                10,
+                Behaviour::Pellet(pellet::PelletState::whip(vx, vy)),
+            ),
+            ShotKind::Bullet | ShotKind::Casing => return None,
         };
         self.projectile_entity(
             super::Projectile {
@@ -175,7 +203,25 @@ impl Scene {
             Behaviour::Star(s) => s.vx.signum(),
             _ => 0,
         };
-        let (direct, blast) = match e.behaviour {
+        let (direct, blast) = match &e.behaviour {
+            Behaviour::Pellet(s) if s.whip => (
+                Pending {
+                    amount: pellet::WHIP_DAMAGE,
+                    knockdown: true,
+                    push: (dir * pellet::PUSH, 0),
+                    ..Default::default()
+                },
+                None,
+            ),
+            Behaviour::Star(s) if s.knife => (
+                Pending {
+                    amount: star::KNIFE_DAMAGE,
+                    shove: true,
+                    push: (dir * 2, 0),
+                    ..Default::default()
+                },
+                None,
+            ),
             Behaviour::Pellet(_) => (
                 Pending {
                     amount: pellet::DAMAGE,
@@ -254,12 +300,12 @@ impl Scene {
     /// (`enemy::hurt`, com crédito, e `interact::hurt`) reage.
     pub(super) fn apply_punch(&mut self, r: Rect) {
         let right = self.jake.as_ref().is_some_and(|j| j.facing_right());
-        let p = Pending {
+        let p = self.jake.as_ref().and_then(|j| j.blow).unwrap_or(Pending {
             amount: PUNCH_DAMAGE,
             shove: true,
             push: (if right { PUNCH_PUSH } else { -PUNCH_PUSH }, 0),
             ..Default::default()
-        };
+        });
         for e in self.entities.iter_mut() {
             if !e.alive
                 || e.layer != self.jake_layer
@@ -303,6 +349,10 @@ mod tests {
     /// Cena de 2000 × 1000 com chão em y = 100, parede em x = 400 e o Jake parado em
     /// `x` com a arma `w` (munição 10), olhando para a direita.
     fn range(x: i32, w: usize) -> Scene {
+        range_as(x, w, crate::character::Character::Jake)
+    }
+
+    fn range_as(x: i32, w: usize, ch: crate::character::Character) -> Scene {
         use std::rc::Rc;
         let mut s = Scene::empty(2000, 1000);
         let anm = Rc::new(
@@ -339,7 +389,7 @@ mod tests {
         ];
         s.cell_solids = solids.clone();
         s.cell_world = crate::World::new(solids);
-        let mut inv = crate::jake::Inventory::from_points(&[(0, 0), (1, 20)]);
+        let mut inv = crate::jake::Inventory::for_character(&[(0, 0), (1, 20)], ch);
         inv.slots[w] = (1, 10);
         inv.weapon = w;
         let j = crate::Jake::new(
@@ -353,6 +403,7 @@ mod tests {
             },
             std::collections::HashMap::new(),
         )
+        .with_character(ch)
         .with_inventory(inv);
         s.jake = Some(j);
         s.rebuild_world();
@@ -554,5 +605,89 @@ mod tests {
         assert_eq!(hurt, vec![PUNCH_DAMAGE, 0]);
         assert_eq!(s.events.len(), 1);
         assert_eq!(s.events[0].sound_id(), Some(SOUND_PUNCH));
+    }
+
+    #[test]
+    fn garathe_knife_sticks_and_is_picked_up_again() {
+        use crate::character::Character;
+        use crate::jake::weapons::KNIVES;
+        let mut s = range_as(250, KNIVES, Character::Garathe);
+        s.tick(crate::input::SHOOT);
+        for _ in 0..40 {
+            s.tick(0);
+        }
+        let knife = s
+            .entities
+            .iter()
+            .find(|e| e.alive && e.kind == crate::entity::KNIFE)
+            .expect("a faca cravada na parede");
+        assert!(matches!(&knife.behaviour, Behaviour::Star(st) if st.knife && !st.in_flight()));
+        let c = knife.center();
+        let ammo = s.jake.as_ref().unwrap().inventory.ammo(KNIVES);
+        assert_eq!(ammo, 9);
+        if let Some(j) = s.jake.as_mut() {
+            j.body.x = c.0 - 10;
+            j.body.y = c.1 - 20;
+        }
+        s.tick(0);
+        assert_eq!(s.jake.as_ref().unwrap().inventory.ammo(KNIVES), 10);
+        assert_eq!(count(&s, crate::entity::KNIFE), 0);
+    }
+
+    #[test]
+    fn garathe_whip_splits_until_the_fourth_generation() {
+        use crate::character::Character;
+        use crate::jake::weapons::WHIP;
+        let mut s = range_as(1000, WHIP, Character::Garathe);
+        s.tick(crate::input::LEFT);
+        s.tick(crate::input::SHOOT);
+        let mut most = (0, 0);
+        for _ in 0..80 {
+            s.tick(0);
+            for e in s.entities.iter().filter(|e| e.alive) {
+                if let Behaviour::Pellet(p) = &e.behaviour {
+                    assert!(p.whip && p.generation <= 4);
+                    most.0 = most.0.max(p.generation);
+                }
+            }
+            most.1 = most.1.max(count(&s, crate::entity::WHIP_SHOT));
+        }
+        assert_eq!(most.0, 4, "até a 4ª geração");
+        assert!(most.1 >= 4, "dividiu-se: {}", most.1);
+        assert_eq!(
+            count(&s, crate::entity::WHIP_SHOT),
+            0,
+            "somem no cenário ou fora"
+        );
+    }
+
+    #[test]
+    fn garathe_club_blow_uses_its_damage_row() {
+        let mut s = Scene::empty(1000, 1000);
+        s.entities = vec![eye(100)];
+        let b = Rect {
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+        };
+        let mut j = crate::Jake::new(0, 0, b, Default::default());
+        j.blow = Some(Pending {
+            amount: 15,
+            knockdown: true,
+            push: (20, 10),
+            ..Default::default()
+        });
+        s.jake = Some(j);
+        s.apply_punch(Rect {
+            x: 100,
+            y: 10,
+            w: 14,
+            h: 14,
+        });
+        match &s.entities[0].behaviour {
+            Behaviour::LaserEye(st) => assert_eq!(st.hurt.amount, 15),
+            _ => unreachable!(),
+        }
     }
 }

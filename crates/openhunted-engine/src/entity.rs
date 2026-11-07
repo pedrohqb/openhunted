@@ -52,15 +52,19 @@ pub const ENEMIES: [u32; 5] = [BRUISER, SECURITY_ROBOT, SENTINEL, HOP_MINE, MINE
 /// Paredes e portas `OH` (tipos 50–52).
 pub const DOORS: std::ops::RangeInclusive<u32> = 50..=52;
 /// Itens de coleta genérica tratados: armas e munição (12–14, 16–18, 26, 27), vida e comida
-/// (32, 34), veneno (33, 35), antídoto (37), armaduras (76–79), chaves (62–67) e bandeiras
-/// (80–85).
-pub const PICKUPS: [u32; 29] = [
+/// (32, 34), veneno (33, 35), antídoto (37), armaduras (76–79), chaves (62–67), bandeiras
+/// (80–85) e as armas do Garathe: clava (15), facas (25), chicote (44, 45).
+pub const PICKUPS: [u32; 33] = [
     12,
     13,
     14,
+    15,
     16,
     17,
     18,
+    25,
+    44,
+    45,
     26,
     27,
     HEALTH_ITEM,
@@ -91,6 +95,9 @@ pub const ROCKET: u32 = 21;
 pub const SHELL: u32 = 23;
 pub const GRENADE: u32 = 26;
 pub const STAR: u32 = 27;
+/// Projéteis do Garathe: faca (25) e golpe do chicote (108).
+pub const KNIFE: u32 = 25;
+pub const WHIP_SHOT: u32 = 108;
 /// Pistão e interruptor.
 pub const PISTON: u32 = 39;
 pub const SWITCH: u32 = 74;

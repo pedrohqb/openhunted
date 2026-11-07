@@ -3,15 +3,15 @@
 //! `docs/re/armas.md`).
 
 use super::{Ctx, Event, Out};
+use crate::character::Character;
 use crate::damage::Health;
 use crate::entity::{ARMOR_ITEM, Entity, HEALTH_ITEM};
+use crate::jake::weapons::{CLUB, G_GRENADES, G_STARS, KNIVES, WHIP};
 use crate::jake::{GRENADES, Inventory, PISTOL, ROCKETS, SHOTGUN, STARS};
 use crate::physics::{Body, step};
 
 /// Som "Pickup generic object".
 pub const SOUND_PICKUP: u16 = 5057;
-/// O Jake pode pegar (`+0x178 & 0x100`).
-const JAKE_CAN_TAKE: i32 = 0x100;
 
 /// Efeito do item (tabela `0x00471d10`): (vida, armadura).
 fn effect(kind: u32) -> (i32, i32) {
@@ -36,6 +36,11 @@ pub const SHELLS_ITEM: u32 = 17;
 pub const ROCKETS_ITEM: u32 = 18;
 pub const GRENADE_ITEM: u32 = 26;
 pub const STAR_ITEM: u32 = 27;
+/// Armas do Garathe: clava (15), faca (25), chicote (44) e mais chicote (45).
+pub const CLUB_ITEM: u32 = 15;
+pub const KNIFE_ITEM: u32 = 25;
+pub const WHIP_ITEM: u32 = 44;
+pub const WHIP_AMMO_ITEM: u32 = 45;
 /// Chaves (62–67) e bandeiras (80–85): pares `tipo − 49` e `tipo − 73`.
 pub const KEYS: std::ops::RangeInclusive<u32> = 62..=67;
 pub const FLAGS: std::ops::RangeInclusive<u32> = 80..=85;
@@ -56,16 +61,27 @@ pub fn take_weapon(kind: u32, v: i32, inv: &mut Inventory) -> Option<bool> {
         inv.slots[slot].1 = (inv.slots[slot].1 + 1).min(AMMO_CAP);
         return Some(true);
     }
-    let (slot, gives, amount) = match kind {
-        PISTOL_ITEM => (PISTOL, true, 3 * v),
-        AMMO_ITEM => (PISTOL, false, 3 * v),
-        SHOTGUN_ITEM => (SHOTGUN, true, v),
-        SHELLS_ITEM => (SHOTGUN, false, v),
-        ROCKET_ITEM => (ROCKETS, true, v),
-        ROCKETS_ITEM => (ROCKETS, false, v),
-        GRENADE_ITEM => (GRENADES, true, v),
-        STAR_ITEM => (STARS, true, v),
-        _ => return None,
+    let (slot, gives, amount) = match (inv.character, kind) {
+        // Garathe (`0x409fe8`): 15, 25, 26, 27, 44 dão as armas 2, 4, 5, 6, 3 + v; 45 soma v
+        (Character::Garathe, CLUB_ITEM) => (CLUB, true, v),
+        (Character::Garathe, KNIFE_ITEM) => (KNIVES, true, v),
+        (Character::Garathe, GRENADE_ITEM) => (G_GRENADES, true, v),
+        (Character::Garathe, STAR_ITEM) => (G_STARS, true, v),
+        (Character::Garathe, WHIP_ITEM) => (WHIP, true, v),
+        (Character::Garathe, WHIP_AMMO_ITEM) => (WHIP, false, v),
+        (Character::Garathe, _) => return None,
+        (_, CLUB_ITEM | KNIFE_ITEM | WHIP_ITEM | WHIP_AMMO_ITEM) => return None,
+        (_, kind) => match kind {
+            PISTOL_ITEM => (PISTOL, true, 3 * v),
+            AMMO_ITEM => (PISTOL, false, 3 * v),
+            SHOTGUN_ITEM => (SHOTGUN, true, v),
+            SHELLS_ITEM => (SHOTGUN, false, v),
+            ROCKET_ITEM => (ROCKETS, true, v),
+            ROCKETS_ITEM => (ROCKETS, false, v),
+            GRENADE_ITEM => (GRENADES, true, v),
+            STAR_ITEM => (STARS, true, v),
+            _ => return None,
+        },
     };
     let (has, qty) = inv.slots[slot];
     if !(gives && has == 0) && qty >= AMMO_CAP {
@@ -102,7 +118,12 @@ pub fn collect_star(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         .inventory
         .clone()
         .unwrap_or_else(|| jake.inventory.clone());
-    if take_weapon(STAR_ITEM, 1, &mut inv) == Some(true) {
+    // Ruling: a faca cravada devolve 1 faca, como a estrela (o valor não foi lido)
+    let item = match &e.behaviour {
+        crate::entity::Behaviour::Star(s) if s.knife => KNIFE_ITEM,
+        _ => STAR_ITEM,
+    };
+    if take_weapon(item, 1, &mut inv) == Some(true) {
         out.inventory = Some(inv);
         out.events.push(Event::Sound(crate::sound::Cue::ui(
             SOUND_PICKUP,
@@ -186,7 +207,9 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
             }
         }
     }
-    if e.flags & JAKE_CAN_TAKE == 0 {
+    // o Jake pega com 0x100, o Garathe com 0x200 (`itens.md`, passo 2)
+    let can_take = ctx.jake.map_or(0x100, |j| j.profile().take_bit);
+    if e.flags & can_take == 0 {
         return;
     }
     let (Some(item), Some(j)) = (e.bounds(), ctx.jake_bounds()) else {
@@ -409,5 +432,31 @@ mod tests {
         tick(&mut item, &ctx(&j, &w, &on), &mut out);
         assert_eq!(out.poison, Some(1));
         assert!(!item.alive);
+    }
+
+    #[test]
+    fn garathe_weapons_and_swapped_grenades_and_stars() {
+        let mut inv = Inventory::for_character(&[], Character::Garathe);
+        assert_eq!(take_weapon(PISTOL_ITEM, 20, &mut inv), None, "só o Jake");
+        assert_eq!(take_weapon(CLUB_ITEM, 1, &mut inv), Some(true));
+        assert_eq!(inv.slots[CLUB], (1, 1));
+        assert_eq!(
+            inv.weapon, CLUB,
+            "melhor que as garras na lista 1,2,5,4,6,3"
+        );
+        assert_eq!(take_weapon(KNIFE_ITEM, 10, &mut inv), Some(true));
+        assert_eq!((inv.slots[KNIVES], inv.weapon), ((1, 10), KNIVES));
+        assert_eq!(take_weapon(GRENADE_ITEM, 3, &mut inv), Some(true));
+        assert_eq!(inv.slots[G_GRENADES], (1, 3), "26 dá a arma 5 ao Garathe");
+        assert_eq!(take_weapon(STAR_ITEM, 4, &mut inv), Some(true));
+        assert_eq!(inv.slots[G_STARS], (1, 4), "27 dá a arma 6");
+        assert_eq!(take_weapon(WHIP_AMMO_ITEM, 5, &mut inv), Some(true));
+        assert_eq!(inv.slots[WHIP], (0, 5), "45 só soma");
+        assert_eq!(take_weapon(WHIP_ITEM, 5, &mut inv), Some(true));
+        assert_eq!((inv.slots[WHIP], inv.weapon), ((1, 10), WHIP));
+        let mut jake = Inventory::from_points(&[]);
+        assert_eq!(take_weapon(CLUB_ITEM, 1, &mut jake), None);
+        assert_eq!(take_weapon(GRENADE_ITEM, 3, &mut jake), Some(true));
+        assert_eq!(jake.slots[GRENADES], (1, 3));
     }
 }

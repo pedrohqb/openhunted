@@ -34,7 +34,14 @@ pub struct StarState {
     pub prev: Option<(i32, i32)>,
     /// Cravada: tiques restantes como item.
     pub stuck: Option<u32>,
+    /// É a faca do Garathe (25, `0x40ba54`): reta, sem onda.
+    pub knife: bool,
 }
+
+/// Faca (`OKN.ANM`): rótulo 2 girando no voo e 4 cravada; linha `(25, …)`: 12 com empurrão.
+pub const KNIFE_LABEL_FLY: u16 = 2;
+pub const KNIFE_LABEL_STUCK: u16 = 4;
+pub const KNIFE_DAMAGE: i32 = 12;
 
 impl StarState {
     pub fn new(vx: i32, vy: i32) -> Self {
@@ -45,6 +52,16 @@ impl StarState {
             phase: if vx < 0 { 0x8000 } else { 0 },
             prev: None,
             stuck: None,
+            knife: false,
+        }
+    }
+
+    /// Faca do Garathe: voa reta.
+    pub fn knife(vx: i32, vy: i32) -> Self {
+        Self {
+            phase: 0,
+            knife: true,
+            ..Self::new(vx, vy)
         }
     }
 
@@ -56,6 +73,9 @@ impl StarState {
 
     /// Velocidade deste tique: a base mais a variação da onda na perpendicular.
     pub fn velocity(&self) -> (i32, i32) {
+        if self.knife {
+            return (self.vx, self.vy);
+        }
         let d = self.wave(self.k + 1) - self.wave(self.k);
         let len = f64::from(self.vx).hypot(f64::from(self.vy)).max(1.0);
         let (px, py) = (-f64::from(self.vy) / len, f64::from(self.vx) / len);
@@ -104,8 +124,13 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         e.x -= (f64::from(st.vx) / len * f64::from(BACK_OFF)).round() as i32;
         e.y -= (f64::from(st.vy) / len * f64::from(BACK_OFF)).round() as i32;
         st.stuck = Some(STUCK_TICKS);
+        let label = if st.knife {
+            KNIFE_LABEL_STUCK
+        } else {
+            LABEL_STUCK
+        };
         e.flags |= 0x28;
-        super::restart(e, LABEL_STUCK);
+        super::restart(e, label);
         out.events.push(Event::Sound(crate::sound::Cue::at(
             SOUND_STICK,
             crate::sound::PRIORITY_FRAME,

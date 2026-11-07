@@ -29,6 +29,8 @@ pub struct Pending {
     /// Reações (`+0x250`): derrubada (4), empurrão (2).
     pub knockdown: bool,
     pub shove: bool,
+    /// Tranco (`+0x250 = 1`): só o Garathe reage (estado 59).
+    pub jolt: bool,
 }
 
 impl Pending {
@@ -47,6 +49,7 @@ impl Pending {
         self.push.1 = self.push.1.saturating_add(o.push.1);
         self.knockdown |= o.knockdown;
         self.shove |= o.shove;
+        self.jolt |= o.jolt;
     }
 }
 

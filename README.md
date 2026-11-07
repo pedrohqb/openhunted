@@ -11,6 +11,15 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M8: o Garathe Den jogável.** Nas missões do Minotauro (`T_M`, `I_M`, `H_M`, `D_M`) o
+jogador controla o Garathe: corre a 15 px/tique, anda em pose de luta (X), pula médio ou longo
+(com preparo; no longo, a investida fere quem ele toca), pulo parado e para cima, redes,
+camadas, rasteja, pendura e anda na barra, esconde-se (o robô não o vê) e usa o especial
+(BAIXO+ATIRAR: 1 de vida por tique, 16 tiques). Armas: garras, clava (Z usa a clava), chicote
+(golpe que se divide), facas (cravam na parede e são recolhidas), granadas e estrelas; só ele
+pega a clava, as facas e o chicote. A `T_M_002` é vencida de ponta a ponta
+(`t_m_002_can_be_won`). Regras em `docs/superpowers/specs/2026-11-06-m8-garathe-design.md`.
+
 **M7b: o arsenal do Jake e os itens da campanha.** Além da pistola, o Jake soca (Z, ou
 ATIRAR com os punhos: 8 de dano na frente), atira com a espingarda (o chumbo se divide em
 quatro, com cartucho), o lança-foguetes (20 diretos e explosão de raio 64 que também fere o
@@ -34,22 +43,17 @@ embaixo; leva metade do dano, é imune a fogo e morre em 30 explosões. As morte
 jogador contam no resultado; os sons de cada um tocam pelos quadros (`SOUND.TBL`). Regras e
 simplificações em `docs/superpowers/specs/2026-11-06-m7a-inimigos-design.md`.
 
-**M6b: os demais movimentos do Jake.** O esqueleto `JAKE.SKE` é lido e move o Jake como no
-original: o andar furtivo (X), o impulso do pulo estendido, os pulos parado e para cima (com a
-tabela de velocidades e o controle no ar), as aterrissagens que deslizam, a escalada, o
-engatinhar e a barra; o desenho acompanha o deslocamento da captura. CIMA diante de uma
-corda, escada ou rede (zona PR 4) agarra e escala (em pé ou no ar, sem PULAR), na vertical,
-de lado e nas diagonais; PULAR solta em pulo. As portas de camada (zonas 1 e 2) levam o Jake
-de uma camada à outra com CIMA/BAIXO, e o cenário sólido passa a ser o da camada nova. CIMA
-sem zona esconde o Jake contra a parede; BAIXO agacha e engatinha (sob teto baixo não
-levanta); o pulo para cima contra um teto de cenário pendura na barra (mão ante mão, puxar o
-corpo). BAIXO+ATIRAR com vida acima de 25 é o especial: custa 3 de vida e destrói ou fere o
+**M6b: os demais movimentos do Jake.** O esqueleto `JAKE.SKE` move o Jake como no original
+(andar furtivo, impulso do pulo estendido, pulos parado e para cima, aterrissagens, escalada,
+engatinhar, barra) e o desenho acompanha a captura. CIMA diante de uma corda, escada ou rede
+agarra e escala; PULAR solta em pulo. As portas de camada levam o Jake de uma camada à outra
+com CIMA/BAIXO. CIMA sem zona esconde o Jake; BAIXO agacha e engatinha; o pulo para cima contra
+um teto pendura na barra. BAIXO+ATIRAR com vida acima de 25 é o especial: custa 3 de vida e destrói ou fere o
 que estiver a menos de 70 px. Com os objetos da M6a, as missões tutoriais `T_J_003`, `T_J_005`
 e `T_J_007` podem ser vencidas de ponta a ponta (testes `t_j_00x_can_be_won`).
 
-**M6a: os objetos das missões tutoriais `T_J_003/005/007`.** O olho-laser varre o teto, vê
-o Jake dentro do cone do feixe e dispara rajadas de raios (5 de dano com tranco; morre com um
-tiro e explode); o barril tomba quando o Jake encosta, rola empurrado, explode com tiro, fogo,
+**M6a: os objetos das missões tutoriais `T_J_003/005/007`.** O olho-laser varre o teto e
+dispara rajadas de raios no Jake que entra no cone; o barril tomba quando o Jake encosta, rola empurrado, explode com tiro, fogo,
 raio, explosão ou batida rápida, em cadeia; o fogo cresce e queima 1 por tique; a cerca
 elétrica faísca e dá choque; o grafite escreve o texto do `GRAFFITI.RES`; a peça do carro
 flutua e, apanhada, cumpre o objetivo; o teletransporte some com o Jake e o põe no destino; as
@@ -63,9 +67,8 @@ GO/CANCEL) sobre o primeiro quadro da fase. A partida ocupa 640×405 com a barra
 original embaixo (`INVBAR01.BMP`: vida, rosto, armadura, armas com munição, cronômetro de
 rolo); P ou Pause pausa ("GAME PAUSED"). No fim, a tela de resultado (`SMISS.ITF`) conta
 mortos, pontos e bônus de vitória, guarda o recorde da missão na sessão e oferece REPLAY,
-NEXT (a próxima missão solo) e MAIN MENU. Decisão do port: enquanto o Garathe não existe, o
-NEXT pula as missões sem o Jake controlável (as do Garathe); uma fase aberta com `--level` fora
-da lista de missões não grava recorde e o NEXT dela volta ao menu.
+NEXT (a próxima missão solo) e MAIN MENU. Uma fase aberta com `--level` fora da lista de
+missões não grava recorde e o NEXT dela volta ao menu.
 
 **M4c: efeitos sonoros.** **M4b: a pistola.** **M4a: a primeira missão é jogável de ponta a ponta.** Na `T_J_001`, o
 Jake corre, pula e cai, colide com o cenário e com os objetos sólidos, apanha a vida e a
@@ -83,13 +86,12 @@ estado em [`docs/formats/`](docs/formats/README.md)); M2 visualizador de fase; M
 corre e pula; M3b objetos sólidos e presença por modo de jogo.
 
 Ainda não há: os demais inimigos (Morte, Camaleão,
-catapulta, dardos, Anticorpo, Manta, Entidade, Minotauro), o equilíbrio na beirada (162/163),
+catapulta, dardos, Anticorpo, Manta, Entidade, Minotauro inimigo), o equilíbrio na beirada (162/163),
 música, os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, a
 abertura (logotipo, filme, história, créditos), os demais botões do menu (carregar, escolher
 missão, opções, dispositivos, heróis, ajuda, dois jogadores), tesouros e segredos, gravação de
-recordes e de jogo, outras missões jogáveis, o Garathe. Os obstáculos `OPO` (gotas, bloco que cai,
-portão) ainda não agem. Nas missões do Garathe não há personagem controlável (as setas rolam a
-tela).
+recordes e de jogo, as cores do herói escolhido (o Garathe usa a paleta da fase). Os obstáculos `OPO` (gotas, bloco que cai,
+portão) ainda não agem.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
 reversa, em [`docs/re/`](docs/re/).
@@ -114,14 +116,14 @@ direção e Enter ou espaço clicam; Esc cancela (no briefing, volta; no resulta
 nada; no menu, sai do jogo). No briefing, CIMA/BAIXO rolam o texto longo. Na tela de
 resultado, uma tecla salta a contagem.
 
-No jogo: setas movem o Jake, espaço pula (correndo, o pulo escolhe a distância conforme o chão
+No jogo: setas movem o personagem (o Jake ou, nas missões do Minotauro, o Garathe), espaço pula (correndo, o pulo escolhe a distância conforme o chão
 adiante; com CIMA, para cima), Ctrl atira (segurando, rajadas; com as setas mira para cima e
-nas diagonais; BAIXO+Ctrl é o especial), X anda furtivo, Z é o soco, PgUp/PgDn trocam de arma (1–6 escolhem direto), CIMA
+nas diagonais; BAIXO+Ctrl é o especial), X anda furtivo (o Garathe, em pose de luta), Z é o soco (o Garathe usa a clava se a tem), PgUp/PgDn trocam de arma (1–6 escolhem direto), CIMA
 usa a saída ou o interruptor quando ele está parado diante deles, agarra cordas e escadas, passa pelas portas
 de camada ou o esconde, e BAIXO agacha (e engatinha com as setas) ou desce de camada; a
 câmera o acompanha. P ou Pause pausa (Enter,
 espaço ou OKAY retomam). A dica do tutorial pausa o jogo e fecha ao soltar uma tecla. Esc não
-faz nada (como no original). Em fases sem o Jake, as setas rolam a tela, PageUp/PageDown pulam
+faz nada (como no original). Em fases sem personagem, as setas rolam a tela, PageUp/PageDown pulam
 uma tela, Home/End vão às pontas e Esc volta ao menu (sem personagem, a fase nunca acaba).
 Quando a janela perde o foco, o jogo pausa. Só o botão esquerdo do mouse clica. Tab mostra as caixas de colisão e os objetos de lógica. O
 som sai pelo dispositivo de áudio padrão; sem ele, o jogo avisa uma vez e segue mudo.

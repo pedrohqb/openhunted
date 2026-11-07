@@ -480,6 +480,8 @@ pub struct Jake {
     pub special: Option<SpecialBlast>,
     /// Caixa do soco no primeiro tique da janela do golpe (a cena fere quem cruza).
     pub punch: Option<Rect>,
+    /// Dano desse golpe (linha do `DAMAGE.TBL` da arma e da mira).
+    pub blow: Option<Pending>,
     /// Trocou de arma neste tique (a cena toca 3090).
     pub switched: bool,
     /// Tiques restantes da pose "pronto" depois da troca (`+0x26c`).
@@ -493,6 +495,9 @@ pub struct Jake {
     clock: u32,
     /// Quem é (perfil de movimentos, rótulos e armas).
     character: Character,
+    /// Som posicional pedido neste tique (Garathe: pouso do pulo longo, empurrar, pulo
+    /// contra a parede; a cena toca).
+    pub sound: Option<u16>,
 }
 
 impl Jake {
@@ -527,13 +532,19 @@ impl Jake {
             rng: 0x4a41_4b45,
             special: None,
             punch: None,
+            blow: None,
             switched: false,
             switch_pose: 0,
             poison: 0,
             door_push: false,
             clock: 0,
             character: Character::Jake,
+            sound: None,
         }
+    }
+
+    fn is_garathe(&self) -> bool {
+        self.character == Character::Garathe
     }
 
     /// Passa a ser o personagem `ch` (perfil, rótulos e armas; o inventário segue).
@@ -641,12 +652,13 @@ impl Jake {
             self.tick_special(input, world);
             return true;
         }
+        let melee = self.melee_weapon();
         let mut w = if input & PUNCH != 0 {
-            FISTS
+            melee
         } else {
             self.inventory.weapon
         };
-        if w != FISTS && !self.inventory.available(w) {
+        if self.weapon(w).shot.is_some() && !self.inventory.available(w) {
             self.no_ammo = true;
             self.inventory.weapon = self.inventory.best();
             self.body.vx = 0;
@@ -655,11 +667,11 @@ impl Jake {
             return true;
         }
         let aim = Aim::from_input(input);
-        if w != FISTS {
+        if self.weapon(w).shot.is_some() {
             let r = self.weapon(w).states[weapons::aim_slot(aim)][0].1;
             let dx = if self.facing_right { r.dx.1 } else { r.dx.0 };
-            if !self.muzzle_clear(world, (self.body.x + dx, self.body.y + r.dy)) {
-                w = FISTS;
+            if !self.muzzle_ok(world, w, (self.body.x + dx, self.body.y + r.dy)) {
+                w = melee;
             }
         }
         self.body.vx = 0;
@@ -675,6 +687,41 @@ impl Jake {
         self.frame = 0;
         self.label_changed = true;
         true
+    }
+
+    /// Arma do SOCO e da boca na parede: os punhos/garras ou, no Garathe com o par 2, a
+    /// clava (`0x43ab05`, ramo `0x43ab82`).
+    fn melee_weapon(&self) -> usize {
+        if self.is_garathe() && self.inventory.slots[weapons::CLUB].0 != 0 {
+            weapons::CLUB
+        } else {
+            FISTS
+        }
+    }
+
+    /// A boca da arma `w` está livre; o chicote só testa a metade da linha (`0x43bbe3`).
+    fn muzzle_ok(&self, world: &World, w: usize, muzzle: (i32, i32)) -> bool {
+        if self.weapon(w).half_line {
+            let b = self.body.bounds();
+            let c = (b.x + b.w / 2, b.y + b.h / 2);
+            self.muzzle_clear(world, ((c.0 + muzzle.0) / 2, (c.1 + muzzle.1) / 2))
+        } else {
+            self.muzzle_clear(world, muzzle)
+        }
+    }
+
+    /// Dano do golpe corpo a corpo do estado de tiro corrente (linha do `DAMAGE.TBL` da
+    /// variante), com o empurrão pelo lado.
+    fn blow_damage(&self, w: u8, aim: Aim) -> Option<Pending> {
+        let b = self.weapon(w as usize).blow?[weapons::aim_slot(aim)];
+        let dir = self.dir();
+        Some(Pending {
+            amount: b.damage,
+            knockdown: b.knockdown,
+            shove: !b.knockdown,
+            push: (b.push.0 * dir, b.push.1),
+            ..Default::default()
+        })
     }
 
     /// Caixa do golpe (`0x0043accb`): metade da frente da caixa do Jake e um terço da altura
@@ -757,6 +804,7 @@ impl Jake {
         let right = self.facing_right;
         if r.hit != (0, 0) && t == r.hit.0 {
             self.punch = Some(self.punch_box(aim));
+            self.blow = self.blow_damage(w, aim);
         }
         let muzzle = (
             self.body.x + if right { r.dx.1 } else { r.dx.0 },
@@ -764,7 +812,7 @@ impl Jake {
         );
         let in_window = r.fire != (0, 0) && r.fire.0 <= t && t < r.fire.1 + wp.step;
         if let Some(kind) = wp.shot.filter(|_| in_window) {
-            if self.inventory.available(w as usize) && self.muzzle_clear(world, muzzle) {
+            if self.inventory.available(w as usize) && self.muzzle_ok(world, w as usize, muzzle) {
                 let slot = &mut self.inventory.slots[w as usize].1;
                 *slot = (*slot - 1).max(0);
                 let sign = if right { 1 } else { -1 };
@@ -884,6 +932,7 @@ impl Jake {
         !matches!(
             self.state,
             State::Pushed
+                | State::Jolted
                 | State::KnockedDown(_)
                 | State::Shocked(_)
                 | State::Dying(_)
@@ -902,20 +951,53 @@ impl Jake {
         {
             return false;
         }
-        if p.knockdown {
+        let g = self.is_garathe();
+        let layering = matches!(self.state, State::LayerUp(_) | State::LayerDown(_));
+        // empurrão: Jake em 1/10/101; Garathe em 1, 54–56 e 58 (`0x428531`)
+        let shovable = if g {
+            matches!(
+                self.state,
+                State::Idle | State::Hide | State::Hidden | State::Unhide | State::Pushed
+            )
+        } else {
+            matches!(self.state, State::Idle | State::Run | State::Push)
+        };
+        if p.knockdown && !(g && layering) {
             let right = p.push.0 >= 0;
             self.body.vx = p.push.0 * SUB;
             self.body.vy = p.push.1 * SUB;
             self.set(State::KnockedDown(right));
-        } else if p.shove && matches!(self.state, State::Idle | State::Run | State::Push) {
+        } else if p.shove && shovable {
             self.body.vx = p.push.0 * SUB;
             self.set(State::Pushed);
-        } else if p.electric && !matches!(self.state, State::Shocked(_)) {
+        } else if g && p.jolt && moves::joltable(self.state) {
+            // tranco (`0x42859e`): 59, ou queda na corda
+            self.body.vx = 0;
+            if matches!(self.state, State::Climb(_)) {
+                self.set(State::Fall);
+            } else {
+                self.set(State::Jolted);
+            }
+        } else if p.electric && !matches!(self.state, State::Shocked(_)) && !(g && layering) {
             self.body.vx = 0;
             self.set(State::Shocked(SHOCK_TICKS));
+            if g {
+                self.frame = garathe::SHOCK_FRAME.min(self.len_of(121) - 1);
+            }
         }
         if apply(&mut self.health, &p, tick) == 0 {
             self.death_label = match self.state {
+                State::KnockedDown(right) if g => {
+                    if garathe::knocked_label(right, self.facing_right) == 32 {
+                        garathe::DIE_FORWARD
+                    } else {
+                        garathe::DIE_BACK
+                    }
+                }
+                State::Land(Landing::Hard) if g => garathe::DIE_FORWARD,
+                State::Rise if g => garathe::DIE_BACK,
+                _ if g && p.poison => garathe::DIE_POISON,
+                _ if g => garathe::DIE_DEFAULT,
                 State::KnockedDown(true) => DIE_KNOCKED_RIGHT,
                 State::KnockedDown(false) => DIE_KNOCKED_LEFT,
                 _ if p.poison => DIE_POISON,
@@ -1143,8 +1225,10 @@ impl Jake {
         self.no_ammo = false;
         self.special = None;
         self.punch = None;
+        self.blow = None;
         self.switched = false;
         self.door_push = false;
+        self.sound = None;
         self.anim_mode = AnimMode::Auto;
         self.ske_req = None;
         if self.state == State::Dead {
@@ -1219,6 +1303,13 @@ impl Jake {
             State::Idle | State::Run | State::Push => {
                 self.decide_standing(input, env, jump_edge, side);
             }
+            State::RunUp if self.is_garathe() => {
+                // preparo 24 (uma vez) → pulo longo 25 (`0x429a0b`)
+                self.body.vx = 0;
+                if self.anim_done() {
+                    self.launch(JumpKind::Long);
+                }
+            }
             State::RunUp => {
                 // Impulso (`0x00425382`): vx pelo esqueleto com k = 2, mantendo a vertical;
                 // no fim, o pulo estendido sai de onde o impulso levou o Jake.
@@ -1239,6 +1330,10 @@ impl Jake {
                     // fim do 80 ainda no ar → queda descontrolada (76)
                     self.set(State::WildFall);
                 } else {
+                    if self.is_garathe() && self.anim_done() {
+                        // 22/25: a animação toca uma vez e para no último quadro
+                        self.anim_mode = AnimMode::Hold;
+                    }
                     self.air_reverse(side);
                 }
             }
@@ -1249,7 +1344,12 @@ impl Jake {
             }
             _ => self.tick_move(input, env, jump_edge, side),
         }
-        self.door_push = self.state == State::Push && self.ticks + 1 == self.len_of(100) as u32;
+        let (push_label, push_c) = self.anim_of(State::Push);
+        self.door_push = self.state == State::Push
+            && self.ticks + 1 == self.len_of(push_label) as u32 * (push_c + 1);
+        if self.door_push && self.is_garathe() {
+            self.sound = Some(garathe::SOUND_PUSH);
+        }
         // a caixa do estado vale já para a física deste tique (o BRD troca com o estado)
         self.fit_box(world);
         if matches!(self.state, State::Run | State::Push) {
@@ -1265,8 +1365,19 @@ impl Jake {
         self.animate();
         self.apply_ske();
         let was_rising = self.body.vy < 0;
-        step(&mut self.body, world, moves::gravity(self.state));
+        let gravity = self.gravity_on();
+        step(&mut self.body, world, gravity);
         match self.state {
+            State::Jump(kind) if self.is_garathe() && self.body.hit_wall => {
+                // 22/25 contra a parede: fala e queda (`0x429e46`, `0x429c6c`)
+                self.sound = Some(if kind == JumpKind::Long {
+                    garathe::SPEECH_WALL_LONG
+                } else {
+                    garathe::SPEECH_WALL_MEDIUM
+                });
+                self.body.vx = 0;
+                self.set(State::Fall);
+            }
             State::Jump(_) | State::Fall | State::WildFall
                 if self.body.on_ground && !was_rising =>
             {
@@ -1279,6 +1390,9 @@ impl Jake {
                     _ => Landing::Hard,
                 };
                 self.set(State::Land(landing));
+                if landing == Landing::Long && self.is_garathe() {
+                    self.sound = Some(garathe::SOUND_LONG_LANDING);
+                }
             }
             State::JumpUp(_) if self.body.hit_ceiling && self.ceiling_is_bar(world) => {
                 self.body.vx = 0;
@@ -1351,6 +1465,26 @@ impl Jake {
                     self.state = State::Shocked(n - 1);
                 }
             }
+            State::Jolted => {
+                // 59: desliza pelo esqueleto (k = 2, só x), depois levanta (35)
+                if self.anim_done() {
+                    self.body.vx = 0;
+                    self.set(State::Rise);
+                } else {
+                    self.animate();
+                    self.ske_req = Some(SkeReq {
+                        k: 2,
+                        x: true,
+                        y: false,
+                        diag: 0,
+                    });
+                    self.apply_ske();
+                    step(&mut self.body, world, true);
+                    self.fit_box(world);
+                    self.finish_tick();
+                    return;
+                }
+            }
             State::Pushed => {
                 step(&mut self.body, world, true);
                 if self.anim_done() {
@@ -1371,7 +1505,18 @@ impl Jake {
                 if self.body.on_ground && !was_rising {
                     self.body.vx = 0;
                     self.body.vy = 0;
-                    self.set(State::Land(Landing::Fall));
+                    let next = match self.state {
+                        // 32 → 30 no chão; 33 → 35 (`0x42a115`, `0x42a1b3`)
+                        State::KnockedDown(right) if self.is_garathe() => {
+                            if garathe::knocked_label(right, self.facing_right) == 32 {
+                                State::Land(Landing::Hard)
+                            } else {
+                                State::Rise
+                            }
+                        }
+                        _ => State::Land(Landing::Fall),
+                    };
+                    self.set(next);
                 }
             }
             State::Dying(_) => {
