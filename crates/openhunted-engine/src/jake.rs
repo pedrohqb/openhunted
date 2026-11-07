@@ -915,6 +915,11 @@ impl Jake {
         self.pending.add(&p);
     }
 
+    /// Dano pendente ainda não aplicado (`+0x24c`, lido pela IA).
+    pub fn pending_damage(&self) -> i32 {
+        self.pending.amount
+    }
+
     /// Entra na porta de saída: estado 13, sem colisão; encolhe depois de 10 tiques.
     /// `scale_num` é o numerador atual da escala do sprite.
     pub fn enter_exit(&mut self, scale_num: i32) {

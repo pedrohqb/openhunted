@@ -2,6 +2,7 @@
 //! Engine do OpenHunted: monta a cena de uma fase, avança as animações por tick e desenha
 //! num framebuffer indexado. Não depende de SDL nem de relógio.
 
+pub mod ai;
 pub mod anim;
 pub mod assets;
 pub mod behaviour;
