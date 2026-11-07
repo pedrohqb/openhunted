@@ -27,6 +27,16 @@ pub fn hurt(e: &mut Entity, p: &Pending) -> bool {
             st.hurt.add(p);
             true
         }
+        // granada com dano de explosão pendente detona no próximo tique (`0x40d819`)
+        Behaviour::Grenade(st) if p.explosion => {
+            st.fuse = 0;
+            true
+        }
+        // estrela cravada atingida por explosão some (`armas-2.md`)
+        Behaviour::Star(st) if p.explosion && !st.in_flight() => {
+            e.alive = false;
+            true
+        }
         _ => false,
     }
 }

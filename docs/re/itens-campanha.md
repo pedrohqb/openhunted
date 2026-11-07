@@ -113,8 +113,11 @@ depois de `+0x9c` em `+0x44…` (no JSON, `fields[16..]` nas versões ≥ 1006):
 (`índice/10000`, `'A' + índice/1000 % 10`, `índice/10 % 100`, `'A' + índice % 10`); 2 → a
 mesma colisão fechada; 3 → nada; 4 → último quadro do rótulo e `…0.BRD` (aberta). Por tique
 (`0x40ed62`): abrindo, quadro + 1 até o fim do rótulo → 4; fechando, quadro − 1 até o
-começo → 1; aberta, conta `+0x50` e, a 0, se nenhum objeto cruza a colisão fechada
-(`0x435d1c`), `+0x50 = +0x4c` e fecha. Nos dados, a colisão fechada tem uma coluna de 20 px
+começo → 1; aberta, conta `+0x50` e, a 0, se nenhum objeto cruza a faixa da coluna
+(`0x40ee3b` → `0x435d1c`), `+0x50 = +0x4c` e fecha. A faixa: x e largura da primeira caixa
+da colisão atual (`+0x2c`; caixa em memória `+4` x, `+8` y, `+0x14` largura, `+0x18` altura)
+com largura ≤ altura — a coluna; os trilhos 128 × 12 ficam de fora —, na altura toda da
+célula (y 0, altura 0x80); sem caixa assim, x = 58 e largura 12. Nos dados, a colisão fechada tem uma coluna de 20 px
 no meio da célula que a aberta encurta (`C1A38A1/0.BRD`: 104 → 30 px de altura).
 
 `0x40f040(célula, máscara, quem)` (Jake `0x425e3c`, Garathe `0x42abac`): fechada → sem a

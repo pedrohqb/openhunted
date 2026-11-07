@@ -95,8 +95,26 @@ impl CellDoor {
         }
     }
 
+    /// Faixa de ocupação (`0x0040ee3b`): na altura toda da célula (128 px), com o x e a
+    /// largura da primeira caixa da colisão atual que não é mais larga que alta (a coluna da
+    /// porta; os trilhos 128 × 12 ficam de fora); sem ela, x = 58 e largura 12.
+    pub fn strip(&self) -> Rect {
+        let (x, w) = self
+            .solids()
+            .iter()
+            .find(|b| b.w <= b.h)
+            .map_or((self.origin.0 + 58, 12), |b| (b.x, b.w));
+        Rect {
+            x,
+            y: self.origin.1,
+            w,
+            h: super::CELL,
+        }
+    }
+
     /// Um tique (`0x0040ed62`): anda um quadro abrindo ou fechando; aberta, conta e fecha se
-    /// nada cruza a colisão fechada (`occupied`). Devolve `true` se a colisão mudou.
+    /// nada cruza a faixa da coluna (`strip`, pela consulta `occupied`). Devolve `true` se
+    /// a colisão mudou.
     pub fn tick(&mut self, occupied: impl Fn(&[Rect]) -> bool) -> bool {
         match self.state {
             OPENING => {
@@ -118,7 +136,7 @@ impl CellDoor {
                 self.frame = self.last;
                 if self.timer > 0 {
                     self.timer -= 1;
-                } else if self.timer == 0 && !occupied(&self.closed) {
+                } else if self.timer == 0 && !occupied(&[self.strip()]) {
                     self.timer = self.close_after;
                     self.state = CLOSING;
                     return true;
@@ -309,6 +327,51 @@ mod tests {
         assert_eq!(d.state, OPEN);
         let mut d = door(0);
         assert_eq!(d.push(0, true), None);
+    }
+
+    fn r(x: i32, y: i32, w: i32, h: i32) -> Rect {
+        Rect { x, y, w, h }
+    }
+
+    /// Porta aberta como `C1A38A0.BRD` na célula (128, 0): trilhos 128 × 12 em cima e
+    /// embaixo e a coluna de 20 px encurtada.
+    fn open_door() -> CellDoor {
+        let mut d = CellDoor::new(&[1, 0, 3]);
+        d.origin = (128, 0);
+        d.timer = 0;
+        let rails = [r(128, 0, 128, 12), r(128, 116, 128, 12)];
+        d.closed = [&rails[..], &[r(178, 12, 20, 104)]].concat();
+        d.open = [&rails[..], &[r(178, 12, 20, 30)]].concat();
+        d
+    }
+
+    /// Ocupação (`0x40ee3b`): a faixa da coluna da porta (x e largura da primeira caixa
+    /// com largura ≤ altura) na altura toda da célula; sem ela, x = 58 e 12 de largura.
+    #[test]
+    fn occupancy_strip_is_the_door_column_over_the_whole_cell() {
+        let d = open_door();
+        assert_eq!(d.strip(), r(178, 0, 20, 128));
+        let mut bare = CellDoor::new(&[1]);
+        bare.origin = (0, 256);
+        assert_eq!(bare.strip(), r(58, 256, 12, 128));
+    }
+
+    /// Um barril pousado no trilho de baixo, fora da coluna, não segura a porta aberta;
+    /// dentro da coluna, segura.
+    #[test]
+    fn barrel_on_the_rail_does_not_keep_the_door_open() {
+        for (x, stays) in [(140, false), (180, true)] {
+            let mut s = Scene::empty(512, 256);
+            s.cell_doors = vec![open_door()];
+            let mut b = crate::behaviour::test_support::logic(crate::entity::BARREL, x, 90, &[]);
+            b.boxes = vec![r(0, 0, 16, 30)]; // cruza o trilho (y 116..128) por 4 px
+            b.solid_shapes = true;
+            b.flags = 0x80001;
+            s.entities.push(b);
+            s.tick_cell_doors();
+            let st = s.cell_doors[0].state;
+            assert_eq!(st == OPEN, stays, "barril em x = {x}: estado {st}");
+        }
     }
 
     #[test]

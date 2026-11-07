@@ -69,7 +69,8 @@ Célula com `(índice / 10) % 100 = 38`. Tabela `+0x44..+0x54` (os `s16` depois 
 nunca), `+0x54` estado (1 fechada, 2 fechando, 3 abrindo, 4 aberta). Quadros: o rótulo da
 célula; fechada = primeiro, aberta = último; abrindo/fechando anda um quadro por tique.
 Colisão: `C%d%c%02d%c1.BRD` fechada/abrindo/fechando, `…0.BRD` aberta. Aberta, conta os
-tiques e fecha quando nada cruza a colisão fechada. Abrir (`0x40f040`): o Jake empurrando
+tiques e fecha quando nada cruza a faixa da coluna (`0x40ee3b`: x e largura da coluna da
+porta, a primeira caixa com largura ≤ altura, na altura toda da célula; os trilhos não contam). Abrir (`0x40f040`): o Jake empurrando
 (fim do rótulo 100) numa zona PR `0x20`; fechada → abre se não pede chave, ou se alguma chave
 pedida está no inventário, **e** as entradas 3–4 dos gatilhos da célula dão verdadeiro;
 senão fala 3715/3714 (sem chave) ou 3715/3719 (gatilho); aberta → fecha. Chave não gasta.
