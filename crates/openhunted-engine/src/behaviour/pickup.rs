@@ -217,9 +217,9 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
             }
         }
     }
-    // o Jake pega com 0x100, o Garathe com 0x200 (`itens.md`, passo 2)
+    // o Jake pega com 0x100, o Garathe com 0x200 (`itens.md`, passo 2); na disputa, qualquer um
     let can_take = ctx.jake.map_or(0x100, |j| j.profile().take_bit);
-    if e.flags & can_take == 0 {
+    if !ctx.any_taker && e.flags & can_take == 0 {
         return;
     }
     let (Some(item), Some(j)) = (e.bounds(), ctx.jake_bounds()) else {

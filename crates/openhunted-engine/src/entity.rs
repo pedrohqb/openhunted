@@ -173,6 +173,8 @@ pub enum Behaviour {
     Ant(crate::behaviour::ant::AntState),
     /// Personagem da IA (M11): corpo do jogador e cérebro.
     AiPlayer(Box<crate::ai::AiPlayer>),
+    /// Cadáver clonado de um jogador da disputa (`0x433d80`), com a tabela de cor dele.
+    Corpse(i32),
 }
 
 #[derive(Debug, Clone)]

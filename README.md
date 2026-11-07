@@ -11,6 +11,13 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M15a: dois jogadores no motor.** A cena aceita os modos cooperativo e disputa
+(`Scene::build_with`, `tick_players`): vagas e máscaras do original, inimigos e IA contra o
+jogador mais perto, fogo amigo, crédito do golpe fatal, F/S, renascimento com cadáver, itens
+que renascem, fins por pontos, tempo e saída, e a cor escolhida de cada um. A tela dividida e
+as telas de escolha vêm na M15b. Regras em
+`docs/superpowers/specs/2026-11-07-m15a-multijogador-motor-design.md`.
+
 **M13: auditoria da campanha.** `ohtool audit --god --reach`: das 65 missões solo, 64
 vencem (a D_M_010 não: antídoto sem veneno, como no original). Corrigidos os teletransportes
 entre camadas e a placa da saída. Tabela em [`docs/campanha.md`](docs/campanha.md).
@@ -78,7 +85,7 @@ M2 visualizador; M3a o Jake corre e pula; M3b objetos sólidos e presença por m
 Ainda não há: o equilíbrio na beirada (162/163), os passos e
 demais sons por quadro do Jake e do cenário, o zumbido das minas, o logotipo, o título e a
 história da abertura (só o filme toca) e o laço de demonstração, a troca de teclas e o joystick,
-os modos de dois jogadores (e a cor escolhida para cada um), tesouros e segredos, a luz por
+a tela dividida e as telas dos modos de dois jogadores, tesouros e segredos, a luz por
 região sobre os objetos. Os obstáculos `OPO` (gotas, bloco que cai, portão) ainda não agem.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia

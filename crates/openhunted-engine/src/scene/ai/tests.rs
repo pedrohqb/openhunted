@@ -230,3 +230,53 @@ fn ai_characters_draw_with_the_player_colour_tables() {
         Some(crate::tint::GARATHE)
     );
 }
+
+/// Dois jogadores (M15a, `0x42c5cc`): o Minotauro escolhe o mais perto dos dois e fica com
+/// ele; morto esse, passa ao outro.
+#[test]
+fn ai_targets_the_nearer_of_two_humans_and_keeps_it() {
+    use crate::scene::players::Seat;
+    let mut s = arena(1500);
+    s.mode = crate::scene::Mode::Coop;
+    for n in 1..=2u8 {
+        s.players.push(crate::scene::Player {
+            number: n,
+            character: Character::Jake,
+            colour: 0,
+            stats: Default::default(),
+            credit: 0,
+            start_layer: 0,
+        });
+    }
+    let solids = s.cell_solids.clone();
+    s.parked.push(Seat {
+        player: 1,
+        jake: Some(Jake::new(500, 53, BOX, std::collections::HashMap::new()).with_health(100, 0)),
+        sprite: Some(sprite(500)),
+        cell_solids: solids.clone(),
+        cell_world: World::new(solids),
+        ..Default::default()
+    });
+    s.entities
+        .push(ai_at(Character::Garathe, 300, 100, &[(0, 0), (1, 20)], 1));
+    let brain = |s: &Scene| match &s.entities[0].behaviour {
+        Behaviour::AiPlayer(a) => (a.brain.target, a.brain.target_of),
+        _ => unreachable!(),
+    };
+    s.tick_players([0, 0]);
+    assert_eq!(brain(&s), (true, 1), "o 2, a 200 px");
+    // o 1 chega perto, mas o alvo fica
+    s.place_player(0, (330, 53), 0);
+    for _ in 0..4 {
+        s.tick_players([0, 0]);
+    }
+    assert_eq!(brain(&s).1, 1);
+    s.player_jake_mut(1).unwrap().hurt(crate::damage::Pending {
+        amount: 500,
+        ..Default::default()
+    });
+    for _ in 0..4 {
+        s.tick_players([0, 0]);
+    }
+    assert_eq!(brain(&s), (true, 0), "morto o 2, o 1");
+}

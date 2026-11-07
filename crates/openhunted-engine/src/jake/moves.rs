@@ -835,7 +835,7 @@ impl Jake {
         });
         // piscar do efeito do Jake (`0x427671`; o do Garathe, `0x42c348`, não pisca)
         if !self.is_garathe() {
-            self.flash.start(crate::tint::FLASH_SPECIAL, 0);
+            self.flash.start(crate::tint::FLASH_SPECIAL, self.colour());
         }
         self.hurt(Pending {
             amount: self.profile().special.self_damage,

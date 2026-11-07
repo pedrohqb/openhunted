@@ -5,7 +5,10 @@ mod ai;
 mod arsenal;
 mod cell_door;
 mod garathe;
+pub(crate) mod players;
 mod switches;
+
+pub use players::{COLOURS, DEFAULT_COLOURS, Duel, Mode, Player, Stats};
 
 use std::rc::Rc;
 
@@ -67,6 +70,11 @@ fn blocks_entity(jake_flags: i32, e: &Entity) -> bool {
         && e.solid_shapes
         && !matches!(e.behaviour, Behaviour::AiPlayer(_))
         && crate::objects::blocks_flags(jake_flags, e.flags)
+}
+
+/// Crédito da explosão `i` da lista (0 sem registro).
+fn blast_credit(credits: &[(usize, u8)], i: usize) -> u8 {
+    credits.iter().find(|(b, _)| *b == i).map_or(0, |(_, c)| *c)
 }
 
 /// Parâmetros de um projétil a criar.
@@ -171,6 +179,27 @@ pub struct Scene {
     pub difficulty: crate::Difficulty,
     /// Confusão do jogador (`+0x264`): tiques com os pares de direção trocados (Entidade).
     pub confusion: u32,
+    /// Modo de jogo (M15a).
+    pub mode: Mode,
+    /// Jogadores humanos (nenhum, 1 ou 2), em ordem de número (`+0x19c`).
+    pub players: Vec<Player>,
+    /// Assentos dos jogadores fora do ativo (`players::Seat`).
+    parked: Vec<players::Seat>,
+    /// Jogador do assento ativo (os campos `jake`, `jake_layer`, `world`…): 0 fora das trocas.
+    active: usize,
+    /// Entrada do jogador ativo neste tique, já com a confusão.
+    cur_input: u32,
+    /// Relógio real em ms desde o começo da partida, posto por quem chama antes de cada tique
+    /// (limite de tempo da disputa, `timeGetTime − 0x497474`).
+    pub elapsed_ms: u64,
+    /// Crédito `+0x1b0` de cada entidade (índice; só com dois jogadores).
+    credits: Vec<u8>,
+    /// Tiros dos jogadores humanos: (índice do tiro, índice do jogador).
+    human_shots: Vec<(usize, usize)>,
+    /// Pontos de renascimento da disputa (x, y, camada), `0x4973b0`.
+    pub spawn_points: Vec<(i32, i32, i32)>,
+    /// Itens que renascem (disputa).
+    regens: Vec<players::Regen>,
 }
 
 /// Empurrão da derrubada do especial num personagem da IA (Ruling: valor não lido).
@@ -391,6 +420,16 @@ impl Scene {
             confusion: 0,
             ai_shots: Vec::new(),
             ai_grid: crate::ai::CellGrid::default(),
+            mode: Mode::Solo,
+            players: Vec::new(),
+            parked: Vec::new(),
+            active: 0,
+            cur_input: 0,
+            elapsed_ms: 0,
+            credits: Vec::new(),
+            human_shots: Vec::new(),
+            spawn_points: Vec::new(),
+            regens: Vec::new(),
         }
     }
 
@@ -398,53 +437,20 @@ impl Scene {
     /// e objetos (coordenadas da fase), da lista global e das células. Nas fases com início de
     /// jogador solo, só entram os objetos presentes no modo solo (`objects::present`).
     pub fn build(level: &Level, assets: &mut Assets) -> Result<Self> {
+        Self::build_with(level, assets, Mode::Solo)
+    }
+
+    /// Monta a cena no modo `mode` (`0x43c95c`, `0x43cbb0`, `0x43cb28`): no solo, como
+    /// `build`; com dois jogadores, as vagas atribuídas viram os jogadores e só ficam os
+    /// objetos presentes na máscara do modo. Sem vaga para algum jogador, erro
+    /// ("Unable to find a human object to assign to player N!").
+    pub fn build_with(level: &Level, assets: &mut Assets, mode: Mode) -> Result<Self> {
         let (gx, gy) = (
             i32::from(level.grid_x).max(1),
             i32::from(level.grid_y).max(1),
         );
-        let mut s = Scene {
-            width: gx * CELL,
-            height: gy * CELL,
-            sprites: Vec::new(),
-            markers: Vec::new(),
-            borders: Vec::new(),
-            warnings: Vec::new(),
-            jake: None,
-            body_checked: Vec::new(),
-            jake_sprite: None,
-            world: World::default(),
-            object_solids: Vec::new(),
-            entities: Vec::new(),
-            jake_layer: 0,
-            jake_flags: 0,
-            cell_solids: Vec::new(),
-            cell_world: World::default(),
-            layer_worlds: Vec::new(),
-            explosion_anim: None,
-            projectile_anims: HashMap::new(),
-            projectile_borders: HashMap::new(),
-            prop_zones: Vec::new(),
-            layers: 1,
-            streak: Streak::default(),
-            prev_input: 0,
-            hints: Vec::new(),
-            events: Vec::new(),
-            outcome: None,
-            tick_count: 0,
-            rng: Rng::new(0x4a4b_4531),
-            kills: 0,
-            mines_at_start: 0,
-            kills_total: 0,
-            timer: 0,
-            time_limit: 0,
-            cell_doors: Vec::new(),
-            quake: 0,
-            sound_clock: HashMap::new(),
-            difficulty: crate::Difficulty::Normal,
-            confusion: 0,
-            ai_shots: Vec::new(),
-            ai_grid: crate::ai::CellGrid::default(),
-        };
+        let mut s = Scene::empty(gx * CELL, gy * CELL);
+        s.mode = mode;
         let mut scenery = 0usize;
         let mut jake_layer = 0;
         let mut jake_flags = 0;
@@ -607,18 +613,59 @@ impl Scene {
             }
             objects.extend(cell.objects.iter());
         }
+        // Vagas (`0x43cbb0`): com dois jogadores, as atribuídas, e só fica o que está na
+        // máscara do modo (`0x43cb28`).
+        let slots = if mode == Mode::Solo {
+            Vec::new()
+        } else {
+            players::assign_slots(&objects, &mode, &mut s.rng).map_err(|n| {
+                openhunted_formats::FormatError::Unsupported {
+                    what: "fase",
+                    detail: format!("Unable to find a human object to assign to player {n}!"),
+                }
+            })?
+        };
         // Modo solo quando a fase tem um início de jogador nele: só os objetos presentes no
         // modo, e o Jake é esse início. Sem ele (fases de vários jogadores), tudo, e o Jake é o
         // primeiro objeto de tipo 1.
-        let solo = objects.iter().any(|o| is_player_start(o, SOLO));
+        let solo = mode == Mode::Solo && objects.iter().any(|o| is_player_start(o, SOLO));
         if solo {
             objects.retain(|o| present(o, SOLO) || is_player_start(o, SOLO));
         }
-        for o in objects {
-            if is_player(o, solo) && s.jake.is_none() {
+        let list: Vec<(&LevelObject, Option<usize>)> = if mode == Mode::Solo {
+            objects.into_iter().map(|o| (o, None)).collect()
+        } else {
+            let mask = mode.mask();
+            objects
+                .into_iter()
+                .enumerate()
+                .filter_map(|(k, o)| match slots.iter().position(|&x| x == k) {
+                    Some(p) => Some((o, Some(p))),
+                    None => present(o, mask).then_some((o, None)),
+                })
+                .collect()
+        };
+        let mut humans: Vec<Option<(Jake, Sprite, i32)>> = vec![None; slots.len()];
+        for (o, slot) in list {
+            if let Some(p) = slot {
+                if let Some((j, sp)) = ai::character(o, assets, &mut s.warnings) {
+                    let colour = mode.duel().map_or(0, |d| i32::from(d.colours[p]));
+                    humans[p] = Some((j.with_colour(colour), sp, flags(o)));
+                }
+                continue;
+            }
+            if mode == Mode::Solo && is_player(o, solo) && s.jake.is_none() {
                 if let Some((j, sp)) = ai::character(o, assets, &mut s.warnings) {
                     jake_layer = j.layer();
                     jake_flags = flags(o);
+                    s.players.push(Player {
+                        number: 1,
+                        character: j.character(),
+                        colour: 0,
+                        stats: Stats::default(),
+                        credit: 0,
+                        start_layer: jake_layer,
+                    });
                     s.jake = Some(j);
                     s.jake_sprite = Some(sp);
                     continue;
@@ -640,12 +687,55 @@ impl Scene {
             }
             s.entities.push(e);
         }
+        for (p, h) in humans.into_iter().enumerate() {
+            let Some((j, sp, fl)) = h else {
+                s.warnings
+                    .push(format!("jogador {}: personagem sem animação", p + 1));
+                continue;
+            };
+            s.players.push(Player {
+                number: p as u8 + 1,
+                character: j.character(),
+                colour: j.colour(),
+                stats: Stats::default(),
+                credit: 0,
+                start_layer: j.layer(),
+            });
+            let idx = s.players.len() - 1;
+            if idx == 0 {
+                jake_layer = j.layer();
+                jake_flags = fl;
+                s.jake = Some(j);
+                s.jake_sprite = Some(sp);
+            } else {
+                s.parked.push(players::Seat {
+                    player: idx,
+                    layer: j.layer(),
+                    flags: fl,
+                    jake: Some(j),
+                    sprite: Some(sp),
+                    ..Default::default()
+                });
+            }
+        }
         s.sprites.sort_by_key(|p| p.layer);
         s.jake_flags = jake_flags;
         s.layers = i32::from(level.grid_z).max(1);
         s.set_jake_layer(jake_layer);
-        s.time_limit = i32::from(level.field_1004.max(0));
+        for i in 1..s.players.len() {
+            s.with_seat(i, |s| s.set_jake_layer(s.jake_layer));
+        }
+        // o campo 1004 não vale na disputa (`0x488e54 = 0`)
+        if s.mode.duel().is_none() {
+            s.time_limit = i32::from(level.field_1004.max(0));
+        }
         s.timer = s.time_limit * TIMER_TICKS_PER_SECOND;
+        if s.mode.duel().is_some() {
+            s.spawn_points = players::spawn_points(level);
+            if let Ok(a) = assets.animation("ORG.ANM") {
+                s.projectile_anims.insert("ORG.ANM".to_string(), a);
+            }
+        }
         if let Ok(res) = assets.archive().get("WIZARD.RES") {
             s.hints = openhunted_formats::parse_text_list(res);
         }
@@ -711,6 +801,15 @@ impl Scene {
         {
             let m = map(self.jake.as_ref().map(crate::jake::Jake::tint));
             draw_sprite(j, assets, fb, camera, m.as_ref());
+        }
+        // o outro jogador (M15a)
+        for seat in &self.parked {
+            if let (Some(sp), Some(j)) = (seat.sprite.as_ref(), seat.jake.as_ref()) {
+                if j.is_visible() {
+                    let m = map(Some(j.tint()));
+                    draw_sprite(sp, assets, fb, camera, m.as_ref());
+                }
+            }
         }
         if overlay {
             for (bx, by, _, b) in &self.borders {
@@ -784,32 +883,19 @@ impl Scene {
     /// Um tique (50 ms): o Jake reage à entrada `input` (bits de `crate::input`), as
     /// entidades agem, e todas as animações avançam. Com a partida decidida, só anima.
     pub fn tick(&mut self, input: u32) {
-        let input = if self.outcome.is_some() { 0 } else { input };
-        let input = self.confused_input(input);
-        if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
-            let env = Env {
-                world: &self.world,
-                zones: &self.prop_zones,
-                layers: self.layers,
-            };
-            j.tick_in(input, &env);
-            j.respawn_if_outside((self.width, self.height));
-            sp.x = j.body.x;
-            sp.y = j.body.y;
+        self.tick_players([input, 0]);
+    }
+
+    /// Um tique com a entrada de cada jogador (a do 2º só vale com dois jogadores).
+    pub fn tick_players(&mut self, inputs: [u32; 2]) {
+        let seats = self.seats();
+        for (i, &input) in inputs.iter().enumerate().take(seats) {
+            self.with_seat(i, |s| s.tick_seat(input));
         }
-        let layer = self.jake.as_ref().map(|j| j.layer());
-        if let Some(l) = layer.filter(|&l| l != self.jake_layer) {
-            self.set_jake_layer(l);
-        }
-        if let Some(b) = self.jake.as_mut().and_then(|j| j.special.take()) {
-            self.apply_special(b);
-        }
-        if let Some(r) = self.jake.as_mut().and_then(|j| j.punch.take()) {
-            self.apply_punch(r);
-        }
-        self.tick_player_extras();
         self.tick_cell_doors();
-        self.spawn_shots();
+        for i in 0..seats {
+            self.with_seat(i, Self::spawn_shots);
+        }
         if self.outcome.is_none() {
             self.tick_ai_players();
             // balas à queima-roupa: acertam já na boca, antes de voar
@@ -819,42 +905,42 @@ impl Scene {
             self.resolve_impacts(&mut pre);
             self.entities.extend(pre.spawn);
             self.events.extend(pre.events);
-            let up_edge = input & crate::input::UP != 0 && self.prev_input & crate::input::UP == 0;
-            if up_edge {
-                self.try_switch();
-                self.try_exit();
+            for i in 0..seats {
+                self.with_seat(i, |s| {
+                    let up = crate::input::UP;
+                    if s.cur_input & up != 0 && s.prev_input & up == 0 {
+                        s.try_switch();
+                        s.try_exit();
+                    }
+                });
             }
             self.tick_entities();
             if self.timer > 0 {
                 self.timer -= 1;
             }
-            let mut result = verdict::evaluate(&self.entities, self.jake.as_ref());
-            // tempo esgotado numa fase com limite → derrota (`0x43cdf0`)
-            if result.is_none() && self.timed_out() {
-                result = Some(Outcome::Defeat);
-            }
-            if let Some(o) = self.streak.push(result) {
-                self.outcome = Some(o);
-                self.events.push(Event::Outcome(o));
-            }
+            let result = if self.players.len() >= 2 {
+                self.evaluate_players()
+            } else {
+                let mut result = verdict::evaluate(&self.entities, self.jake.as_ref());
+                // tempo esgotado numa fase com limite → derrota (`0x43cdf0`)
+                if result.is_none() && self.timed_out() {
+                    result = Some(Outcome::Defeat);
+                }
+                result
+            };
+            self.push_outcome(result);
         }
-        self.prev_input = input;
+        for i in 0..seats {
+            self.with_seat(i, |s| s.prev_input = s.cur_input);
+        }
         self.kills = behaviour::enemy::kills(&self.entities);
         self.kills_total = behaviour::enemy::kills_total(&self.entities);
-        if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
-            // deslocamento do desenho pelo esqueleto (`+0x16c/+0x170`)
-            let (ox, oy) = j.draw_offset();
-            sp.x = j.body.x.saturating_add(ox);
-            sp.y = j.body.y.saturating_add(oy);
-            // A arte do Jake olha para a esquerda: espelha quando ele olha para a direita.
-            sp.mirror = j.sprite_mirrored();
-            if let Some(num) = j.scale_override() {
-                sp.scale.0 = num;
-            }
-            if let Some(mut p) = AnimPlayer::at_label(&sp.anim, j.label()) {
-                p.seek(j.frame());
-                sp.player = p;
-            }
+        self.count_kills();
+        if !self.regens.is_empty() {
+            self.tick_regens();
+        }
+        for i in 0..seats {
+            self.with_seat(i, Self::sync_jake_sprite);
         }
         for sp in self.sprites.iter_mut().filter(|sp| !sp.frozen) {
             let anim = sp.anim.clone();
@@ -877,6 +963,61 @@ impl Scene {
             }
         }
         self.tick_count = self.tick_count.saturating_add(1);
+    }
+
+    /// O tique do jogador do assento ativo: entrada (confusão), corpo, fim da morte na
+    /// disputa, camada, especial, soco, sons e investida.
+    fn tick_seat(&mut self, input: u32) {
+        let input = if self.outcome.is_some() { 0 } else { input };
+        let input = self.confused_input(input);
+        self.cur_input = input;
+        let was_dead = self
+            .jake
+            .as_ref()
+            .is_some_and(|j| j.state() == crate::State::Dead);
+        if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
+            let env = Env {
+                world: &self.world,
+                zones: &self.prop_zones,
+                layers: self.layers,
+            };
+            j.tick_in(input, &env);
+            j.respawn_if_outside((self.width, self.height));
+            sp.x = j.body.x;
+            sp.y = j.body.y;
+        }
+        self.after_player_tick(was_dead);
+        let layer = self.jake.as_ref().map(|j| j.layer());
+        if let Some(l) = layer.filter(|&l| l != self.jake_layer) {
+            self.set_jake_layer(l);
+        }
+        if let Some(b) = self.jake.as_mut().and_then(|j| j.special.take()) {
+            self.apply_special(b);
+        }
+        if let Some(r) = self.jake.as_mut().and_then(|j| j.punch.take()) {
+            self.apply_punch(r);
+        }
+        self.tick_player_extras();
+    }
+
+    /// O sprite do jogador ativo segue o corpo: deslocamento do esqueleto, espelho, escala da
+    /// porta, rótulo e quadro.
+    fn sync_jake_sprite(&mut self) {
+        if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
+            // deslocamento do desenho pelo esqueleto (`+0x16c/+0x170`)
+            let (ox, oy) = j.draw_offset();
+            sp.x = j.body.x.saturating_add(ox);
+            sp.y = j.body.y.saturating_add(oy);
+            // A arte do Jake olha para a esquerda: espelha quando ele olha para a direita.
+            sp.mirror = j.sprite_mirrored();
+            if let Some(num) = j.scale_override() {
+                sp.scale.0 = num;
+            }
+            if let Some(mut p) = AnimPlayer::at_label(&sp.anim, j.label()) {
+                p.seek(j.frame());
+                sp.player = p;
+            }
+        }
     }
 
     fn assets_anim(&self, name: &str) -> Option<Rc<Animation>> {
@@ -906,9 +1047,16 @@ impl Scene {
             )));
         }
         let layer = self.jake_layer;
+        let multi = self.players.len() >= 2;
         for s in shots {
             if let Some(e) = self.shot_entity(&s, layer) {
                 self.entities.push(e);
+                if multi {
+                    // o tiro nasce com o número do dono (`+0x1b0`)
+                    let i = self.entities.len() - 1;
+                    self.human_shots.push((i, self.active));
+                    self.set_credit(i, self.active_number());
+                }
             }
         }
     }
@@ -1094,6 +1242,7 @@ impl Scene {
             if !self.entities[bi].alive {
                 continue;
             }
+            self.inherit_credit(vi, bi);
             // só quem trata a própria morte perde vida (minas, olhos-laser, barris); os
             // demais só param a bala. Contam para o jogador as minas e os olhos que a bala
             // dele mata.
@@ -1162,14 +1311,19 @@ impl Scene {
             }
         }
         if let Some(req) = out.teleport.take() {
-            let dest = behaviour::teleporter::destination(&self.entities, &req, &mut self.rng);
-            let mut to = None;
-            if let (Some((delta, i)), Some(j)) = (dest, self.jake.as_mut()) {
-                j.start_teleport_to(delta, self.entities[i].layer);
-                to = Some(i);
-            }
-            behaviour::teleporter::settle(&mut self.entities, to, self.tick_count);
+            self.teleport_active(&req);
         }
+    }
+
+    /// Teletransporte pedido para o jogador ativo: sorteia o destino e parte.
+    fn teleport_active(&mut self, req: &behaviour::teleporter::Request) {
+        let dest = behaviour::teleporter::destination(&self.entities, req, &mut self.rng);
+        let mut to = None;
+        if let (Some((delta, i)), Some(j)) = (dest, self.jake.as_mut()) {
+            j.start_teleport_to(delta, self.entities[i].layer);
+            to = Some(i);
+        }
+        behaviour::teleporter::settle(&mut self.entities, to, self.tick_count);
     }
 
     /// CIMA (`0x00423b8e`): o Jake parado sobre uma zona PR 0x40 e tocando a caixa de uma
@@ -1201,7 +1355,9 @@ impl Scene {
         let Some(i) = self.entities.iter().position(touching) else {
             return;
         };
-        if verdict::objectives_met(&self.entities, self.jake.as_ref()) {
+        // na disputa, interruptor comum, sem teste de objetivos (`multijogador.md`)
+        if self.mode.duel().is_some() || verdict::objectives_met(&self.entities, self.jake.as_ref())
+        {
             self.entities[i].on = true;
             let num = self.jake_sprite.as_ref().map_or(1, |sp| sp.scale.0);
             if let Some(j) = self.jake.as_mut() {
@@ -1331,6 +1487,36 @@ impl Scene {
     /// Especial BAIXO+ATIRAR (`0x00427643`): objetos vivos da camada a menos de 70 px do
     /// centro do Jake. Projéteis somem; os demais levam o dano da variante 9 (15 por tique).
     fn apply_special(&mut self, b: SpecialBlast) {
+        if self.players.len() >= 2 {
+            // crédito de quem o especial alcança; o outro jogador é derrubado como a IA
+            let c = self.active_number();
+            let reached: Vec<usize> = (0..self.entities.len())
+                .filter(|&i| {
+                    let e = &self.entities[i];
+                    e.alive
+                        && e.health > 0
+                        && e.layer == b.layer
+                        && e.flags & 0x80003 == 0x80001
+                        && e.present()
+                        && b.reaches(e.center())
+                })
+                .collect();
+            for i in reached {
+                self.set_credit(i, c);
+            }
+            self.hurt_others(|j| {
+                let r = j.body.bounds();
+                let at = (r.x + r.w / 2, r.y + r.h / 2);
+                (j.layer() == b.layer && b.reaches(at)).then(|| {
+                    let dir = if r.x >= b.center.0 { 1 } else { -1 };
+                    crate::damage::Pending {
+                        knockdown: true,
+                        push: (dir * SPECIAL_KNOCKDOWN.0, SPECIAL_KNOCKDOWN.1),
+                        ..Default::default()
+                    }
+                })
+            });
+        }
         for e in self.entities.iter_mut().filter(|e| {
             e.alive && e.layer == b.layer && e.flags & 0x80003 == 0x80001 && e.present()
         }) {
@@ -1396,85 +1582,199 @@ impl Scene {
             .map(|e| (e.id, e.on))
             .collect();
         let on = |id: i32| snapshot.iter().find(|(i, _)| *i == id).map(|(_, o)| *o);
-        let mut out = Out::default();
+        let seats = self.seats();
+        let multi = self.players.len() >= 2;
+        // cada entidade age contra um jogador (Ruling M15a: o mais perto, `entity_targets`)
+        let targets = if multi {
+            self.entity_targets()
+        } else {
+            Vec::new()
+        };
+        let alive_before: Vec<bool> = if self.mode.duel().is_some() {
+            self.entities.iter().map(|e| e.alive).collect()
+        } else {
+            Vec::new()
+        };
+        let mut outs: Vec<Out> = (0..seats).map(|_| Out::default()).collect();
         let mut rng = self.rng.clone();
         {
-            let mut ctx = Ctx {
-                tick: self.tick_count,
-                jake: self.jake.as_ref(),
-                jake_layer: self.jake_layer,
-                world: &self.world,
-                cells: &self.cell_world,
-                layer_cells: &self.layer_worlds,
-                on: &on,
-                rng: &mut rng,
-                hints: &self.hints,
-                level: (self.width, self.height),
-                difficulty: self.difficulty,
-            };
-            for e in self.entities.iter_mut().filter(|e| e.alive) {
+            let mut views: Vec<(Option<&Jake>, i32, &World, &World)> = vec![(
+                self.jake.as_ref(),
+                self.jake_layer,
+                &self.world,
+                &self.cell_world,
+            )];
+            for i in 1..seats {
+                let v = self
+                    .parked
+                    .iter()
+                    .find(|p| p.player == i)
+                    .map_or(views[0], |p| {
+                        (p.jake.as_ref(), p.layer, &p.world, &p.cell_world)
+                    });
+                views.push(v);
+            }
+            let any_taker = self.mode.duel().is_some();
+            for (k, e) in self.entities.iter_mut().enumerate() {
+                if !e.alive {
+                    continue;
+                }
+                let t = targets.get(k).copied().unwrap_or(0).min(views.len() - 1);
+                let (jake, jake_layer, world, cells) = views[t];
+                let mut ctx = Ctx {
+                    tick: self.tick_count,
+                    jake,
+                    jake_layer,
+                    world,
+                    cells,
+                    layer_cells: &self.layer_worlds,
+                    on: &on,
+                    rng: &mut rng,
+                    hints: &self.hints,
+                    level: (self.width, self.height),
+                    difficulty: self.difficulty,
+                    any_taker,
+                };
+                let out = &mut outs[t];
+                let (blasts, spawns) = (out.blasts.len(), out.spawn.len());
                 match e.behaviour {
-                    Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, &mut out),
-                    Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, &mut out),
-                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &ctx, &mut out),
-                    Behaviour::LaserEye(_) => behaviour::laser_eye::tick(e, &mut ctx, &mut out),
-                    Behaviour::Laser(_) => behaviour::laser::tick(e, &ctx, &mut out),
-                    Behaviour::Barrel(_) => behaviour::barrel::tick(e, &ctx, &mut out),
-                    Behaviour::Fire(_) => behaviour::fire::tick(e, &ctx, &mut out),
-                    Behaviour::Fence(_) => behaviour::fence::tick(e, &mut ctx, &mut out),
-                    Behaviour::Graffiti(_) => behaviour::graffiti::tick(e, &ctx, &mut out),
-                    Behaviour::CarPiece => behaviour::car_piece::tick(e, &ctx, &mut out),
-                    Behaviour::Teleporter(_) => behaviour::teleporter::tick(e, &ctx, &mut out),
-                    Behaviour::Door(_) => behaviour::door::tick(e, &ctx, &mut out),
-                    Behaviour::Mine(_) => behaviour::mine::tick(e, &mut ctx, &mut out),
-                    Behaviour::Explosion(_) => behaviour::explosion::tick(e, &mut out),
+                    Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, out),
+                    Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, out),
+                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &ctx, out),
+                    Behaviour::LaserEye(_) => behaviour::laser_eye::tick(e, &mut ctx, out),
+                    Behaviour::Laser(_) => behaviour::laser::tick(e, &ctx, out),
+                    Behaviour::Barrel(_) => behaviour::barrel::tick(e, &ctx, out),
+                    Behaviour::Fire(_) => behaviour::fire::tick(e, &ctx, out),
+                    Behaviour::Fence(_) => behaviour::fence::tick(e, &mut ctx, out),
+                    Behaviour::Graffiti(_) => behaviour::graffiti::tick(e, &ctx, out),
+                    Behaviour::CarPiece => behaviour::car_piece::tick(e, &ctx, out),
+                    Behaviour::Teleporter(_) => behaviour::teleporter::tick(e, &ctx, out),
+                    Behaviour::Door(_) => behaviour::door::tick(e, &ctx, out),
+                    Behaviour::Mine(_) => behaviour::mine::tick(e, &mut ctx, out),
+                    Behaviour::Explosion(_) => behaviour::explosion::tick(e, out),
                     Behaviour::Exit(_) => behaviour::exit::tick(e),
-                    Behaviour::Bullet(_) => behaviour::bullet::tick(e, &ctx, &mut out),
-                    Behaviour::Casing(_) => behaviour::casing::tick(e, &mut ctx, &mut out),
-                    Behaviour::Pellet(_) => behaviour::pellet::tick(e, &mut ctx, &mut out),
-                    Behaviour::Rocket(_) => behaviour::rocket::tick(e, &ctx, &mut out),
-                    Behaviour::Star(_) => behaviour::star::tick(e, &ctx, &mut out),
-                    Behaviour::Grenade(_) => behaviour::grenade::tick(e, &ctx, &mut out),
-                    Behaviour::Piston(_) => behaviour::piston::tick(e, &ctx, &mut out),
+                    Behaviour::Bullet(_) => behaviour::bullet::tick(e, &ctx, out),
+                    Behaviour::Casing(_) => behaviour::casing::tick(e, &mut ctx, out),
+                    Behaviour::Pellet(_) => behaviour::pellet::tick(e, &mut ctx, out),
+                    Behaviour::Rocket(_) => behaviour::rocket::tick(e, &ctx, out),
+                    Behaviour::Star(_) => behaviour::star::tick(e, &ctx, out),
+                    Behaviour::Grenade(_) => behaviour::grenade::tick(e, &ctx, out),
+                    Behaviour::Piston(_) => behaviour::piston::tick(e, &ctx, out),
                     Behaviour::Switch(_) => behaviour::switch::tick(e),
-                    Behaviour::Sentinel(_) => behaviour::sentinel::tick(e, &mut ctx, &mut out),
-                    Behaviour::HopMine(_) => behaviour::hop_mine::tick(e, &mut ctx, &mut out),
+                    Behaviour::Sentinel(_) => behaviour::sentinel::tick(e, &mut ctx, out),
+                    Behaviour::HopMine(_) => behaviour::hop_mine::tick(e, &mut ctx, out),
                     Behaviour::MineGenerator(_) => {
-                        behaviour::mine_generator::tick(e, &mut ctx, &mut out)
+                        behaviour::mine_generator::tick(e, &mut ctx, out)
                     }
                     Behaviour::SecurityRobot(_) => {
-                        behaviour::security_robot::tick(e, &mut ctx, &mut out)
+                        behaviour::security_robot::tick(e, &mut ctx, out)
                     }
-                    Behaviour::Bruiser(_) => behaviour::bruiser::tick(e, &mut ctx, &mut out),
-                    Behaviour::EnemyShot(_) => behaviour::enemy_shot::tick(e, &mut ctx, &mut out),
-                    Behaviour::Death(_) => behaviour::death::tick(e, &mut ctx, &mut out),
-                    Behaviour::Chameleon(_) => behaviour::chameleon::tick(e, &mut ctx, &mut out),
-                    Behaviour::Flyer(_) => behaviour::flyer::tick(e, &mut ctx, &mut out),
+                    Behaviour::Bruiser(_) => behaviour::bruiser::tick(e, &mut ctx, out),
+                    Behaviour::EnemyShot(_) => behaviour::enemy_shot::tick(e, &mut ctx, out),
+                    Behaviour::Death(_) => behaviour::death::tick(e, &mut ctx, out),
+                    Behaviour::Chameleon(_) => behaviour::chameleon::tick(e, &mut ctx, out),
+                    Behaviour::Flyer(_) => behaviour::flyer::tick(e, &mut ctx, out),
                     Behaviour::DartGenerator(_) => {
-                        behaviour::dart_generator::tick(e, &mut ctx, &mut out)
+                        behaviour::dart_generator::tick(e, &mut ctx, out)
                     }
-                    Behaviour::Catapult(_) => behaviour::catapult::tick(e, &mut ctx, &mut out),
-                    Behaviour::TheEntity(_) => behaviour::the_entity::tick(e, &mut ctx, &mut out),
-                    Behaviour::Anthill(_) => behaviour::ant::tick_hill(e, &mut ctx, &mut out),
-                    Behaviour::Ant(_) => behaviour::ant::tick(e, &mut ctx, &mut out),
+                    Behaviour::Catapult(_) => behaviour::catapult::tick(e, &mut ctx, out),
+                    Behaviour::TheEntity(_) => behaviour::the_entity::tick(e, &mut ctx, out),
+                    Behaviour::Anthill(_) => behaviour::ant::tick_hill(e, &mut ctx, out),
+                    Behaviour::Ant(_) => behaviour::ant::tick(e, &mut ctx, out),
                     _ => {}
+                }
+                if multi {
+                    // explosões que a entidade criou herdam o crédito dela (`0x40d649`)
+                    let c = self.credits.get(k).copied().unwrap_or(0);
+                    out.blast_credits
+                        .extend((blasts..out.blasts.len()).map(|b| (b, c)));
+                    if c != 0 {
+                        out.spawn_credits
+                            .extend((spawns..out.spawn.len()).map(|n| (n, c)));
+                    }
                 }
             }
         }
         self.rng = rng;
+        // as saídas dos outros jogadores: o comum se junta; ficam o dano, a cura, o veneno,
+        // o inventário, o teletransporte, o terremoto e a confusão de cada um
+        let mut outs = outs.into_iter();
+        let mut out = outs.next().unwrap_or_default();
+        let mut extra: Vec<Out> = Vec::new();
+        for mut o in outs {
+            let off = out.blasts.len();
+            out.events.append(&mut o.events);
+            let soff = out.spawn.len();
+            out.spawn_credits
+                .extend(o.spawn_credits.drain(..).map(|(n, c)| (n + soff, c)));
+            out.spawn.append(&mut o.spawn);
+            out.blast_credits
+                .extend(o.blast_credits.drain(..).map(|(b, c)| (b + off, c)));
+            out.blasts.append(&mut o.blasts);
+            out.impacts.append(&mut o.impacts);
+            out.effects.append(&mut o.effects);
+            out.hazards.append(&mut o.hazards);
+            out.enemy_spawns.append(&mut o.enemy_spawns);
+            out.launches.append(&mut o.launches);
+            extra.push(o);
+        }
+        self.schedule_regen(&alive_before);
         self.ai_shots_hit_human(&mut out);
         self.bullet_hits(&mut out);
         behaviour::enemy_shot::object_hits(&mut self.entities, &mut self.rng, &mut out);
         self.weapon_hits(&mut out);
         self.resolve_impacts(&mut out);
         self.object_interactions(&mut out);
+        for (k, o) in extra.iter_mut().enumerate() {
+            if let Some(req) = o.teleport.take() {
+                self.with_seat(k + 1, |s| s.teleport_active(&req));
+            }
+        }
+        if multi {
+            // dano dos inimigos: crédito 0 (com dois jogadores também sobrescreve)
+            if !out.jake_damage.is_empty() {
+                self.credit_player(0, 0);
+            }
+            for (k, o) in extra.iter().enumerate() {
+                if !o.jake_damage.is_empty() {
+                    self.credit_player(k + 1, 0);
+                }
+            }
+        }
         // Explosões: dano de área ao Jake e às minas, e o efeito visual (`OEX.ANM`).
-        for b in &out.blasts {
+        for (bi, b) in out.blasts.iter().enumerate() {
             if let Some(j) = self.jake.as_mut().filter(|j| j.is_active()) {
                 let jb = j.body.bounds();
                 let jc = (jb.x + jb.w / 2, jb.y + jb.h / 2);
                 if let Some(p) = behaviour::explosion::area_effect(b, jc, self.jake_layer) {
                     out.jake_damage.add(&p);
+                    if multi {
+                        let c = blast_credit(&out.blast_credits, bi);
+                        self.credit_player(0, c);
+                    }
+                }
+            }
+            if multi {
+                let c = blast_credit(&out.blast_credits, bi);
+                for k in 1..seats {
+                    let hit = self.player_jake(k).filter(|j| j.is_active()).and_then(|j| {
+                        let jb = j.body.bounds();
+                        let jc = (jb.x + jb.w / 2, jb.y + jb.h / 2);
+                        behaviour::explosion::area_effect(b, jc, j.layer())
+                    });
+                    if let (Some(p), Some(o)) = (hit, extra.get_mut(k - 1)) {
+                        o.jake_damage.add(&p);
+                        self.credit_player(k, c);
+                    }
+                }
+                for i in 0..self.entities.len() {
+                    let e = &self.entities[i];
+                    if e.alive
+                        && e.health > 0
+                        && behaviour::explosion::area_effect(b, e.center(), e.layer).is_some()
+                    {
+                        self.set_credit(i, c);
+                    }
                 }
             }
             for e in self.entities.iter_mut().filter(|e| e.alive) {
@@ -1487,6 +1787,31 @@ impl Scene {
                 out.spawn.push(e);
             }
         }
+        self.apply_player_out(&mut out);
+        for (k, o) in extra.iter_mut().enumerate() {
+            self.with_seat(k + 1, |s| s.apply_player_out(o));
+        }
+        behaviour::catapult::apply(&mut self.entities, &out.launches);
+        self.spawn_enemy_objects(&mut out);
+        let base = self.entities.len();
+        self.entities.extend(out.spawn);
+        for (n, c) in out.spawn_credits {
+            // o tiro criado por outro tiro de um jogador é dele
+            self.set_credit(base + n, c);
+            if let Some(p) = self.players.iter().position(|p| p.number == c) {
+                self.human_shots.push((base + n, p));
+            }
+        }
+        let events = self.throttle_sounds(out.events);
+        self.events.extend(events);
+        for i in 0..seats {
+            self.with_seat(i, Self::rebuild_world);
+        }
+    }
+
+    /// As saídas das entidades para o jogador ativo: cura, veneno, inventário, dano,
+    /// terremoto e confusão.
+    fn apply_player_out(&mut self, out: &mut Out) {
         if let Some(j) = self.jake.as_mut() {
             if let Some(h) = out.heal {
                 j.health = h;
@@ -1502,15 +1827,9 @@ impl Scene {
             }
         }
         self.apply_quake(out.quake);
-        behaviour::catapult::apply(&mut self.entities, &out.launches);
         if out.confuse && self.confusion <= 1 {
             self.confusion = behaviour::the_entity::CONFUSION_TICKS;
         }
-        self.spawn_enemy_objects(&mut out);
-        self.entities.extend(out.spawn);
-        let events = self.throttle_sounds(out.events);
-        self.events.extend(events);
-        self.rebuild_world();
     }
 
     /// Confusão (`tiro-jake.md`): com `+0x264 > 0` os pares de direção se invertem e ele

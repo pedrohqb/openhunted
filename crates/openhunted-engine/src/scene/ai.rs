@@ -222,12 +222,55 @@ impl Scene {
         }
     }
 
-    /// Caixa do jogador humano como vítima na camada `layer`.
-    fn human_target(&self, layer: i32) -> Option<Rect> {
-        self.jake
-            .as_ref()
-            .filter(|j| j.is_active() && self.jake_layer == layer)
-            .map(|j| j.body.bounds())
+    /// Jogadores humanos em jogo na camada `layer` (pela camada do assento): (índice, caixa).
+    fn human_targets(&self, layer: i32) -> Vec<(usize, Rect)> {
+        (0..self.seats())
+            .filter_map(|i| {
+                let seat_layer = if i == self.active {
+                    self.jake_layer
+                } else {
+                    self.parked.iter().find(|s| s.player == i)?.layer
+                };
+                self.player_jake(i)
+                    .filter(|j| j.is_active() && seat_layer == layer)
+                    .map(|j| (i, j.body.bounds()))
+            })
+            .collect()
+    }
+
+    /// Alvo de um personagem da IA com dois jogadores (`0x42c5cc`): o escolhido fica enquanto
+    /// vive; senão o mais perto dos dois primeiros vivos que está na mesma célula ou que a
+    /// busca alcança, senão o outro, senão o mais perto (o cérebro o recusa).
+    fn pick_target(&self, ai: &mut AiPlayer, humans: &[(usize, View)]) -> Option<View> {
+        if ai.brain.target {
+            if let Some(h) = humans.iter().find(|h| h.0 == ai.brain.target_of) {
+                return Some(h.1);
+            }
+            ai.brain.target = false;
+        }
+        let me = View::of(&ai.body);
+        let c = me.center();
+        let here = self.ai_grid.cell_of(c, me.layer);
+        let mut by_dist: Vec<&(usize, View)> = humans.iter().collect();
+        by_dist.sort_by_key(|h| {
+            let t = h.1.center();
+            let (dx, dy) = (i64::from(t.0 - c.0), i64::from(t.1 - c.1));
+            (dx * dx + dy * dy, h.0)
+        });
+        let reach = |v: &View| {
+            let goal = self.ai_grid.cell_of(v.center(), v.layer);
+            goal == here || self.ai_grid.search(here, goal, c.0).is_some()
+        };
+        let Some(pick) = by_dist
+            .iter()
+            .find(|h| reach(&h.1))
+            .or_else(|| by_dist.first())
+        else {
+            ai.brain.target = false;
+            return None;
+        };
+        ai.brain.target_of = pick.0;
+        Some(pick.1)
     }
 
     /// Mundo de um personagem da IA na camada `layer`: células e portas dessa camada mais os
@@ -303,13 +346,26 @@ impl Scene {
         let ents = &self.entities;
         self.ai_shots.retain(|(s, _)| ents[*s].alive);
         self.sync_ai_doors();
-        // o candidato a alvo: o jogador humano vivo (o cérebro o escolhe e o guarda)
-        let target = self.jake.as_ref().filter(|j| !j.is_dead()).map(View::of);
+        // candidatos a alvo: os dois primeiros jogadores humanos vivos (o cérebro escolhe e
+        // guarda)
+        let humans: Vec<(usize, View)> = (0..self.seats())
+            .filter_map(|i| {
+                self.player_jake(i)
+                    .filter(|j| !j.is_dead())
+                    .map(|j| (i, View::of(j)))
+            })
+            .take(2)
+            .collect();
         for i in ais {
             let Behaviour::AiPlayer(mut ai) =
                 std::mem::replace(&mut self.entities[i].behaviour, Behaviour::Static)
             else {
                 continue;
+            };
+            let target = if self.players.len() < 2 {
+                humans.first().map(|h| h.1)
+            } else {
+                self.pick_target(&mut ai, &humans)
             };
             self.tick_ai(i, &mut ai, target.as_ref());
             self.entities[i].behaviour = Behaviour::AiPlayer(ai);
@@ -372,10 +428,16 @@ impl Scene {
         if ai.body.character() == Character::Garathe
             && ai.body.state() == State::Jump(JumpKind::Long)
         {
-            let hit = self.human_target(layer).filter(|h| h.overlaps(&b));
-            if let (false, Some(h), Some(j)) = (ai.body_checked, hit, self.jake.as_mut()) {
-                j.hurt(garathe::body_check(b, h));
-                ai.body_checked = true;
+            let hit = self
+                .human_targets(layer)
+                .into_iter()
+                .find(|h| h.1.overlaps(&b));
+            if let (false, Some((k, h))) = (ai.body_checked, hit) {
+                if let Some(j) = self.player_jake_mut(k) {
+                    j.hurt(garathe::body_check(b, h));
+                    ai.body_checked = true;
+                }
+                self.credit_player(k, 0);
             }
         } else {
             ai.body_checked = false;
@@ -420,8 +482,11 @@ impl Scene {
             toward: (c.0 - from.0, c.1 - from.1),
         };
         let mut sounds = Vec::new();
-        if self.human_target(layer).is_some_and(|h| h.overlaps(&r)) {
-            if let Some(j) = self.jake.as_mut() {
+        for (k, h) in self.human_targets(layer) {
+            if !h.overlaps(&r) {
+                continue;
+            }
+            if let Some(j) = self.player_jake_mut(k) {
                 let b = j.body.bounds();
                 let c = (b.x + b.w / 2, b.y + b.h / 2);
                 if let Some(row) = strike.row(j.character().kind()) {
@@ -429,6 +494,7 @@ impl Scene {
                     sounds.extend(row.sound().map(|id| (id, c)));
                 }
             }
+            self.credit_player(k, 0);
         }
         for (k, e) in self.entities.iter_mut().enumerate() {
             if k == me
@@ -445,6 +511,12 @@ impl Scene {
             };
             let c = e.center();
             let p = row.pending(geometry(c));
+            if self.players.len() >= 2 && e.health > 0 {
+                // a IA não tem jogador: crédito 0, que também sobrescreve
+                if self.credits.len() > k {
+                    self.credits[k] = 0;
+                }
+            }
             if behaviour::enemy::hurt(e, &p, false) || behaviour::interact::hurt(e, &p) {
                 sounds.extend(row.sound().map(|id| (id, c)));
             }
@@ -455,14 +527,21 @@ impl Scene {
         }
     }
 
-    /// Tiros da IA no jogador humano (antes dos acertos nos objetos): balas e projéteis das
-    /// armas cuja caixa varrida cruza a dele levam a linha da vítima jogador e param.
+    /// Tiros da IA nos jogadores humanos e, com dois jogadores, os de um humano no outro
+    /// (antes dos acertos nos objetos): balas e projéteis das armas cuja caixa varrida cruza a
+    /// de um jogador levam a linha da vítima jogador e param.
     pub(super) fn ai_shots_hit_human(&mut self, out: &mut behaviour::Out) {
-        let Some(victim) = self.jake.as_ref().map(|j| j.character().kind()) else {
+        if self.jake.is_none() && self.parked.is_empty() {
             return;
-        };
-        let shots: Vec<usize> = self.ai_shots.iter().map(|(s, _)| *s).collect();
-        for si in shots {
+        }
+        let mut shots: Vec<(usize, Option<usize>)> =
+            self.ai_shots.iter().map(|(s, _)| (*s, None)).collect();
+        if self.players.len() >= 2 {
+            let ents = &self.entities;
+            self.human_shots.retain(|(s, _)| ents[*s].alive);
+            shots.extend(self.human_shots.iter().map(|(s, p)| (*s, Some(*p))));
+        }
+        for (si, owner) in shots {
             let e = &self.entities[si];
             if !e.alive {
                 continue;
@@ -474,12 +553,21 @@ impl Scene {
                     .and_then(|(prev, _)| behaviour::projectile::swept(e, prev)),
             };
             let Some(sw) = swept else { continue };
-            let Some(h) = self.human_target(e.layer).filter(|h| h.overlaps(&sw)) else {
+            let Some((k, h)) = self
+                .human_targets(e.layer)
+                .into_iter()
+                .find(|(k, h)| Some(*k) != owner && h.overlaps(&sw))
+            else {
                 continue;
             };
+            let victim = self.player_jake(k).map_or(1, |j| j.character().kind());
             let p = hit_on_character(e, victim, (h.x + h.w / 2, h.y + h.h / 2));
-            if let (Some(p), Some(j)) = (p, self.jake.as_mut()) {
+            if let (Some(p), Some(j)) = (p, self.player_jake_mut(k)) {
                 j.hurt(p);
+            }
+            if self.players.len() >= 2 {
+                let c = self.credit_of(si);
+                self.credit_player(k, c);
             }
             if matches!(self.entities[si].behaviour, Behaviour::Bullet(_)) {
                 let c = self.entities[si].center();

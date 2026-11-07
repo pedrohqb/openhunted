@@ -294,9 +294,11 @@ pub struct Step {
 #[derive(Debug, Clone, Default)]
 pub struct Brain {
     pub mode: Mode,
-    /// Tem alvo (`+0x00`; o único candidato é o jogador humano): escolhido só quando não há
-    /// ou ele morreu (`0x42d520` → `0x42c5cc`), e então fica.
+    /// Tem alvo (`+0x00`; candidatos: os dois primeiros jogadores humanos): escolhido só
+    /// quando não há ou ele morreu (`0x42d520` → `0x42c5cc`), e então fica.
     pub target: bool,
+    /// Qual jogador é o alvo (índice; com um jogador, sempre 0).
+    pub target_of: usize,
     /// Vê o alvo (`+0x54`).
     pub sees: bool,
     /// Última entrada (`+0x78`).

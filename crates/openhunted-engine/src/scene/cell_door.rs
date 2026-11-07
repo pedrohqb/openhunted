@@ -206,6 +206,46 @@ impl Scene {
             return;
         }
         let mut changed = false;
+        for i in 0..self.seats() {
+            changed |= self.with_seat(i, Self::push_cell_door);
+        }
+        let humans: Vec<(Rect, i32)> = (0..self.seats())
+            .filter_map(|i| self.player_jake(i))
+            .filter(|j| j.is_active())
+            .map(|j| (j.body.bounds(), j.layer()))
+            .collect();
+        let others: Vec<(Rect, i32)> = self
+            .entities
+            .iter()
+            .filter(|e| e.alive && e.solid_shapes && e.flags & 1 != 0)
+            .filter_map(|e| e.bounds().map(|b| (b, e.layer)))
+            .collect();
+        for d in self.cell_doors.iter_mut() {
+            let layer = d.layer;
+            let occupied = |boxes: &[Rect]| {
+                boxes.iter().any(|b| {
+                    humans.iter().any(|(r, l)| *l == layer && r.overlaps(b))
+                        || others.iter().any(|(r, l)| *l == layer && r.overlaps(b))
+                })
+            };
+            changed |= d.tick(occupied);
+            if let Some(sp) = self.sprites.get_mut(d.sprite) {
+                let f = d.frame.min(sp.anim.frames.len().saturating_sub(1));
+                sp.player = crate::AnimPlayer::from_frame(&sp.anim, f);
+                sp.frozen = true;
+            }
+        }
+        if changed {
+            for i in 0..self.seats() {
+                self.with_seat(i, |s| s.set_jake_layer(s.jake_layer));
+            }
+        }
+    }
+
+    /// O jogador ativo que empurra numa zona 0x20 pede a porta da célula dele; `true` se ela
+    /// passou a fechar.
+    fn push_cell_door(&mut self) -> bool {
+        let mut changed = false;
         if let Some(j) = self.jake.as_ref().filter(|j| j.door_push) {
             let jb = j.body.bounds();
             let on_zone = self.prop_zones.iter().any(|z| {
@@ -244,35 +284,7 @@ impl Scene {
                 changed |= before != d.state && d.state == CLOSING;
             }
         }
-        let jake = self
-            .jake
-            .as_ref()
-            .filter(|j| j.is_active())
-            .map(|j| (j.body.bounds(), j.layer()));
-        let others: Vec<(Rect, i32)> = self
-            .entities
-            .iter()
-            .filter(|e| e.alive && e.solid_shapes && e.flags & 1 != 0)
-            .filter_map(|e| e.bounds().map(|b| (b, e.layer)))
-            .collect();
-        for d in self.cell_doors.iter_mut() {
-            let layer = d.layer;
-            let occupied = |boxes: &[Rect]| {
-                boxes.iter().any(|b| {
-                    jake.is_some_and(|(r, l)| l == layer && r.overlaps(b))
-                        || others.iter().any(|(r, l)| *l == layer && r.overlaps(b))
-                })
-            };
-            changed |= d.tick(occupied);
-            if let Some(sp) = self.sprites.get_mut(d.sprite) {
-                let f = d.frame.min(sp.anim.frames.len().saturating_sub(1));
-                sp.player = crate::AnimPlayer::from_frame(&sp.anim, f);
-                sp.frozen = true;
-            }
-        }
-        if changed {
-            self.set_jake_layer(self.jake_layer);
-        }
+        changed
     }
 }
 

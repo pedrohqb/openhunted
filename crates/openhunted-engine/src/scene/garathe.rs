@@ -26,6 +26,33 @@ impl Scene {
         // investida: quem ele toca (objeto sólido, não só de toque) leva 7 e tranco, com o
         // empurrão pelos centros; Ruling: uma vez por objeto por pulo
         let b = j.body.bounds();
+        if !self.parked.is_empty() {
+            // o outro jogador (marcado como `usize::MAX − índice` na lista do pulo)
+            let checked = self.body_checked.clone();
+            let mut hit = Vec::new();
+            let others: Vec<usize> = self.parked.iter().map(|s| s.player).collect();
+            for k in others {
+                if checked.contains(&(usize::MAX - k)) {
+                    continue;
+                }
+                let r = self
+                    .player_jake(k)
+                    .filter(|o| o.is_active() && o.layer() == layer);
+                if let Some(r) = r.map(|o| o.body.bounds()).filter(|r| r.overlaps(&b)) {
+                    hit.push((k, r));
+                }
+            }
+            for (k, r) in hit {
+                self.body_checked.push(usize::MAX - k);
+                if let Some(o) = self.player_jake_mut(k) {
+                    o.hurt(garathe::body_check(b, r));
+                }
+                let c = self.active_number();
+                self.credit_player(k, c);
+            }
+        }
+        let Some(j) = self.jake.as_ref() else { return };
+        let b = j.body.bounds();
         for (i, e) in self.entities.iter_mut().enumerate() {
             let Some(r) = e.bounds() else { continue };
             if !e.alive
@@ -38,6 +65,12 @@ impl Scene {
                 continue;
             }
             self.body_checked.push(i);
+            if self.players.len() >= 2 && e.health > 0 {
+                if self.credits.len() <= i {
+                    self.credits.resize(i + 1, 0);
+                }
+                self.credits[i] = self.players.get(self.active).map_or(0, |p| p.number);
+            }
             let p = garathe::body_check(b, r);
             // as mortes contam pela cena (`enemy::kills`)
             if !behaviour::enemy::hurt(e, &p, true) {

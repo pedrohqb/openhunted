@@ -107,6 +107,8 @@ pub struct Ctx<'a> {
     pub level: (i32, i32),
     /// Dificuldade (`0x487854`).
     pub difficulty: crate::Difficulty,
+    /// Qualquer personagem pega qualquer item (disputa, `itens.md` passo 2).
+    pub any_taker: bool,
 }
 
 impl Ctx<'_> {
@@ -156,6 +158,11 @@ pub struct Out {
     pub confuse: bool,
     /// Lançamentos da catapulta sobre barris e formigas (a cena aplica).
     pub launches: Vec<catapult::Launch>,
+    /// Crédito (`+0x1b0`) de explosões de `blasts`: (índice, número do jogador), herdado de
+    /// quem a criou; as ausentes têm crédito 0.
+    pub blast_credits: Vec<(usize, u8)>,
+    /// Crédito dos objetos de `spawn` criados por quem tem crédito (o chumbo que se divide).
+    pub spawn_credits: Vec<(usize, u8)>,
 }
 
 /// Área que fere quem a cruza na mesma camada (`0x43d629` de fogo e cerca sobre os objetos).
@@ -318,6 +325,7 @@ pub(crate) mod test_support {
             hints: &[],
             level: (10_000, 10_000),
             difficulty: crate::Difficulty::Normal,
+            any_taker: false,
         }
     }
 }

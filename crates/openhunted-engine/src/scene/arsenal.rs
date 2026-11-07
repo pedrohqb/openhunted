@@ -274,19 +274,27 @@ impl Scene {
         };
         self.entities[i].alive = false;
         if let Some(vi) = victim.filter(|_| !direct.is_empty()) {
+            self.inherit_credit(vi, i);
             // as mortes contam pela cena (`enemy::kills`), qualquer que seja a causa
             let v = &mut self.entities[vi];
             let _ =
                 behaviour::enemy::hurt(v, &direct, true) || behaviour::interact::hurt(v, &direct);
         }
         match blast {
-            Some((radius, push, damage)) => out.blasts.push(Blast {
-                center: c,
-                layer,
-                radius,
-                push,
-                damage,
-            }),
+            Some((radius, push, damage)) => {
+                // a explosão herda o crédito do projétil (`0x40d649`)
+                if self.players.len() >= 2 {
+                    out.blast_credits
+                        .push((out.blasts.len(), self.credit_of(i)));
+                }
+                out.blasts.push(Blast {
+                    center: c,
+                    layer,
+                    radius,
+                    push,
+                    damage,
+                })
+            }
             None => {
                 // faísca `oex15` de raio 12 e o som do impacto
                 out.effects.push((
@@ -336,7 +344,30 @@ impl Scene {
                 (0, 0),
             ),
         };
-        for e in self.entities.iter_mut() {
+        let multi = self.players.len() >= 2;
+        let (number, layer) = (self.active_number(), self.jake_layer);
+        if multi {
+            // o outro jogador também leva o golpe (fogo amigo, `multijogador.md`)
+            let mut sounds = Vec::new();
+            self.hurt_others(|j| {
+                if j.layer() != layer || !j.body.bounds().overlaps(&r) {
+                    return None;
+                }
+                let row = strike.row(j.character().kind())?;
+                let b = j.body.bounds();
+                let c = (b.x + b.w / 2, b.y + b.h / 2);
+                sounds.extend(row.sound().map(|id| (id, c)));
+                Some(row.pending(Geometry {
+                    vel,
+                    toward: (c.0 - from.0, c.1 - from.1),
+                }))
+            });
+            for (id, c) in sounds {
+                self.events
+                    .push(Event::Sound(Cue::at(id, PRIORITY_FRAME, c, layer)));
+            }
+        }
+        for (k, e) in self.entities.iter_mut().enumerate() {
             if !e.alive
                 || e.layer != self.jake_layer
                 || e.flags & 0x80001 != 0x80001
@@ -353,6 +384,12 @@ impl Scene {
                 vel,
                 toward: (c.0 - from.0, c.1 - from.1),
             });
+            if multi && e.health > 0 {
+                if self.credits.len() <= k {
+                    self.credits.resize(k + 1, 0);
+                }
+                self.credits[k] = number;
+            }
             if behaviour::enemy::hurt(e, &p, true) || behaviour::interact::hurt(e, &p) {
                 if let Some(id) = row.sound() {
                     self.events

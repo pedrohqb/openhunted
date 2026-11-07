@@ -510,6 +510,8 @@ pub struct Jake {
     /// Som posicional pedido neste tique (Garathe: pouso do pulo longo, empurrar, pulo
     /// contra a parede; a cena toca).
     pub sound: Option<u16>,
+    /// Cor-base (`+0x280`): 0 no solo e no coop (35/36); na disputa, a da `SEGOC`.
+    colour: i32,
 }
 
 impl Jake {
@@ -554,6 +556,7 @@ impl Jake {
             clock: 0,
             character: Character::Jake,
             sound: None,
+            colour: 0,
         }
     }
 
@@ -574,6 +577,42 @@ impl Jake {
 
     pub fn character(&self) -> Character {
         self.character
+    }
+
+    /// Cor-base `+0x280` (e `+0x27c`) da disputa (`0x43cd2f`); 0 = a do personagem.
+    pub fn with_colour(mut self, colour: i32) -> Self {
+        self.colour = colour;
+        self
+    }
+
+    /// Cor-base (`+0x280`; 0 = a do personagem).
+    pub fn colour(&self) -> i32 {
+        self.colour
+    }
+
+    /// Renasce na disputa (estados 181 `0x426b09` / 80 `0x42b861`): de pé com o centro x da
+    /// caixa e o topo dela em `at` (`None` = o ponto de renascimento `+0x29c`) na camada
+    /// `layer`, sem armas, munição, chaves, bandeiras, veneno, dano pendente nem piscar, com a
+    /// melhor arma (punhos/garras) e vida 100; a armadura fica.
+    pub fn respawn_at(&mut self, at: Option<(i32, i32)>, layer: i32) {
+        let bx = self.box_default;
+        let (x, y) = at.map_or(self.start, |(px, py)| (px - bx.x - bx.w / 2, py - bx.y));
+        let armor = self.health.armor;
+        self.body = Body::new(x, y, bx);
+        self.start = (x, y);
+        self.layer = layer;
+        self.health = Health { hp: 100, armor };
+        self.pending = Pending::default();
+        self.poison = 0;
+        self.flash = crate::tint::Flash::default();
+        self.teleport = None;
+        self.exit_scale = None;
+        self.switch_pose = 0;
+        self.push_loop = false;
+        self.inventory = Inventory::for_character(&[], self.character);
+        self.inventory.weapon = self.inventory.best();
+        self.shots.clear();
+        self.set(State::Idle);
     }
 
     pub(crate) fn profile(&self) -> &'static Profile {
@@ -896,7 +935,7 @@ impl Jake {
     /// Desenhado (fica invisível durante o teletransporte).
     /// Tabela de cor do desenho (`0x42315f`/`0x4282d3`): a do piscar ou a do personagem.
     pub fn tint(&self) -> crate::tint::Tint {
-        crate::tint::player(self.is_garathe(), &self.flash)
+        crate::tint::player_coloured(self.is_garathe(), self.colour, &self.flash)
     }
 
     pub fn is_visible(&self) -> bool {
@@ -983,7 +1022,7 @@ impl Jake {
             return false;
         }
         if p.amount != 0 && (p.knockdown || p.shove || p.jolt || p.explosion) {
-            self.flash.start(crate::tint::FLASH_HIT, 0);
+            self.flash.start(crate::tint::FLASH_HIT, self.colour);
         }
         let g = self.is_garathe();
         let layering = matches!(self.state, State::LayerUp(_) | State::LayerDown(_));
@@ -1014,7 +1053,7 @@ impl Jake {
             }
         } else if p.electric && !matches!(self.state, State::Shocked(_)) && !(g && layering) {
             self.body.vx = 0;
-            self.flash.start(crate::tint::FLASH_SHOCK, 0);
+            self.flash.start(crate::tint::FLASH_SHOCK, self.colour);
             self.set(State::Shocked(SHOCK_TICKS));
             if g {
                 self.frame = garathe::SHOCK_FRAME.min(self.len_of(121) - 1);
@@ -1284,7 +1323,7 @@ impl Jake {
         // piscar: envenenado (`0x42328e`), e o passo do fim da atualização (`0x408129`)
         // adiantado para cá (o do especial, posto depois, conta a partir do próximo tique)
         if self.poison > 0 {
-            self.flash.start(crate::tint::FLASH_POISON, 0);
+            self.flash.start(crate::tint::FLASH_POISON, self.colour);
         }
         self.flash.tick(self.poison > 0);
         if !self.controllable() {

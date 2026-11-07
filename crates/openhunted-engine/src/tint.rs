@@ -192,6 +192,15 @@ pub fn player(garathe: bool, flash: &Flash) -> Tint {
     )
 }
 
+/// Cor de um jogador com cor-base `colour` (`+0x280`; 0 = a padrão do personagem, como no
+/// solo): a do piscar ou a base (`0x42315f`/`0x4282d3`).
+pub fn player_coloured(garathe: bool, colour: i32, flash: &Flash) -> Tint {
+    if colour == 0 {
+        return player(garathe, flash);
+    }
+    Tint::new(flash.color().unwrap_or(colour), 0)
+}
+
 /// Cor do Camaleão (`0x419391`).
 pub fn chameleon(s: &ChameleonState) -> Tint {
     let (normal, shift, clone) = CHAMELEON[s.variant.min(CHAMELEON.len() - 1)];
@@ -222,6 +231,7 @@ pub fn entity(e: &Entity, index: usize, tick: u32) -> Option<Tint> {
         Behaviour::Chameleon(s) => Some(chameleon(s)),
         // personagens da IA: a rotina do jogador (`+0x27c` 0 → 35 / 36, com os piscares)
         Behaviour::AiPlayer(a) => Some(a.body.tint()),
+        Behaviour::Corpse(t) => Some(Tint::new(*t, 0)),
         Behaviour::Flyer(f) if !f.manta => {
             let (t, b) = ANTIBODY[f.variant.min(ANTIBODY.len() - 1)];
             Some(Tint::new(t, b))
