@@ -170,3 +170,49 @@ fn fuzz_random_input_on_all_levels_with_ai_characters() {
     }
     assert!(played >= 25, "fases com IA: {played}");
 }
+
+/// O alvo empurrado, derrubado ou levantando não é atacado (`0x42cdef` olha o estado do
+/// alvo): sob entrada aleatória, nenhum tique de pensamento (os pares) com ATIRAR/SOCO de
+/// uma IA que vê o humano indefeso. Nos ímpares a IA repete a entrada anterior.
+#[test]
+fn ai_does_not_attack_a_helpless_human() {
+    use openhunted_engine::input::PUNCH;
+    use openhunted_engine::jake::State;
+    let Some(gd) = data() else { return };
+    for name in ["D_J_007.LEV", "H_M_027.LEV", "D_M_021.LEV", "D_M_024.LEV"] {
+        let l = level(&gd, name);
+        let mut a = Assets::new(gd.resources().unwrap());
+        let mut s = Scene::build(&l, &mut a).unwrap();
+        let mut seed: u32 = 0x4149_4149;
+        let mut input = 0;
+        let mut helpless = 0;
+        for t in 0..2000u32 {
+            if t % 7 == 0 {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                input = seed & (UP | DOWN | LEFT | RIGHT | SHOOT | JUMP | 0x400 | 0x40000);
+            }
+            s.tick(input);
+            let Some(j) = s.jake.as_ref() else { break };
+            let h = matches!(
+                j.state(),
+                State::Pushed | State::KnockedDown(_) | State::Jolted | State::GetUp | State::Rise
+            );
+            if !h || t % 2 != 0 {
+                continue;
+            }
+            helpless += 1;
+            for e in &s.entities {
+                if let Behaviour::AiPlayer(ai) = &e.behaviour {
+                    assert!(
+                        !ai.brain.sees || ai.brain.last & (SHOOT | PUNCH) == 0,
+                        "{name}: ataque ao humano indefeso ({:?}) no tique {t}",
+                        j.state()
+                    );
+                }
+            }
+        }
+        eprintln!("{name}: {helpless} pensamentos com o humano indefeso");
+    }
+}
