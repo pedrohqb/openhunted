@@ -682,6 +682,20 @@ fn anthill_spawns_ants_in_t_m_008() {
         assert_eq!(a.layer, s.entities[hill].layer);
         assert!(!enemy::counted(a), "formigas criadas não contam");
     }
+    // com o Garathe jogável (M8): ao lado de uma formiga, ele leva a mordida
+    assert!(s.jake.is_some(), "a T_M_008 tem o Garathe");
+    let a = (n0..s.entities.len())
+        .find(|&k| s.entities[k].alive && s.entities[k].kind == 109)
+        .expect("nenhuma formiga viva");
+    stand_near(&mut s, a, 20);
+    let hp = s.jake.as_ref().unwrap().health.hp;
+    for _ in 0..60 {
+        s.tick(0);
+        if s.jake.as_ref().unwrap().health.hp < hp {
+            return;
+        }
+    }
+    panic!("a formiga não mordeu");
 }
 
 /// Dificuldade: no fácil a pistola tira o dobro do Bruiser; no difícil, nada passa de metade.

@@ -1026,6 +1026,14 @@ mod tests {
             (35, 0, 1404)
         );
         assert!(b.m9.game_lut.is_some(), "paleta do brilho");
+        // a dificuldade gravada vale na partida (`0x487854`)
+        let mut b = b;
+        b.key_down(Key::Enter); // New Game
+        run(&mut b, 6);
+        assert_eq!(
+            b.viewer().map(|v| v.scene().difficulty),
+            Some(openhunted_engine::Difficulty::Easy)
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 
