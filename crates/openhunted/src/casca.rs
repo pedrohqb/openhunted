@@ -41,6 +41,10 @@ const LAST_PIECE: i32 = 15;
 const PORT_KEYS: [usize; 10] = [38, 40, 37, 39, 17, 32, 88, 33, 90, 34];
 /// Cor padrão do jogador 1 (`0x497320 = 35`, `DLS.TBL`).
 const PLAYER1_COLORS: u16 = 35;
+/// Avisos do port (sem texto no `SYSTEM.RES`): sem pasta de dados do usuário (sem `HOME`)
+/// e nome de jogo salvo vazio depois de limpo.
+pub const NO_STORAGE: &str = "SAVED GAMES ARE NOT AVAILABLE: NO HOME FOLDER.";
+pub const EMPTY_NAME: &str = "TYPE A NAME WITH LETTERS OR DIGITS.";
 
 /// Qual tela da M9 está aberta.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -293,7 +297,7 @@ impl App {
         self.last_menu_button = id;
         let font = self.font.clone();
         match id {
-            menu::RESTORE if self.m9.storage.is_some() => {
+            menu::RESTORE => {
                 let title = self.sys_text(LOAD_GAME);
                 let last = self
                     .m9
@@ -308,6 +312,9 @@ impl App {
                         PageKind::LoadName,
                         |s, _| Box::new(NameEntry::new(s, f, Some(title), &last)),
                     );
+                }
+                if self.m9.storage.is_none() {
+                    self.set_notice(NO_STORAGE);
                 }
             }
             menu::CHOOSE_LEVEL => {
@@ -469,13 +476,20 @@ impl App {
             (PageKind::HeroName, Reply::Close) => self.save_step(),
             (PageKind::SaveName, Reply::Name(n)) => {
                 let n = clean_name(&n);
-                if let (false, Some(st)) = (n.is_empty(), &self.m9.storage) {
-                    let p = st.save_path(&n);
-                    self.write_save(p);
+                match &self.m9.storage {
+                    None => self.set_notice(NO_STORAGE),
+                    Some(_) if n.is_empty() => self.set_notice(EMPTY_NAME),
+                    Some(st) => {
+                        let p = st.save_path(&n);
+                        self.write_save(p);
+                        self.back_to_results();
+                    }
                 }
-                self.back_to_results();
             }
             (PageKind::SaveName, Reply::Close) => self.back_to_results(),
+            (PageKind::LoadName, Reply::Name(_)) if self.m9.storage.is_none() => {
+                self.set_notice(NO_STORAGE)
+            }
             (PageKind::LoadName, Reply::Name(n)) => {
                 if !self.restore(&n) {
                     let t = self.sys_text(INVALID_SAVE);
@@ -1167,6 +1181,72 @@ mod tests {
         // e então o NEXT pedido
         assert_eq!(a.mode(), super::super::Mode::Briefing);
         assert_eq!(a.mission_index(), Some(1));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn restore_without_storage_and_an_empty_save_name_explain_themselves() {
+        let Some(d) = data() else {
+            return;
+        };
+        let mut a = App::load(&d, None).unwrap();
+        click(&mut a, menu::RESTORE);
+        assert_eq!(
+            a.page_kind(),
+            Some(PageKind::LoadName),
+            "o botão não fica morto"
+        );
+        assert_eq!(a.notice(), Some(NO_STORAGE));
+        a.key_down(Key::Enter);
+        assert_eq!(a.notice(), None);
+        a.key_down(Key::Enter);
+        assert_eq!(a.notice(), Some(NO_STORAGE));
+        a.key_down(Key::Enter);
+        a.key_down(Key::Escape);
+        assert_eq!(a.mode(), super::super::Mode::Menu);
+        // nome que a limpeza esvazia: aviso e o campo continua aberto
+        let root = temp("app-empty-name");
+        let mut b = app(&root, None).unwrap();
+        b.key_down(Key::Enter); // New Game
+        run(&mut b, 6);
+        b.key_down(Key::Enter); // GO
+        run(&mut b, 6);
+        win(&mut b, false);
+        b.key_down(Key::Enter);
+        run(&mut b, 2);
+        assert_eq!(b.page_kind(), Some(PageKind::HeroName));
+        b.text_input("!!!");
+        b.key_down(Key::Enter);
+        assert_eq!(b.page_kind(), Some(PageKind::SaveName));
+        b.key_down(Key::Enter);
+        assert_eq!(b.notice(), Some(EMPTY_NAME));
+        b.key_down(Key::Enter);
+        assert_eq!(b.page_kind(), Some(PageKind::SaveName), "ainda pede o nome");
+        assert_eq!(b.save_path(), None);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_prefilled_restore_name_finds_the_same_file() {
+        let root = temp("app-latest");
+        let Some(mut a) = app(&root, None) else {
+            return;
+        };
+        let st = Storage::at(&root);
+        // um nome de 31 caracteres (o máximo do campo) e um arquivo que o port não nomearia
+        let long = "A".repeat(storage::SAVE_NAME_MAX);
+        let g = a.save_game(&st.save_path(&long));
+        storage::write(&st.save_path(&long), &g.to_bytes()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        storage::write(&st.saves_dir().join("x.y.hhg"), &g.to_bytes()).unwrap();
+        assert_eq!(st.latest_save().as_deref(), Some(long.as_str()));
+        click(&mut a, menu::RESTORE);
+        a.key_down(Key::Enter);
+        assert_eq!(
+            a.mode(),
+            super::super::Mode::Briefing,
+            "carregou o pré-preenchido"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 
