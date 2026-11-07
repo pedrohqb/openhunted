@@ -62,3 +62,5 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`inimigos-menores.md`](inimigos-menores.md): gerador de dardos (87) e dardo (29), catapulta (41), Entidade (107), Camaleão (4) e Morte (3).
 - [`itens-campanha.md`](itens-campanha.md): itens da campanha (nas células), chaves 62–67 e portas, bandeiras 80–85, pistão 39, interruptor 74, tipo 0.
 - [`armas-2.md`](armas-2.md): espingarda, foguetes, estrelas ninja e granadas do Jake: descritores, registros, projéteis e dano.
+- [`garathe.md`](garathe.md): Garathe/Minotauro (tipo 2): inicialização, quem o controla, missões, armas e registros, `DAMAGE.TBL` do atacante 2, especial, reações, morte, falas, HUD e itens só dele.
+- [`garathe-movimentos.md`](garathe-movimentos.md): tabela de 164 estados do Garathe, despacho, decisão em pé, correr/andar, pulos (com a investida), queda, agachar, empurrar, barra, corda, esconder (54–56) e velocidades do `MINOTAUR.SKE`.
