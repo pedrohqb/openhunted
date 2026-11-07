@@ -22,7 +22,7 @@ auditadas com `ohtool audit --god --reach` (`openhunted_engine::audit`; desenho 
   D_M_004, D_M_003, H_J_039, D_M_027, D_J_012, D_M_018) — na T_M_006 basta o pulo até a
   corda; as demais não foram percorridas.
 
-Resultado: **64 vencem, 1 falha** (D_M_010, abaixo).
+Resultado: **64 vencem, 1 falha** (D_M_010, abaixo); igual depois da revisão da IA da M11.
 
 ## Causas achadas e corrigidas
 
@@ -54,8 +54,13 @@ Resultado: **64 vencem, 1 falha** (D_M_010, abaixo).
 - Gatilhos para ids inexistentes (valem verdadeiro, `0x435bd8`): I_J_104 e D_J_012
   (pistão → id 3), D_J_001 e D_M_004 (robô), H_J_012 (barril), D_M_027 (teletransporte).
   Teletransportes sem destino na fase: I_M_003, H_J_036 (2), D_M_027.
-- A rota real (pulos, inimigos, tempo) só se prova com vitórias roteirizadas:
-  `real_missions.rs` (T_J_003/005/007), `real_garathe.rs` (T_M_002) e as da M13.
+- A rota real (pulos, inimigos, tempo) só se prova com vitórias roteirizadas (só a entrada
+  do jogador): `real_missions.rs` (T_J_003/005/007 e, da M13, **I_J_002**: seis robôs, a
+  chave 62 no corredor de cima, portas que abrem sozinhas e a porta de célula da saída) e
+  `real_garathe.rs` (T_M_002 e, da M13, **I_M_102**: poço, redes, três camadas e a porta de
+  empurrar que abre a de baixo pelo gatilho). Falta uma H_J/D_J: a D_J_001 (a mais curta)
+  é um quebra-cabeça de interruptores (ids 3, 8, 9) e portas por gatilho na camada 1, ainda
+  não percorrido.
 
 ## Missões
 
@@ -75,8 +80,8 @@ Personagem J/G; tempo em segundos (campo 1004); objetivos além da saída.
 | I_J_005 | J | — | 1× bandeira | vence | 4 teletr. entre camadas (**presa antes da M13**) |
 | I_M_003 | G | 190 | só a saída | vence |  |
 | I_J_110 | J | — | 1× peça | vence |  |
-| I_J_002 | J | — | 6× robô | vence |  |
-| I_M_102 | G | — | só a saída | vence |  |
+| I_J_002 | J | — | 6× robô | vence | vitória roteirizada |
+| I_M_102 | G | — | só a saída | vence | vitória roteirizada |
 | I_J_104 | J | — | 2× bandeira | vence |  |
 | I_J_001 | J | 250 | 1× peça | vence |  |
 | I_J_004 | J | — | só a saída | vence |  |

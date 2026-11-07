@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! O Garathe sobre os dados reais (OPENHUNTED_DATA): a `T_M_002` (primeiro tutorial do
 //! Garathe) carrega com ele controlável, corre e pula pelas tabelas e é vencida por entrada
-//! roteirizada; fuzz nas fases `p=2` solo.
+//! roteirizada, como a `I_M_102`; fuzz nas fases `p=2` solo.
 
 use openhunted_engine::character::Character;
 use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
@@ -272,6 +272,53 @@ fn t_m_002_can_be_won() {
     assert!(p.climbed > first, "desceu pela 2ª rede");
     p.tick(JUMP);
     p.settle();
+    p.win();
+}
+
+/// I_M_102 (só a saída): cai pelo poço da sala do início (camada 2, x 406–490) até a sala
+/// de baixo e passa à camada 1 pela porta de x ≈ 703; sobe a rede da esquerda (x 430–463)
+/// até a saliência de y 756, anda até a rede de x 562–595 e sobe à sala de cima, saltando
+/// dela para a direita; passa à camada 0 pela porta de x ≈ 711, cai pelo vão de x 278–362,
+/// empurra a porta de x 128–152 (id 2; ela abre a de baixo pelo gatilho) e cai pela coluna
+/// da esquerda até o corredor da saída.
+#[test]
+fn i_m_102_can_be_won() {
+    let Some(s) = load("I_M_102.LEV") else {
+        return;
+    };
+    let mut p = Pilot {
+        s,
+        t: 0,
+        climbed: 0,
+    };
+    p.run(10, 0);
+    p.go_x(448);
+    p.settle();
+    assert_eq!(p.feet(), 884, "desceu o poço: {:?}", p.center());
+    p.go_x(703);
+    p.tick(UP);
+    p.run(10, 0);
+    assert_eq!(p.s.jake_layer, 1);
+    p.go_x(446);
+    p.climb(UP, 740);
+    p.run(6, RIGHT);
+    p.settle();
+    assert_eq!(p.feet(), 756, "saliência: {:?}", p.center());
+    p.go_x(578);
+    p.climb(UP, 495);
+    p.tick(JUMP | RIGHT);
+    p.run(30, RIGHT);
+    p.settle();
+    assert_eq!(p.feet(), 500, "sala de cima: {:?}", p.center());
+    p.go_x(711);
+    p.tick(UP);
+    p.run(10, 0);
+    assert_eq!(p.s.jake_layer, 0);
+    p.go_x(320);
+    p.settle();
+    assert_eq!(p.feet(), 628, "caiu pelo vão: {:?}", p.center());
+    p.go_x(65);
+    assert_eq!(p.feet(), 884, "caiu pela coluna: {:?}", p.center());
     p.win();
 }
 
