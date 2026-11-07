@@ -69,3 +69,4 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`videos-musica.md`](videos-musica.md): filmes AVI (Indeo 3.2) da abertura, meio e final; música (CD de áudio, `SX_3000.WAV` nos menus); vozes; grupos 0/1 do `SOUND.TBL`.
 - [`menus-restantes.md`](menus-restantes.md): as 16 `.ITF`, fluxo a partir do `SMAIN`, `SMULT`, `SINPU`, `SKEYB`/`SJOYS`, `SEGOC`, `SHVLD`, `SH2HS`, `SHERO`, `SHIGH`, `S_CAR`, `SABOUT`; campos do `ENGLEVEL.TXT`.
 - [`opcoes-salvamento.md`](opcoes-salvamento.md): `HUNTER.INI`, tela de opções, menu da janela, dificuldade, jogo salvo `.hhg`, progresso e `hunter.fam`.
+- [`cores-sprites.md`](cores-sprites.md): tabela de desenho `0x43becd` (`DLS.TBL`), arte "de sprite" dos 7 tipos com rotina `+0x1c4`, cor e piscar dos jogadores, Camaleão (cor, clones, esmaecer) e pulsos do robô, do gerador e das minas.
