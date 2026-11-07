@@ -68,8 +68,9 @@ fn tutorial_render_matches_reference() {
     assert_eq!(h, REFERENCE);
 }
 
-/// Atualizado na M4a: a saída mostra o rótulo 8 (`osw08`, o portão "EXIT").
-const REFERENCE: u64 = 0x6d24_9829_bdba_056f;
+/// Atualizado na M4a: a saída mostra o rótulo 8 (`osw08`, o portão "EXIT"); na M12, as três
+/// minas flutuantes saem pela tabela de cor 40 (verdes), conferidas visualmente.
+const REFERENCE: u64 = 0xfd21_fcb0_8501_b294;
 
 /// Camadas z ≥ 1 usam o índice 0 como transparência: nada de índice 0 pode chegar à tela.
 #[test]

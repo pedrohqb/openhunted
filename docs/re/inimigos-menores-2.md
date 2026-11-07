@@ -88,8 +88,8 @@ Decisão com alvo (`0x41a79e`, chamada no fim dos estados 6, 11–13, 27, 34, 38
 Fim do 28 (virar): 20 % → **invisível** (`+0x265 = 1`, som **3155**); senão 25 % → visível
 (`+0x265 = 0`). Também voltam a 0: a contagem da clonagem e a entrada no 18; o fim do 18 põe 1
 (o corpo esmaece). Desenho `0x419391` (só no original): o limiar `+0x268` desce 7 por quadro até
-0x91 (com `+0x265 = 1`) ou sobe até 0xf7; os índices ≥ limiar da tabela `0x481048` são zerados
-[inferido: tabela de transparência por cor].
+0x91 (com `+0x265 = 1`) ou sobe até 0xf7; os índices ≥ limiar da tabela `0x481048` são zerados:
+esses pixels ficam transparentes (`cores-sprites.md`).
 
 **Clones**: só o original (sem `0x10`), < 3 clones: 25 % ao andar, `+0x26e = 50 + rand%50`,
 `+0x26d = rand%5`; a cada 3 tiques a cor cicla (`0x47277c`) e `+0x26e` −1; zerado → `0x41aec0`

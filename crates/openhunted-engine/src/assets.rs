@@ -15,6 +15,7 @@ pub struct Assets {
     bitmaps: HashMap<String, Rc<Bitmap>>,
     animations: HashMap<String, Rc<Animation>>,
     fonts: HashMap<String, Rc<Font>>,
+    dls: Option<Rc<crate::tint::Dls>>,
 }
 
 impl Assets {
@@ -24,12 +25,22 @@ impl Assets {
             bitmaps: HashMap::new(),
             animations: HashMap::new(),
             fonts: HashMap::new(),
+            dls: None,
         }
     }
 
     /// O arquivo de recursos por trás do cache.
     pub fn archive(&self) -> &ResourceArchive {
         &self.archive
+    }
+
+    /// As 48 tabelas de cor do `DLS.TBL` (`crate::tint`), lidas uma vez; `None` se faltarem.
+    pub fn dls(&mut self) -> Option<Rc<crate::tint::Dls>> {
+        if self.dls.is_none() {
+            let d = self.archive.get("DLS.TBL").ok()?;
+            self.dls = Some(Rc::new(crate::tint::Dls::parse(d)?));
+        }
+        self.dls.clone()
     }
 
     pub fn bitmap(&mut self, name: &str) -> Result<Rc<Bitmap>> {

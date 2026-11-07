@@ -11,6 +11,13 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M12: as cores dos sprites.** O Jake, o Garathe, o Camaleão, o Anticorpo, o robô de
+segurança, o gerador de minas e as minas flutuantes são desenhados pela tabela de cor do
+`DLS.TBL` que o original monta para cada um (antes saíam com ruído de arco-íris): o Jake e o
+Garathe piscam ao serem feridos, envenenados ou eletrocutados; o Camaleão tem a cor da
+variante, cicla de cor ao se clonar e, invisível, só deixa ver o brilho do corpo; robôs,
+geradores e minas pulsam. Regras em `docs/superpowers/specs/2026-11-07-m12-cores-design.md`.
+
 **M10: inimigos secundários e dificuldade.** Morte (aparece ao lado do jogador, irradia,
 atira, some), Camaleão (morde, fica invisível, se clona), Anticorpo e Manta (laços, mergulho,
 bote), dardos, catapulta, Entidade (inverte os controles de perto) e formigueiro. A dificuldade
@@ -82,8 +89,8 @@ corre e pula; M3b objetos sólidos e presença por modo de jogo.
 Ainda não há: o Minotauro e o Jake inimigos, o equilíbrio na beirada (162/163), os passos e
 demais sons por quadro do Jake e do cenário, o zumbido das minas, o logotipo, o título e a
 história da abertura (só o filme toca) e o laço de demonstração, a troca de teclas e o joystick,
-os modos de dois jogadores, tesouros e segredos, as cores do herói (o Garathe usa a paleta da
-fase). Os obstáculos `OPO` (gotas, bloco que cai, portão) ainda não agem.
+os modos de dois jogadores (e a cor escolhida para cada um), tesouros e segredos, a luz por
+região sobre os objetos. Os obstáculos `OPO` (gotas, bloco que cai, portão) ainda não agem.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
 reversa, em [`docs/re/`](docs/re/).

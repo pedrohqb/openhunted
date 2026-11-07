@@ -106,12 +106,12 @@ levam dano — explodem em cadeia (vida 1). [inferido do cálculo]
 
 A cada tique chama `0x43becd(índice, 64·sen(2π·((tique + endereço) mod período)/período))`
 com o índice e o período da variante. `0x43becd` aceita índices 0–47 e valores −127…127 e
-guarda o par para um efeito de paleta [inferido]; nos sprites, as minas "piscam". O som
+monta a tabela de cor do desenho (`cores-sprites.md`): a rampa do sprite clareia e escurece. O som
 3016 "Hover Mine Floating" consta do `SOUND.RES`, mas a chamada não foi localizada.
 
 ## Em aberto
 
-- Efeito exato de `0x43becd` (brilho/ciclo de paleta?) e o papel de `+0x174`.
+- O papel de `+0x174`.
 - Onde e como o som 3016 é tocado.
 - Semântica exata de `+0x164`/`+0x168` frente a `+0x15c`/`+0x160` e de `0x404bc7`; por que
   a mina sem alvo não cai (o bit `0x8` fica desligado).

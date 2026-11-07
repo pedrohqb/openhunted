@@ -50,8 +50,8 @@ e `anticorpo-manta.md`, e a dificuldade (`opcoes-salvamento.md`, `0x487854`).
   inferido), 28 (vira), 13 (morde), 7 (olha), 12 (recua ferido, recarga 40), 18 (morre),
   26/27 (cai/aterrissa) e 3 (preso: `vy += 10`). Sem alvo, no fim de 34/27/7: 50 % anda se o
   caminho está livre, senão vira; 25 % vira; 25 % fica. A troca de camada (39/40) não é portada.
-- Ruling: a invisibilidade do Camaleão esconde o desenho depois de 15 tiques (o limiar desce
-  7 por quadro de 0xf7 a 0x91); ele continua presente, sólido e ferível.
+- Ruling: o Camaleão invisível continua presente, sólido e ferível; o esmaecer (limiar 0xf7
+  → 0x91, 7 por quadro) é feito pela tabela de cor desde a M12 (`2026-11-07-m12-cores-design.md`).
 - Ruling (revisão): clones e formigas criadas, como as minas de gerador, entram no total
   enquanto vivos e saem dele (e nunca contam nos mortos) quando destruídos — o original os
   libera ao destruir (`0x435b63`) e o `0x43cfcf` só percorre as listas; a morte do original

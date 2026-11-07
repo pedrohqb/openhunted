@@ -37,7 +37,7 @@ Chamada pela atualização do Jake (`0x422ab4`), antes da queda (`0x42415c`) e d
 estados, salvo se `+0x178 & 0x200000` (morrendo/saindo) ou no estado 181. [confirmado]
 
 1. Dano pendente com reação (`+0x250 & 7`) ou de explosão → `0x4081ae(obj, 0x2e, 4)`:
-   pisca/tinge o sprite por 4 tiques [inferido; grava `+0x28c`/`+0x290`].
+   pisca na tabela de cor 0x2e por 4 tiques (`cores-sprites.md`).
 2. Reações (podem trocar de estado; qualquer uma "consome" o tique):
    - `2` → `0x423366`: em certos estados (1, 6, 79, 164–167) desliga `0x8` e vai ao
      estado 168 (`J168`, empurrado);
@@ -155,4 +155,4 @@ sai da armadura.
 - Estado do Jake ao morrer em voo (81/82) e no estado 3.
 - Dificuldade: `0x487854` dobra/reduz o dano recebido por alguns inimigos (lista em
   `opcoes-salvamento.md`); não se viu efeito no Jake.
-- `0x4081ae` (efeito visual exato) e `0x436358` (eventos 4, 0xc, 0x20).
+- `0x436358` (eventos 4, 0xc, 0x20).
