@@ -14,7 +14,7 @@ use openhunted_engine::shell::generic::GenericBox;
 use openhunted_engine::shell::heroes::{Car, Heroes, Info, InfoKind, NameEntry};
 use openhunted_engine::shell::levels::{Entry, LevelSelect};
 use openhunted_engine::shell::options::Options;
-use openhunted_engine::shell::results::Results;
+use openhunted_engine::shell::results::{Choice, Results};
 use openhunted_engine::shell::{Dir, Input, Page, Placement, Reply, Screen, menu, next_mission};
 use openhunted_engine::{TICK_MS, display_palette};
 use openhunted_formats::{Palette, SaveGame, Sound, parse_text_list};
@@ -41,6 +41,10 @@ const LAST_PIECE: i32 = 15;
 const PORT_KEYS: [usize; 10] = [38, 40, 37, 39, 17, 32, 88, 33, 90, 34];
 /// Cor padrão do jogador 1 (`0x497320 = 35`, `DLS.TBL`).
 const PLAYER1_COLORS: u16 = 35;
+/// Avisos do port (sem texto no `SYSTEM.RES`): sem pasta de dados do usuário (sem `HOME`)
+/// e nome de jogo salvo vazio depois de limpo.
+pub const NO_STORAGE: &str = "SAVED GAMES ARE NOT AVAILABLE: NO HOME FOLDER.";
+pub const EMPTY_NAME: &str = "TYPE A NAME WITH LETTERS OR DIGITS.";
 
 /// Qual tela da M9 está aberta.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +112,8 @@ pub(super) struct Casca {
     pub(super) improved: bool,
     /// A contagem do resultado já chegou a 100 (nome e gravação feitos).
     count_done: bool,
+    /// Escolha do resultado feita antes da contagem acabar, à espera do nome e da gravação.
+    after_count: Option<Choice>,
     /// Resultado à espera sob uma tela (carro, nome) e o filme depois do carro.
     pending: Option<Box<Results>>,
     film: Option<Film>,
@@ -291,7 +297,7 @@ impl App {
         self.last_menu_button = id;
         let font = self.font.clone();
         match id {
-            menu::RESTORE if self.m9.storage.is_some() => {
+            menu::RESTORE => {
                 let title = self.sys_text(LOAD_GAME);
                 let last = self
                     .m9
@@ -306,6 +312,9 @@ impl App {
                         PageKind::LoadName,
                         |s, _| Box::new(NameEntry::new(s, f, Some(title), &last)),
                     );
+                }
+                if self.m9.storage.is_none() {
+                    self.set_notice(NO_STORAGE);
                 }
             }
             menu::CHOOSE_LEVEL => {
@@ -467,13 +476,20 @@ impl App {
             (PageKind::HeroName, Reply::Close) => self.save_step(),
             (PageKind::SaveName, Reply::Name(n)) => {
                 let n = clean_name(&n);
-                if let (false, Some(st)) = (n.is_empty(), &self.m9.storage) {
-                    let p = st.save_path(&n);
-                    self.write_save(p);
+                match &self.m9.storage {
+                    None => self.set_notice(NO_STORAGE),
+                    Some(_) if n.is_empty() => self.set_notice(EMPTY_NAME),
+                    Some(st) => {
+                        let p = st.save_path(&n);
+                        self.write_save(p);
+                        self.back_to_results();
+                    }
                 }
-                self.back_to_results();
             }
             (PageKind::SaveName, Reply::Close) => self.back_to_results(),
+            (PageKind::LoadName, Reply::Name(_)) if self.m9.storage.is_none() => {
+                self.set_notice(NO_STORAGE)
+            }
             (PageKind::LoadName, Reply::Name(n)) => {
                 if !self.restore(&n) {
                     let t = self.sys_text(INVALID_SAVE);
@@ -606,10 +622,16 @@ impl App {
         }
     }
 
-    /// Filme na tela: desenha direto em RGBA.
+    /// Filme na tela: desenha direto em RGBA. No primeiro quadro desenhado, o relógio do
+    /// filme e o áudio dele começam juntos (a abertura é criada antes da janela).
     pub(super) fn render_movie(&mut self, out: &mut [u8]) -> bool {
-        if let State::Show(s) = &self.state {
-            if let Some(Running::Film(m)) = &s.cur {
+        if let State::Show(s) = &mut self.state {
+            if let Some(Running::Film(m)) = &mut s.cur {
+                if m.start() {
+                    if let (Some(a), Some(mu)) = (&m.audio, self.m9.music.as_mut()) {
+                        mu.play_film(a.clone());
+                    }
+                }
                 m.render_rgba(out);
                 return true;
             }
@@ -619,7 +641,7 @@ impl App {
 
     // ---- música ----
 
-    pub(super) fn update_music(&mut self) {
+    pub(super) fn update_music(&mut self, ms: u32) {
         let mode = self.mode();
         let Some(m) = self.m9.music.as_mut() else {
             return;
@@ -628,7 +650,7 @@ impl App {
         match mode {
             Mode::Menu | Mode::Results | Mode::Page => m.menu(),
             Mode::Play | Mode::Paused => {
-                if let Some(p) = m.game() {
+                if let Some(p) = m.game(ms) {
                     self.m9.track_title = Some(track_name(&p, &self.system));
                 }
             }
@@ -647,6 +669,7 @@ impl App {
         first_win: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.m9.count_done = false;
+        self.m9.after_count = None;
         let piece = first_win
             && self.viewer.as_ref().is_some_and(|v| {
                 v.scene()
@@ -677,9 +700,32 @@ impl App {
 
     fn back_to_results(&mut self) {
         match self.m9.pending.take() {
-            Some(r) => self.state = State::Results(r),
+            Some(r) => {
+                self.state = State::Results(r);
+                if let Some(c) = self.m9.after_count.take() {
+                    self.dispatch_results(Some(c));
+                }
+            }
             None => self.go_menu(),
         }
+    }
+
+    /// Antes de seguir uma escolha do resultado: se a contagem não acabou, acaba agora (nome
+    /// do herói e gravação). Devolve se a escolha segue já; senão ela fica à espera da tela
+    /// aberta e segue quando o resultado volta.
+    pub(super) fn finish_count_before(&mut self, c: Choice) -> bool {
+        if self.m9.count_done {
+            return true;
+        }
+        if let State::Results(r) = &mut self.state {
+            r.skip_count();
+        }
+        self.count_finished();
+        if matches!(self.state, State::Results(_)) {
+            return true;
+        }
+        self.m9.after_count = Some(c);
+        false
     }
 
     /// A contagem chegou a 100 (uma vez): nome na lista de heróis e gravação do jogo.
@@ -772,7 +818,6 @@ impl App {
         let i = self.index.unwrap_or(0) as i32;
         SaveGame {
             name: self.m9.player.clone(),
-            list_len: self.missions.len() as i32,
             solo_count: self.missions.len() as i32,
             current: i,
             last_loaded: i,
@@ -860,11 +905,9 @@ impl App {
             Step::Film(f) => {
                 let name = self.m9.config.movie(f);
                 let movie = self.m9.movies.as_mut().and_then(|mk| mk(name))?;
+                // o áudio começa com o primeiro quadro na tela (`render_movie`)
                 if let Some(m) = self.m9.music.as_mut() {
-                    match &movie.audio {
-                        Some(a) => m.play_film(a.clone()),
-                        None => m.silence(),
-                    }
+                    m.silence();
                 }
                 Some(Running::Film(movie))
             }
@@ -1088,7 +1131,9 @@ mod tests {
         assert_eq!(a.save_path(), Some(path.as_path()));
         let saved = read_save(&path).unwrap();
         assert_eq!(saved, a.save_game(&path), "gravado e relido igual");
-        assert_eq!(&saved.to_bytes()[0x7a0..0x7a8], &[0; 8]);
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[0xa0..0xa4], &[0; 4], "o original remonta a lista");
+        assert_eq!(&bytes[0x7a0..0x7a8], &[0; 8]);
         assert_eq!(saved.records[0], a.records[0]);
         assert!(saved.hero_id > 0);
         // carregar noutra sessão: a T_J_001 já tem recorde → a próxima sem recorde
@@ -1107,6 +1152,109 @@ mod tests {
         assert_eq!(c.notice(), Some("UNABLE TO LOAD. INVALID GAME FORMAT."));
         c.key_down(Key::Enter);
         assert_eq!(c.notice(), None);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_results_choice_before_the_count_ends_still_asks_and_saves() {
+        use openhunted_engine::shell::results;
+        let root = temp("app-early");
+        let Some(mut a) = app(&root, None) else {
+            return;
+        };
+        a.key_down(Key::Enter); // New Game
+        run(&mut a, 6);
+        a.key_down(Key::Enter); // GO
+        run(&mut a, 6);
+        win(&mut a, false);
+        assert_eq!(a.mode(), super::super::Mode::Results);
+        // clique em NEXT com a contagem no começo: o botão ativa sem a contagem fechar
+        let r = a.screen().unwrap().rect(results::NEXT).unwrap();
+        a.pointer_move(r.x + r.w / 2, r.y + r.h / 2);
+        a.pointer_button(true);
+        a.pointer_button(false);
+        a.dispatch_results(Some(results::Choice::Next));
+        assert_eq!(
+            a.page_kind(),
+            Some(PageKind::HeroName),
+            "o nome antes do NEXT"
+        );
+        a.text_input("ANA");
+        a.key_down(Key::Enter);
+        assert_eq!(a.page_kind(), Some(PageKind::SaveName));
+        a.key_down(Key::Enter); // o nome do herói já vem
+        let st = Storage::at(&root);
+        assert_eq!(st.heroes().heroes[0].name, "ANA");
+        assert!(read_save(&st.save_path("ANA")).is_some(), "gravado");
+        // e então o NEXT pedido
+        assert_eq!(a.mode(), super::super::Mode::Briefing);
+        assert_eq!(a.mission_index(), Some(1));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn restore_without_storage_and_an_empty_save_name_explain_themselves() {
+        let Some(d) = data() else {
+            return;
+        };
+        let mut a = App::load(&d, None).unwrap();
+        click(&mut a, menu::RESTORE);
+        assert_eq!(
+            a.page_kind(),
+            Some(PageKind::LoadName),
+            "o botão não fica morto"
+        );
+        assert_eq!(a.notice(), Some(NO_STORAGE));
+        a.key_down(Key::Enter);
+        assert_eq!(a.notice(), None);
+        a.key_down(Key::Enter);
+        assert_eq!(a.notice(), Some(NO_STORAGE));
+        a.key_down(Key::Enter);
+        a.key_down(Key::Escape);
+        assert_eq!(a.mode(), super::super::Mode::Menu);
+        // nome que a limpeza esvazia: aviso e o campo continua aberto
+        let root = temp("app-empty-name");
+        let mut b = app(&root, None).unwrap();
+        b.key_down(Key::Enter); // New Game
+        run(&mut b, 6);
+        b.key_down(Key::Enter); // GO
+        run(&mut b, 6);
+        win(&mut b, false);
+        b.key_down(Key::Enter);
+        run(&mut b, 2);
+        assert_eq!(b.page_kind(), Some(PageKind::HeroName));
+        b.text_input("!!!");
+        b.key_down(Key::Enter);
+        assert_eq!(b.page_kind(), Some(PageKind::SaveName));
+        b.key_down(Key::Enter);
+        assert_eq!(b.notice(), Some(EMPTY_NAME));
+        b.key_down(Key::Enter);
+        assert_eq!(b.page_kind(), Some(PageKind::SaveName), "ainda pede o nome");
+        assert_eq!(b.save_path(), None);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_prefilled_restore_name_finds_the_same_file() {
+        let root = temp("app-latest");
+        let Some(mut a) = app(&root, None) else {
+            return;
+        };
+        let st = Storage::at(&root);
+        // um nome de 31 caracteres (o máximo do campo) e um arquivo que o port não nomearia
+        let long = "A".repeat(storage::SAVE_NAME_MAX);
+        let g = a.save_game(&st.save_path(&long));
+        storage::write(&st.save_path(&long), &g.to_bytes()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        storage::write(&st.saves_dir().join("x.y.hhg"), &g.to_bytes()).unwrap();
+        assert_eq!(st.latest_save().as_deref(), Some(long.as_str()));
+        click(&mut a, menu::RESTORE);
+        a.key_down(Key::Enter);
+        assert_eq!(
+            a.mode(),
+            super::super::Mode::Briefing,
+            "carregou o pré-preenchido"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -1141,6 +1289,74 @@ mod tests {
         assert_eq!(*asked.borrow(), ["MIDDARK.AVI"]);
         assert_eq!(a.mode(), super::super::Mode::Results);
         // a mesma missão de novo não dá peça
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Saída de música que registra o que tocou.
+    struct Rec(Rc<RefCell<Vec<String>>>);
+
+    impl crate::audio::SoundOut for Rec {
+        fn play(&mut self, id: u16, _: Arc<Pcm>, _: u16, _: u8, _: i16) {
+            self.0.borrow_mut().push(format!("play {id}"));
+        }
+    }
+
+    fn movie_frames(a: &App) -> Option<u64> {
+        match &a.state {
+            State::Show(s) => match &s.cur {
+                Some(Running::Film(m)) => Some(m.frames_shown()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn film_audio_and_clock_start_with_the_first_frame_on_screen() {
+        let root = temp("app-film-clock");
+        let Some(mut a) = app(&root, None) else {
+            return;
+        };
+        let log = Rc::new(RefCell::new(Vec::new()));
+        a.set_music(Box::new(Rec(log.clone())), vec![]);
+        a.set_movies(Box::new(|_| {
+            let pcm = Pcm {
+                rate: 22_050,
+                channels: 2,
+                samples: vec![0; 4],
+            };
+            Some(Movie::new(Box::new(Fake { n: 30, i: 0 }), Some(pcm)))
+        }));
+        let film = format!("play {}", crate::music::FILM_ID);
+        // a abertura é criada antes da janela: nada toca nem anda até o primeiro quadro
+        a.play_intro();
+        a.advance(400);
+        assert!(
+            !log.borrow().contains(&film),
+            "sem quadro na tela, sem áudio"
+        );
+        assert_eq!(movie_frames(&a), Some(1));
+        let mut rgba = vec![0u8; 640 * 480 * 4];
+        a.render_rgba(&mut rgba);
+        assert!(
+            log.borrow().contains(&film),
+            "o áudio com o primeiro quadro"
+        );
+        // o avanço seguinte traz o tempo de abrir o filme (~0,4 s): descartado
+        a.advance(450);
+        assert_eq!(
+            movie_frames(&a),
+            Some(1),
+            "o vídeo não corre na frente do áudio"
+        );
+        a.advance(140);
+        assert_eq!(movie_frames(&a), Some(3));
+        a.render_rgba(&mut rgba);
+        assert_eq!(
+            log.borrow().iter().filter(|l| **l == film).count(),
+            1,
+            "o áudio começa uma vez"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

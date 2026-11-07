@@ -20,11 +20,13 @@ Engenharia reversa: [`docs/re/anm.md`](../re/anm.md). Inteiros little-endian.
 | C × 4 | Rótulos: `u16` quadro inicial, `u16` id |
 | D | Roteiro: instruções `s16` opcode + argumentos `s16` |
 
-**Tabela A** [inferido pelos dados]: vazia na maioria; não vazia em `SEGOC`, `SHERO`,
-`SLEVL`, `S_CAR`, `SIERRA` e `OCH`, onde os rótulos passam do número de quadros (ex.:
-`S_CAR` tem 364 quadros, 976 entradas e rótulos até 847). Os rótulos contam quadros
-**lógicos**, e a entrada `i` dá o quadro físico do lógico `i` (repetições seguram um
-quadro). As telas (`Screen`) seguem isso desde a M9; os objetos de jogo (`OCH`) ainda não.
+**Tabela A** [confirmado]: lida por `0x447a16` (campos `+0` e `+0xc` do objeto da
+animação) e usada pelos acessores `0x446edd`, `0x447222`, `0x4472dc`, `0x447380`,
+`0x44747d` e `0x4480c9`. Vazia na maioria; não vazia em `SEGOC`, `SHERO`, `SLEVL`, `S_CAR`,
+`SIERRA` e `OCH`, onde os rótulos passam do número de quadros (ex.: `S_CAR` tem 364
+quadros, 976 entradas e rótulos até 847). Os rótulos contam quadros **lógicos**, e a entrada
+`i` dá o quadro físico do lógico `i` (repetições seguram um quadro). As telas (`Screen`) e
+os créditos seguem isso desde a M9; os objetos de jogo (`OCH`) ainda não.
 
 Tamanho de cada instrução em palavras, opcode incluído:
 

@@ -191,7 +191,8 @@ impl Mixer {
                     if !v.looping {
                         break;
                     }
-                    v.pos -= total << 16;
+                    // o passo pode passar de um laço inteiro (som curto, taxa alta)
+                    v.pos %= total << 16;
                     f = v.pos >> 16;
                 }
                 let i = f as usize * ch;
@@ -403,6 +404,22 @@ pub(crate) mod tests {
             bits_per_sample: bits,
             data: data.to_vec(),
         }
+    }
+
+    #[test]
+    fn loops_shorter_than_one_step_wrap_inside_the_sound() {
+        // 1 quadro a 44 100 Hz numa saída de 11 025 Hz: passo de 4 quadros por amostra
+        let mut m = Mixer::new(11_025);
+        let pcm = Arc::new(Pcm {
+            rate: 44_100,
+            channels: 1,
+            samples: vec![1000],
+        });
+        assert!(m.play_looped(5, pcm, 1, 100));
+        let mut out = [0i16; 64];
+        m.mix(&mut out);
+        assert!(m.is_playing(5));
+        assert!(out.iter().all(|&s| s != 0), "toca a amostra em laço");
     }
 
     #[test]

@@ -20,7 +20,6 @@ pub const MAX_HEROES: usize = 14;
 mod off {
     pub const NAME: usize = 0x020;
     pub const NAME_LEN: usize = 128;
-    pub const LIST_LEN: usize = 0x0a0;
     pub const SOLO_COUNT: usize = 0x0a4;
     pub const CURRENT: usize = 0x0ac;
     pub const LAST_LOADED: usize = 0x0b0;
@@ -33,14 +32,15 @@ mod off {
     pub const RECORDS: usize = 0x2f0;
 }
 
-/// Estado da campanha gravado (`0x47f79c`). Os campos efêmeros (`0x0a8`, o ponteiro da
-/// lista em `0x7a0` e `0x7a4`) não são guardados: na escrita valem zero.
+/// Estado da campanha gravado (`0x47f79c`). Os campos efêmeros (o tamanho da lista em
+/// `0x0a0`, `0x0a8`, o ponteiro da lista em `0x7a0` e a capacidade dela em `0x7a4`) não são
+/// guardados: na escrita valem zero e na leitura são ignorados. Com `0x0a0 = 0`, o original
+/// remonta a lista (`0x4406d3`) no NEXT seguinte (`0x440e95`); com a contagem e o ponteiro
+/// nulo, ele leria `[0x47ff3c]` (`0x440f25`, `0x440388`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaveGame {
     /// Nome do jogador (o da lista de heróis).
     pub name: String,
-    /// Número de entradas da lista de missões (`0x47f83c`, efêmero no original).
-    pub list_len: i32,
     /// Missões da campanha no modo solo (`0x47f840`).
     pub solo_count: i32,
     /// Índice da missão corrente (`0x47f848`).
@@ -65,7 +65,6 @@ impl Default for SaveGame {
     fn default() -> Self {
         Self {
             name: String::new(),
-            list_len: 0,
             solo_count: 0,
             current: 0,
             last_loaded: 0,
@@ -117,7 +116,6 @@ impl SaveGame {
         }
         Ok(Self {
             name: cstr(&d[off::NAME..off::NAME + off::NAME_LEN]),
-            list_len: i32_at(d, off::LIST_LEN),
             solo_count: i32_at(d, off::SOLO_COUNT),
             current: i32_at(d, off::CURRENT),
             last_loaded: i32_at(d, off::LAST_LOADED),
@@ -138,7 +136,6 @@ impl SaveGame {
         d[..SIGNATURE.len()].copy_from_slice(SIGNATURE.as_bytes());
         put_cstr(&mut d[off::NAME..off::NAME + off::NAME_LEN], &self.name);
         let mut put = |o: usize, v: i32| d[o..o + 4].copy_from_slice(&v.to_le_bytes());
-        put(off::LIST_LEN, self.list_len);
         put(off::SOLO_COUNT, self.solo_count);
         put(off::CURRENT, self.current);
         put(off::LAST_LOADED, self.last_loaded);
@@ -270,7 +267,6 @@ mod tests {
         records[299] = -1;
         SaveGame {
             name: "JAKE".into(),
-            list_len: 40,
             solo_count: 40,
             current: 5,
             last_loaded: 4,
@@ -303,10 +299,18 @@ mod tests {
     #[test]
     fn ephemeral_fields_and_pointer_are_zero_and_ignored() {
         let mut b = sample().to_bytes();
+        // 0x0a0 = 0: o original só remonta a lista (`0x4406d3`) com 0x47f83c = 0; com a
+        // contagem e o ponteiro nulo, o NEXT (`0x440f25`) lê [0x47ff3c] → falha
+        assert_eq!(&b[0xa0..0xa4], &[0; 4], "tamanho da lista nunca gravado");
         assert_eq!(&b[0xa8..0xac], &[0; 4]);
-        assert_eq!(&b[0x7a0..0x7a8], &[0; 8], "ponteiro e 0x7a4 nunca gravados");
+        assert_eq!(
+            &b[0x7a0..0x7a8],
+            &[0; 8],
+            "ponteiro e capacidade nunca gravados"
+        );
         // um arquivo do original com lixo nesses campos lê igual
         b[0x7a0..0x7a8].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4]);
+        b[0xa0] = 40;
         b[0xa8] = 9;
         assert_eq!(SaveGame::parse(&b).unwrap(), sample());
     }

@@ -756,6 +756,10 @@ impl App {
 
     fn dispatch_results(&mut self, choice: Option<results::Choice>) {
         let Some(c) = choice else { return };
+        // a contagem não chegou a 100: nome do herói e gravação antes da escolha
+        if !self.finish_count_before(c) {
+            return;
+        }
         let old = std::mem::replace(
             &mut self.state,
             State::Play {
@@ -816,7 +820,7 @@ impl App {
         } else {
             self.advance_inner(ms);
         }
-        self.update_music();
+        self.update_music(ms);
         self.flush_sounds();
     }
 
