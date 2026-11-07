@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Cena de uma fase: blocos de cenário, decorações e objetos, com as animações em curso.
 
+mod ai;
 mod arsenal;
 mod cell_door;
 mod garathe;
@@ -13,8 +14,8 @@ use std::collections::HashMap;
 use openhunted_formats::{Animation, Border, BorderBox, Level, LevelObject, Result};
 
 use crate::behaviour::{self, Ctx, Event, Out, Outcome};
-use crate::entity::{BOX, Behaviour, Entity, from_object, object_scale, object_start};
-use crate::jake::{Env, Skel, SpecialBlast, Zone, zone};
+use crate::entity::{BOX, Behaviour, Entity, from_object};
+use crate::jake::{Env, SpecialBlast, Zone, zone};
 use crate::objects::{SOLO, flags, is_player_start, present};
 use crate::physics::{Rect, SUB, World};
 use crate::rng::Rng;
@@ -61,7 +62,11 @@ pub struct Sprite {
 /// A entidade barra o Jake (`objects::blocks` sobre os sinalizadores dela; só caixas do BRD
 /// ou própria, e só o que ainda está em jogo).
 fn blocks_entity(jake_flags: i32, e: &Entity) -> bool {
-    e.alive && e.solid_shapes && crate::objects::blocks_flags(jake_flags, e.flags)
+    // Ruling (M11): personagens não se barram
+    e.alive
+        && e.solid_shapes
+        && !matches!(e.behaviour, Behaviour::AiPlayer(_))
+        && crate::objects::blocks_flags(jake_flags, e.flags)
 }
 
 /// Parâmetros de um projétil a criar.
@@ -155,11 +160,18 @@ pub struct Scene {
     pub quake: u32,
     /// Último tique de cada som com limite global de repetição (sentinelas, robôs).
     sound_clock: HashMap<u16, u32>,
+    /// Tiros dos personagens da IA: (índice do tiro, índice do dono).
+    ai_shots: Vec<(usize, usize)>,
+    /// Grade de células da IA (bits de passagem, zonas, portas).
+    ai_grid: crate::ai::CellGrid,
     /// Dificuldade (`0x487854`): a casca a põe pela opção gravada; padrão médio.
     pub difficulty: crate::Difficulty,
     /// Confusão do jogador (`+0x264`): tiques com os pares de direção trocados (Entidade).
     pub confusion: u32,
 }
+
+/// Empurrão da derrubada do especial num personagem da IA (Ruling: valor não lido).
+const SPECIAL_KNOCKDOWN: (i32, i32) = (10, -10);
 
 /// Tiques por segundo do cronômetro (`0x43c95c`).
 pub const TIMER_TICKS_PER_SECOND: i32 = 20;
@@ -363,6 +375,8 @@ impl Scene {
             sound_clock: HashMap::new(),
             difficulty: crate::Difficulty::Normal,
             confusion: 0,
+            ai_shots: Vec::new(),
+            ai_grid: crate::ai::CellGrid::default(),
         }
     }
 
@@ -413,6 +427,8 @@ impl Scene {
             sound_clock: HashMap::new(),
             difficulty: crate::Difficulty::Normal,
             confusion: 0,
+            ai_shots: Vec::new(),
+            ai_grid: crate::ai::CellGrid::default(),
         };
         let mut scenery = 0usize;
         let mut jake_layer = 0;
@@ -585,92 +601,18 @@ impl Scene {
         }
         for o in objects {
             if is_player(o, solo) && s.jake.is_none() {
-                let ch = crate::character::Character::from_kind(o.kind).unwrap_or_default();
-                let prof = ch.profile();
-                match assets.animation(&o.names[0]) {
-                    Ok(a) => {
-                        let n = o.fields.len();
-                        let (ta, tb) = if n >= 2 {
-                            (o.fields[n - 2], o.fields[n - 1])
-                        } else {
-                            (0, 0)
-                        };
-                        let (ref_frame, player, _) = object_start(o, &a);
-                        let (rw, rh) = a
-                            .frames
-                            .get(ref_frame)
-                            .map_or((0, 0), |f| (i32::from(f.width), i32::from(f.height)));
-                        let scale = object_scale(ta, tb, rw, rh);
-                        let sc = |v: i32| v * scale.0 / scale.1.max(1);
-                        // o esqueleto do Jake tem id 1 (o do Garathe, 2)
-                        let skel = match assets
-                            .archive()
-                            .get(prof.ske)
-                            .and_then(openhunted_formats::Skeleton::parse)
-                        {
-                            Ok(k) if k.id == prof.ske_id => {
-                                Some(Skel::new(Rc::new(k), (sc(rw), sc(rh))))
-                            }
-                            Ok(k) => {
-                                s.warnings.push(format!(
-                                    "{}: id {} (esperado {})",
-                                    prof.ske, k.id, prof.ske_id
-                                ));
-                                None
-                            }
-                            Err(e) => {
-                                s.warnings.push(format!("{}: {e}", prof.ske));
-                                None
-                            }
-                        };
-                        let brd = |name: &str, fallback: Rect| {
-                            assets
-                                .archive()
-                                .get(name)
-                                .and_then(Border::parse)
-                                .ok()
-                                .and_then(|b| border_bounds(&b))
-                                .unwrap_or(fallback)
-                        };
-                        let crawl = brd(prof.crawl_brd, crate::jake::CRAWL_BOX);
-                        let bar = brd(prof.bar_brd, crate::jake::BAR_BOX);
-                        let boxr = assets
-                            .archive()
-                            .get(&o.names[1])
-                            .and_then(Border::parse)
-                            .ok()
-                            .and_then(|b| border_bounds(&b))
-                            .unwrap_or(JAKE_BOX);
-                        jake_layer = o.fields.get(4).copied().unwrap_or(0);
-                        jake_flags = flags(o);
-                        let player = AnimPlayer::at_label(&a, 1).unwrap_or(player);
-                        let field = |i: usize| o.fields.get(i).copied().unwrap_or(0);
-                        let mut j = Jake::new(o.x, o.y, boxr, label_lengths(&a))
-                            .with_character(ch)
-                            .with_health(field(14), field(15))
-                            .with_inventory(crate::jake::Inventory::for_character(&o.points, ch))
-                            .with_layer(jake_layer)
-                            .with_boxes(crawl, bar);
-                        if let Some(k) = skel {
-                            j = j.with_skeleton(k);
-                        }
-                        s.jake = Some(j);
-                        s.jake_sprite = Some(Sprite {
-                            layer: Layer::Object,
-                            anim: a,
-                            player,
-                            x: o.x,
-                            y: o.y,
-                            frozen: false,
-                            scale,
-                            mirror: false,
-                        });
-                        continue;
-                    }
-                    Err(e) => {
-                        s.warnings
-                            .push(format!("objeto tipo {} ({}): {e}", o.kind, o.names[0]));
-                    }
+                if let Some((j, sp)) = ai::character(o, assets, &mut s.warnings) {
+                    jake_layer = j.layer();
+                    jake_flags = flags(o);
+                    s.jake = Some(j);
+                    s.jake_sprite = Some(sp);
+                    continue;
+                }
+            } else if ai::is_ai(o) {
+                // personagem sem jogador: a IA (M11)
+                if let Some(e) = ai::ai_entity(o, assets, &mut s.warnings) {
+                    s.entities.push(e);
+                    continue;
                 }
             }
             let e = from_object(o, assets, &mut s.warnings);
@@ -712,6 +654,7 @@ impl Scene {
             }
         }
         s.mines_at_start = behaviour::enemy::kills_total(&s.entities);
+        s.ai_grid = ai::cell_grid(level, &s.prop_zones);
         Ok(s)
     }
 
@@ -845,8 +788,10 @@ impl Scene {
         self.tick_cell_doors();
         self.spawn_shots();
         if self.outcome.is_none() {
+            self.tick_ai_players();
             // balas à queima-roupa: acertam já na boca, antes de voar
             let mut pre = Out::default();
+            self.ai_shots_hit_human(&mut pre);
             self.bullet_hits(&mut pre);
             self.resolve_impacts(&mut pre);
             self.entities.extend(pre.spawn);
@@ -892,6 +837,10 @@ impl Scene {
             sp.player.tick(&anim);
         }
         for e in self.entities.iter_mut().filter(|e| e.alive) {
+            if matches!(e.behaviour, Behaviour::AiPlayer(_)) {
+                // o sprite segue o corpo (`tick_ai_players`)
+                continue;
+            }
             if let Some(sp) = e.sprite.as_mut() {
                 sp.x = e.x;
                 sp.y = e.y;
@@ -1099,8 +1048,11 @@ impl Scene {
                 .collect();
             let mut v = Vec::new();
             for (bi, bb, layer) in bullets {
-                let victim = self.entities.iter().position(|e| {
-                    e.alive
+                // o dono (personagem da IA) não é vítima das próprias balas
+                let owner = self.ai_owner(bi);
+                let victim = self.entities.iter().enumerate().position(|(k, e)| {
+                    Some(k) != owner
+                        && e.alive
                         && e.solid_shapes
                         && e.layer == layer
                         && e.flags & 0x80003 == 0x80001
@@ -1128,7 +1080,12 @@ impl Scene {
                     ..
                 })
             );
-            if let Behaviour::Mine(_) = self.entities[vi].behaviour {
+            if let Some((kind, at)) = self.ai_victim(vi) {
+                // linha (19, 1) no personagem da IA
+                if let Some(p) = ai::hit_on_character(&self.entities[bi], kind, at) {
+                    behaviour::enemy::hurt(&mut self.entities[vi], &p, by_player);
+                }
+            } else if let Behaviour::Mine(_) = self.entities[vi].behaviour {
                 self.entities[vi].health = 0;
             } else if behaviour::enemy::hurt(
                 &mut self.entities[vi],
@@ -1358,7 +1315,17 @@ impl Scene {
             }
             match SpecialBlast::effect(e.kind) {
                 crate::jake::SpecialEffect::Destroy => e.alive = false,
-                crate::jake::SpecialEffect::Knockdown => {}
+                crate::jake::SpecialEffect::Knockdown => {
+                    // personagem da IA a < 70 px: derrubado para longe do centro (M11)
+                    if let Behaviour::AiPlayer(a) = &mut e.behaviour {
+                        let dir = if e.x >= b.center.0 { 1 } else { -1 };
+                        a.body.hurt(crate::damage::Pending {
+                            knockdown: true,
+                            push: (dir * SPECIAL_KNOCKDOWN.0, SPECIAL_KNOCKDOWN.1),
+                            ..Default::default()
+                        });
+                    }
+                }
                 crate::jake::SpecialEffect::Damage => {
                     // pelo mesmo caminho das balas: mina (vida), barril (natureza 0: nada),
                     // olho-laser (qualquer dano mata) e os inimigos da M7a; a cerca não trata
@@ -1471,6 +1438,7 @@ impl Scene {
             }
         }
         self.rng = rng;
+        self.ai_shots_hit_human(&mut out);
         self.bullet_hits(&mut out);
         behaviour::enemy_shot::object_hits(&mut self.entities, &mut self.rng, &mut out);
         self.weapon_hits(&mut out);
@@ -1714,6 +1682,7 @@ impl Scene {
 mod tests {
     use super::*;
     use crate::State;
+    use crate::entity::{object_scale, object_start};
     use openhunted_formats::test_support::{mkanm, mkarchive, mkbmp};
     use openhunted_formats::{Cell, Level, LevelObject, ResourceArchive};
 

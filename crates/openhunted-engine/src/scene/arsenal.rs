@@ -34,7 +34,7 @@ pub const BORDERS: [&str; 11] = [
 ];
 
 /// Projétil das armas 3–6 em voo: (posição anterior, já parado no cenário).
-fn flight(e: &Entity) -> Option<(Option<(i32, i32)>, bool)> {
+pub(super) fn flight(e: &Entity) -> Option<(Option<(i32, i32)>, bool)> {
     match &e.behaviour {
         Behaviour::Pellet(s) => Some((s.prev, s.spent)),
         Behaviour::Rocket(s) => Some((s.prev, s.spent)),
@@ -175,9 +175,12 @@ impl Scene {
                 continue;
             };
             let (layer, kind) = (e.layer, e.kind);
+            // o dono (personagem da IA) não é vítima dos próprios projéteis
+            let owner = self.ai_owner(i);
             let victim = (0..n).find(|&k| {
                 let v = &self.entities[k];
                 k != i
+                    && Some(k) != owner
                     && v.alive
                     && v.solid_shapes
                     && v.layer == layer
@@ -202,7 +205,7 @@ impl Scene {
     }
 
     /// Impacto do projétil `i` (na vítima, ou no cenário com `None`).
-    fn weapon_impact(&mut self, i: usize, victim: Option<usize>, out: &mut Out) {
+    pub(super) fn weapon_impact(&mut self, i: usize, victim: Option<usize>, out: &mut Out) {
         use crate::behaviour::{grenade, pellet, rocket, star};
         let e = &self.entities[i];
         let (c, layer) = (e.center(), e.layer);
@@ -261,6 +264,13 @@ impl Scene {
                 Some((grenade::RADIUS, grenade::PUSH, grenade::AREA)),
             ),
             _ => return,
+        };
+        // personagem da IA: a linha da vítima 1/2 (`DAMAGE.TBL`)
+        let direct = match victim.and_then(|vi| self.ai_victim(vi)) {
+            Some((kind, at)) => {
+                super::ai::hit_on_character(&self.entities[i], kind, at).unwrap_or_default()
+            }
+            None => direct,
         };
         self.entities[i].alive = false;
         if let Some(vi) = victim.filter(|_| !direct.is_empty()) {

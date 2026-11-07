@@ -201,6 +201,11 @@ pub enum Spawn {
 /// Soma o dano a um inimigo desta fatia; `false` se não é um deles.
 pub fn hurt(e: &mut Entity, p: &Pending, by_player: bool) -> bool {
     let w = match &mut e.behaviour {
+        // personagem da IA: o dano vai ao corpo (armadura, reações e morte do jogador)
+        Behaviour::AiPlayer(a) => {
+            a.body.hurt(*p);
+            return true;
+        }
         Behaviour::Sentinel(s) => &mut s.wound,
         Behaviour::HopMine(s) => &mut s.wound,
         Behaviour::MineGenerator(s) => &mut s.wound,

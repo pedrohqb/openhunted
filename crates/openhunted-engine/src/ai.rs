@@ -156,6 +156,8 @@ pub struct AiPlayer {
     pub brain: Brain,
     /// Já investiu contra o jogador neste pulo longo.
     pub body_checked: bool,
+    /// Sorteios do cérebro (próprios: não mexem na sequência dos demais objetos).
+    pub rng: Rng,
 }
 
 /// O que o cérebro vê de um personagem.

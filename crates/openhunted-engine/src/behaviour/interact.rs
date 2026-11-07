@@ -118,7 +118,7 @@ pub fn apply_hazards(entities: &mut [Entity], hazards: &[Hazard]) {
             .iter_mut()
             .filter(|e| e.alive && e.layer == h.layer)
         {
-            if !matches!(e.behaviour, Behaviour::Barrel(_)) {
+            if !matches!(e.behaviour, Behaviour::Barrel(_) | Behaviour::AiPlayer(_)) {
                 continue;
             }
             let inside = e.bounds().is_some_and(|b| match h.source {

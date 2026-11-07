@@ -269,9 +269,16 @@ fn jake_can_move_in_every_level() {
         return;
     }
     for level in mission_files() {
-        let (s0, _) = load(&level).unwrap();
+        let (mut s0, _) = load(&level).unwrap();
         if s0.jake.is_none() {
             continue;
+        }
+        // só a geometria: os personagens da IA (M11) atiram e empurram o jogador de perto
+        // (o Jake da IA da H_M_027 começa a 135 px do Garathe)
+        for e in s0.entities.iter_mut() {
+            if matches!(e.behaviour, openhunted_engine::Behaviour::AiPlayer(_)) {
+                e.alive = false;
+            }
         }
         // assentado (40 tiques) ou logo depois de pousar (12): o piso que cede sob o Jake
         // parado (porta `OH_F` da D_J_007, aberta por 10 tiques de toque) o derruba num poço

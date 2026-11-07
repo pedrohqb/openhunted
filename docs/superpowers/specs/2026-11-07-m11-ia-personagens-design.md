@@ -28,10 +28,10 @@ do Jake e Jakes inimigos nas do Garathe (hoje estátuas que travam o "destruir")
 - Dano à IA: `enemy::hurt` encaminha ao `body.hurt` (bala, chumbo, foguete, estrela, faca,
   chicote, soco, investida, explosões; o fogo e a cerca por `apply_hazards`). A armadura vale;
   **sem** fator de dificuldade (`0x4283b7`). O especial do jogador derruba a IA a < 70 px.
-- Linhas do `DAMAGE.TBL` com vítima jogador (1) ou Garathe (2), para o humano e para a IA:
-  bala 19 → 2 com empurrão; chumbo 20 → Jake 10 e derrubada, Garathe 10 e empurrão; estrela
-  27 → 5 e empurrão (sem natureza); faca 25 → 12 e empurrão; chicote 108 → 20 e derrubada;
-  foguete 21 → 20. O soco usa o golpe do corpo (`blow`, linha da arma) como o do jogador.
+- Acertos entre personagens pela linha do `DAMAGE.TBL` (`damage::row`) com o tipo da vítima
+  (1 ou 2): bala 19 → 2 e empurrão; chumbo 20 → Jake derrubado, Garathe empurrado; faca,
+  estrela, chicote e foguete pelas linhas deles; o soco pelo `Strike` do corpo. Os tiros dos
+  inimigos acertam a IA como a qualquer objeto sólido.
 - **Ruling:** personagens não se barram (todos têm `0x4000`, `blocks_flags`).
 - Morte pelo código do jogador; o cadáver fica (`alive`), com `solid_shapes = false` e
   `flags |= 0x8000`; vida ≤ 0 cumpre o "destruir". Tipos 1 e 2 não contam mortes.

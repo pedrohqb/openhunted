@@ -171,6 +171,8 @@ pub enum Behaviour {
     TheEntity(crate::behaviour::the_entity::TheEntityState),
     Anthill(crate::behaviour::ant::AnthillState),
     Ant(crate::behaviour::ant::AntState),
+    /// Personagem da IA (M11): corpo do jogador e cérebro.
+    AiPlayer(Box<crate::ai::AiPlayer>),
 }
 
 #[derive(Debug, Clone)]

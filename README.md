@@ -11,6 +11,11 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M11: personagens do computador.** Minotauros e Jakes sem jogador agem pela IA do original
+(veem a 400 px, caçam, recuam, vagam, socam ou atiram pela distância, pulam buracos, fogem de
+perigos, seguem o jogador de célula em célula), com o corpo do jogador: as balas do jogador os
+matam e os tiros deles o ferem. Regras em `docs/superpowers/specs/2026-11-07-m11-ia-personagens-design.md`.
+
 **M10: inimigos secundários e dificuldade.** Morte (aparece ao lado do jogador, irradia,
 atira, some), Camaleão (morde, fica invisível, se clona), Anticorpo e Manta (laços, mergulho,
 bote), dardos, catapulta, Entidade (inverte os controles de perto) e formigueiro. A dificuldade
@@ -66,20 +71,14 @@ tutoriais** (olho-laser, barril, fogo, cerca elétrica, grafite, peça do carro,
 portas `OH`, coletáveis): `T_J_003`, `T_J_005` e `T_J_007` podem ser vencidas de ponta a
 ponta.
 
-**M5: as telas em volta do jogo.** Menu principal (`SMAIN.ITF`), briefing (`SLEVD.ITF`),
-partida em 640×405 com a barra de estado (`INVBAR01.BMP`), pausa (P ou Pause) e resultado
-(`SMISS.ITF`: mortos, pontos, bônus, recorde; REPLAY, NEXT, MAIN MENU). Uma fase aberta com `--level` fora
-da lista de missões não grava recorde nem jogo.
+**M5: as telas em volta do jogo**: menu, briefing, partida com a barra de estado, pausa e
+resultado (uma fase aberta com `--level` fora da lista não grava recorde nem jogo).
 
-**M4: a primeira missão (`T_J_001`) jogável de ponta a ponta**, com a pistola e os efeitos
-sonoros posicionados (16 canais com prioridade, como no original).
+Etapas anteriores: M4 a `T_J_001` de ponta a ponta, com a pistola e o som posicional; M1
+formatos (`openhunted-formats` lê o CD, pasta ou `.iso`; [`docs/formats/`](docs/formats/README.md));
+M2 visualizador; M3a o Jake corre e pula; M3b objetos sólidos e presença por modo.
 
-Etapas anteriores: M1 formatos (a biblioteca `openhunted-formats` lê os dados do CD, pasta ou
-`.iso`: bitmaps, paletas, sons, textos, animações, cenários, interfaces, fontes, fases;
-estado em [`docs/formats/`](docs/formats/README.md)); M2 visualizador de fase; M3a o Jake
-corre e pula; M3b objetos sólidos e presença por modo de jogo.
-
-Ainda não há: o Minotauro e o Jake inimigos, o equilíbrio na beirada (162/163), os passos e
+Ainda não há: o equilíbrio na beirada (162/163), os passos e
 demais sons por quadro do Jake e do cenário, o zumbido das minas, o logotipo, o título e a
 história da abertura (só o filme toca) e o laço de demonstração, a troca de teclas e o joystick,
 os modos de dois jogadores, tesouros e segredos, as cores do herói (o Garathe usa a paleta da
