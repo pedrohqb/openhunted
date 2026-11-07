@@ -23,9 +23,28 @@ pub const SOUND_LONG_LANDING: u16 = 5053;
 pub const SOUND_PUSH: u16 = 5043;
 pub const SPEECH_WALL_MEDIUM: u16 = 3734;
 pub const SPEECH_WALL_LONG: u16 = 3740;
-/// Investida do pulo longo (`0x429bda`): 7 de dano com tranco e empurrão.
+/// Empurrar (`0x42a9a4`): 44 `PUSHHAND` toca uma vez (atraso 0); no fim, som 5043 e o laço
+/// 46 (atraso 1), em cuja entrada a zona 0x20 pede a porta de célula (`0x42aa74`).
+pub const PUSH_START: u16 = 44;
+/// Investida do pulo longo (`0x429bda`): 7 de dano com tranco (`+0x250 = 1`).
 pub const BODY_CHECK_DAMAGE: i32 = 7;
-pub const BODY_CHECK_PUSH: i32 = 8;
+
+/// Dano da investida em quem o Garathe toca: 7 e tranco, sem a reação de empurrão; o
+/// empurrão (`+0x244/+0x248`, `0x435951`) é o centro da vítima menos o do Garathe (caixas
+/// de colisão, `0x4351b5`).
+pub fn body_check(
+    garathe: crate::physics::Rect,
+    victim: crate::physics::Rect,
+) -> crate::damage::Pending {
+    let c = |r: crate::physics::Rect| (r.x + r.w / 2, r.y + r.h / 2);
+    let (g, v) = (c(garathe), c(victim));
+    crate::damage::Pending {
+        amount: BODY_CHECK_DAMAGE,
+        jolt: true,
+        push: (v.0 - g.0, v.1 - g.1),
+        ..Default::default()
+    }
+}
 
 /// Rótulo e atraso do estado `s` no Garathe.
 pub(super) fn anim(s: State) -> (u16, u32) {
@@ -57,9 +76,9 @@ pub(super) fn anim(s: State) -> (u16, u32) {
             weapon_of(g, w as usize).states[weapons::aim_slot(aim)][usize::from(alt)].0,
             0,
         ),
-        State::Recover(w) => (weapon_of(g, w as usize).states[2][0].1.recover, 0),
-        State::Ready(_, w) => (weapon_of(g, w as usize).ready, 0),
-        State::Holster(w) => (weapon_of(g, w as usize).holster, 0),
+        State::Recover(w) => pose(weapon_of(g, w as usize).states[2][0].1.recover),
+        State::Ready(_, w) => pose(weapon_of(g, w as usize).ready),
+        State::Holster(w) => pose(weapon_of(g, w as usize).holster),
         State::Stealth => (103, 0),
         State::JumpUp(false) => (20, 0),
         State::JumpUp(true) => (19, 0),
@@ -77,6 +96,13 @@ pub(super) fn anim(s: State) -> (u16, u32) {
         State::BarMove => (49, 1),
         State::BarPull | State::BarDown | State::BarUp => (50, 0),
     }
+}
+
+/// Pronto/guardar/recuperação: o estado é o próprio rótulo; atraso 1 nos da tabela
+/// (81, 82, 85, 111, 128–130, 140–142, 152–154), 0 nos demais (100, 101, 110).
+fn pose(label: u16) -> (u16, u32) {
+    let slow = matches!(label, 81 | 82 | 85 | 111 | 128..=130 | 140..=142 | 152..=154);
+    (label, u32::from(slow))
 }
 
 /// Rótulo do derrubado: 32 `BLASTFWD` se jogado para o lado em que olha, senão 33
@@ -106,10 +132,11 @@ pub(super) fn mirrored(s: State) -> bool {
 }
 
 /// Todos os rótulos usados (para conferir contra o `MINOTAUR.ANM` real).
-pub const ALL_LABELS: [u16; 47] = [
+pub const ALL_LABELS: [u16; 48] = [
     1,
     10,
     46,
+    PUSH_START,
     21,
     24,
     22,
@@ -206,6 +233,8 @@ mod tests {
             (63, 4),
             (121, 22),
             (127, 28),
+            (44, 3),
+            (46, 24),
         ] {
             m.insert(l, n);
         }
@@ -237,6 +266,146 @@ mod tests {
         for _ in 0..n {
             j.tick(input, w);
         }
+    }
+
+    /// Empurrar: 44 (3 quadros, atraso 0) → som 5043 → laço 46 (atraso 1); a porta de célula
+    /// é pedida ao entrar no 46 (`0x42a9a4`, `0x42aa74`), não no fim do primeiro laço do 46.
+    #[test]
+    fn push_plays_44_then_loops_46_and_asks_the_door_on_entry() {
+        let mut w = floor_world();
+        w = World::new(
+            w.solids()
+                .iter()
+                .copied()
+                .chain([Rect {
+                    x: 32,
+                    y: 0,
+                    w: 20,
+                    h: 100,
+                }])
+                .collect(),
+        );
+        let mut j = garathe(&w, 0);
+        let mut seen = vec![];
+        for _ in 0..12 {
+            j.tick(RIGHT, &w);
+            seen.push((j.state(), j.label(), j.door_push, j.sound));
+        }
+        let first = seen
+            .iter()
+            .position(|s| s.0 == State::Push)
+            .expect("empurra");
+        let labels: Vec<u16> = seen[first..].iter().map(|s| s.1).collect();
+        assert_eq!(&labels[..5], &[44, 44, 44, 46, 46]);
+        let doors: Vec<usize> = (first..seen.len()).filter(|&i| seen[i].2).collect();
+        assert_eq!(
+            doors,
+            vec![first + 3],
+            "pede a porta uma vez, ao entrar no 46"
+        );
+        assert_eq!(seen[first + 3].3, Some(SOUND_PUSH));
+        assert!(seen[first + 4..].iter().all(|s| s.3.is_none()));
+    }
+
+    /// Atraso (`+0x18`) dos pronto/guardar/recuperação: 1 em 81, 82, 85, 111, 128–130,
+    /// 140–142 e 152–154; 0 nas garras (100, 101) e no pronto da clava (110).
+    #[test]
+    fn weapon_pose_delays_follow_the_state_table() {
+        use weapons::{CLAWS, CLUB, G_GRENADES, G_STARS, KNIVES, WHIP};
+        let d = |s: State| anim(s);
+        assert_eq!(d(State::Ready(0, KNIVES as u8)), (81, 1));
+        assert_eq!(d(State::Holster(KNIVES as u8)), (82, 1));
+        assert_eq!(d(State::Recover(KNIVES as u8)), (85, 1));
+        assert_eq!(d(State::Ready(0, CLUB as u8)), (110, 0));
+        assert_eq!(d(State::Holster(CLUB as u8)), (111, 1));
+        assert_eq!(d(State::Ready(0, CLAWS as u8)), (100, 0));
+        assert_eq!(d(State::Holster(CLAWS as u8)), (101, 0));
+        for w in [G_STARS, G_GRENADES, WHIP] {
+            let (r, h, c) = (
+                d(State::Ready(0, w as u8)),
+                d(State::Holster(w as u8)),
+                d(State::Recover(w as u8)),
+            );
+            assert_eq!((r.1, h.1, c.1), (1, 1, 1), "arma {w}: {r:?} {h:?} {c:?}");
+        }
+    }
+
+    /// Tranco (`0x42859e`): o 38 (levantar) também o sente; na barra (47, 49, 50, 51) nada
+    /// acontece; só a escalada 52/53 vira queda.
+    #[test]
+    fn jolt_reaches_the_stand_up_but_not_the_bar() {
+        use super::super::moves::joltable;
+        assert!(joltable(State::StandUp));
+        for s in [
+            State::BarHang,
+            State::BarMove,
+            State::BarPull,
+            State::BarDown,
+        ] {
+            assert!(!joltable(s), "{s:?}");
+        }
+        assert!(joltable(State::Climb(Climb::Vertical)));
+    }
+
+    /// Investida (`0x429bda`): tranco e 7, empurrão pelos centros (`0x435951`), sem empurrão
+    /// como reação.
+    #[test]
+    fn body_check_jolts_and_pushes_by_the_centres() {
+        let r = |x, y, w, h| Rect { x, y, w, h };
+        let p = body_check(r(0, 0, 20, 50), r(30, 10, 10, 10));
+        assert_eq!(
+            (p.amount, p.jolt, p.shove, p.knockdown),
+            (7, true, false, false)
+        );
+        assert_eq!(p.push, (25, -10));
+        assert_eq!(body_check(r(40, 0, 20, 50), r(0, 0, 20, 50)).push, (-40, 0));
+    }
+
+    /// Pouso duro 30 (`0x42951f`): com 20 px livres, decisão em pé; sem eles, só anima (não
+    /// rasteja) e no fim vai a 31. 31 e 35 (`0x429555`, `0x42a248`): teto a
+    /// menos de 20 px ou BAIXO → rastejar 36; senão decisão; fim → parado.
+    #[test]
+    fn hard_landing_does_not_crawl_but_get_up_does() {
+        let w = floor_world();
+        let mut j = garathe(&w, 0);
+        j.set(State::Land(Landing::Hard));
+        j.tick(DOWN, &w);
+        assert_eq!(
+            j.state(),
+            State::Crouch,
+            "no 30, BAIXO passa pela decisão (37)"
+        );
+        let mut j = garathe(&w, 0);
+        j.set(State::Land(Landing::Hard));
+        let mut n = 0;
+        while j.state() == State::Land(Landing::Hard) && n < 20 {
+            j.tick(0, &w);
+            n += 1;
+        }
+        assert_eq!(j.state(), State::GetUp, "fim do 30 → 31");
+        j.tick(DOWN, &w);
+        assert_eq!(j.state(), State::Crawl, "31 com BAIXO → 36");
+        // teto baixo (10 px acima da cabeça): o 30 segue, o 31 rasteja
+        let head = 44 + BOX.y;
+        let low = World::new(
+            w.solids()
+                .iter()
+                .copied()
+                .chain([Rect {
+                    x: -100,
+                    y: head - 30,
+                    w: 300,
+                    h: 20,
+                }])
+                .collect(),
+        );
+        let mut j = garathe(&w, 0);
+        j.set(State::Land(Landing::Hard));
+        j.tick(0, &low);
+        assert_eq!(j.state(), State::Land(Landing::Hard));
+        j.set(State::GetUp);
+        j.tick(0, &low);
+        assert_eq!(j.state(), State::Crawl);
     }
 
     #[test]
@@ -313,6 +482,43 @@ mod tests {
             -14 * SUB + 2 * SUB,
             "lançado a −14 e um tique de gravidade"
         );
+    }
+
+    /// 22/25 (`0x429e46`): chão, parede e contato só são vistos quando a animação acaba;
+    /// encostar na parede no meio do pulo não o encerra.
+    #[test]
+    fn mid_air_wall_brush_does_not_end_the_jump() {
+        let w = World::new(vec![
+            Rect {
+                x: -1000,
+                y: 100,
+                w: 3000,
+                h: 20,
+            },
+            Rect {
+                x: 60,
+                y: -200,
+                w: 20,
+                h: 240,
+            },
+        ]);
+        let mut j = garathe(&w, 0);
+        j.tick(RIGHT, &w);
+        j.tick(RIGHT | JUMP, &w);
+        assert_eq!(j.state(), State::Jump(JumpKind::Medium));
+        let mut brushed = false;
+        let mut n = 0;
+        while j.state() == State::Jump(JumpKind::Medium) && n < 60 {
+            j.tick(0, &w);
+            brushed |= j.body.hit_wall;
+            if j.state() == State::Jump(JumpKind::Medium) {
+                assert_eq!(j.sound, None);
+            }
+            n += 1;
+        }
+        assert!(brushed, "encostou na parede no ar");
+        // 22 com 6 quadros e atraso 1: ao menos 10 tiques no ar antes de decidir
+        assert!(n >= 10, "o pulo durou {n} tiques");
     }
 
     #[test]
@@ -579,7 +785,16 @@ mod tests {
         }
         let (t, b) = hit.expect("um golpe");
         assert_eq!(t, 3);
-        assert_eq!((b.amount, b.shove, b.push), (15, true, (-2, 0)));
+        assert_eq!((b.attacker, b.variant), (2, 0));
+        // contra um objeto qualquer à esquerda (olha para a esquerda)
+        let on = |b: crate::damage::Strike| {
+            b.row(7).unwrap().pending(crate::damage::Geometry {
+                vel: (0, 0),
+                toward: (-10, 0),
+            })
+        };
+        let p = on(b);
+        assert_eq!((p.amount, p.shove, p.push), (15, true, (-2, 0)));
         // com a clava (par 2): SOCO usa a clava, 114 na frente, derrubada (20, 10)
         let mut j = armed(&w, &[(2, (1, 1))]);
         j.tick(PUNCH, &w);
@@ -589,8 +804,8 @@ mod tests {
             j.tick(0, &w);
             blow = blow.or(j.blow);
         }
-        let b = blow.unwrap();
-        assert_eq!((b.amount, b.knockdown, b.push), (15, true, (-20, 10)));
+        let p = on(blow.unwrap());
+        assert_eq!((p.amount, p.knockdown, p.push), (15, true, (-20, 10)));
         // chicote (par 3): golpe 18 e o projétil 108 em t = 10 (passo 2)
         let mut j = armed(&w, &[(3, (1, 5))]);
         assert_eq!(
@@ -605,7 +820,7 @@ mod tests {
         for _ in 0..12 {
             j.tick(0, &w);
             shots.append(&mut j.shots);
-            blows += usize::from(j.blow.is_some_and(|b| b.amount == 18));
+            blows += usize::from(j.blow.is_some_and(|b| on(b).amount == 18));
         }
         assert_eq!(blows, 1);
         assert_eq!(shots.len(), 1);

@@ -115,6 +115,22 @@ nulo no fim. [confirmado]
 `0x0043d629(atacante, vítima, variante)` acha a primeira linha que casa, aplica o dano
 direto/reação/empurrão à vítima (se houver), cria o efeito e toca o som. [confirmado]
 
+Detalhe da vítima (`0x43d6c5…0x43d8d2`) [confirmado]: `+0x24c =` dano (atribui, não soma);
+`+0x252 |=` natureza; reação:
+
+- 4 derrubada: `+0x250 = 4`; empurrão fixo ≠ (0, 0) → copiado, com vx negado se a vx do
+  atacante (`+0x15c`) é < 0 ou, parado, se o centro do atacante está à direita do da vítima;
+  fixo (0, 0) → centro da vítima − centro do atacante. Com módulo ≠ 0, o vetor é reescalado
+  (`atan2` `0x46718e`, `cos/sen · módulo >> 14`).
+- 2 empurrão (só se `+0x250 ≠ 4`): `+0x250 = 2`; fixo ≠ (0, 0) → copiado, lado só pelos
+  centros; fixo (0, 0) → a velocidade do atacante (`+0x15c/+0x160`; zerada no contato dos
+  projéteis). O módulo não é usado.
+- 1 tranco: `+0x250 = 1` se ainda 0; sem empurrão.
+
+O port transcreve a tabela em `damage/table.rs` (o teste `real_damage` confere com o
+arquivo) e consulta `damage::row` nos golpes do jogador (soco, garras, clava, chicote) e nos
+projéteis 108 e 25.
+
 ## Explosão (`0x0040d20c` e `0x0040d499`) [confirmado]
 
 `0x40d20c(rótulo, &centro, vel, camada, dano_área, empurrão, raio, dono)` cria um objeto

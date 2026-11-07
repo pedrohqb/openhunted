@@ -4,15 +4,10 @@
 
 use super::Scene;
 use crate::behaviour::{self, Blast, Event, Out};
-use crate::damage::Pending;
+use crate::damage::{Geometry, Pending, Strike};
 use crate::entity::{Behaviour, Entity};
 use crate::physics::{Rect, SUB};
 use crate::sound::{Cue, PRIORITY_FRAME};
-
-/// Linha `(1, 0, 0)` do `DAMAGE.TBL` (soco do Jake): 8 de dano, empurrão (2, 0), som 5062.
-pub const PUNCH_DAMAGE: i32 = 8;
-pub const PUNCH_PUSH: i32 = 2;
-pub const SOUND_PUNCH: u16 = 5062;
 
 /// Animações e BRDs dos projéteis das armas 3–6 (`docs/re/projeteis.md`, tabela de tipos).
 pub const ANIMS: [&str; 7] = [
@@ -24,8 +19,9 @@ pub const ANIMS: [&str; 7] = [
     "OKN.ANM",
     "OWB.ANM",
 ];
-pub const BORDERS: [&str; 10] = [
+pub const BORDERS: [&str; 11] = [
     "OKN01.BRD",
+    crate::behaviour::star::KNIFE_STUCK_BRD,
     "OWB.BRD",
     "OBK00.BRD",
     "OBK01.BRD",
@@ -127,7 +123,13 @@ impl Scene {
                 u8::from(s.vx < 0),
                 "OKN01.BRD",
                 3,
-                Behaviour::Star(star::StarState::knife(vx, vy)),
+                Behaviour::Star(star::StarState {
+                    stuck_boxes: self
+                        .assets_border(star::KNIFE_STUCK_BRD)
+                        .map(|b| crate::entity::border_boxes(&b))
+                        .unwrap_or_default(),
+                    ..star::StarState::knife(vx, vy)
+                }),
             ),
             ShotKind::Whip => (
                 crate::entity::WHIP_SHOT,
@@ -210,25 +212,24 @@ impl Scene {
             Behaviour::Star(s) => s.vx.signum(),
             _ => 0,
         };
+        // chicote (108) e faca (25): a linha do `DAMAGE.TBL` pelo tipo da vítima (o barril
+        // explode); a velocidade chega zerada ao contato
+        let by_row = |attacker: u32| {
+            let v = &self.entities[victim?];
+            let vc = v.center();
+            let row = crate::damage::row(attacker, Some(v.kind), 0)?;
+            Some(row.pending(Geometry {
+                vel: (0, 0),
+                toward: (vc.0 - c.0, vc.1 - c.1),
+            }))
+        };
         let (direct, blast) = match &e.behaviour {
-            Behaviour::Pellet(s) if s.whip => (
-                Pending {
-                    amount: pellet::WHIP_DAMAGE,
-                    knockdown: true,
-                    push: (dir * pellet::PUSH, 0),
-                    ..Default::default()
-                },
-                None,
-            ),
-            Behaviour::Star(s) if s.knife => (
-                Pending {
-                    amount: star::KNIFE_DAMAGE,
-                    shove: true,
-                    push: (dir * 2, 0),
-                    ..Default::default()
-                },
-                None,
-            ),
+            Behaviour::Pellet(s) if s.whip => {
+                (by_row(crate::entity::WHIP_SHOT).unwrap_or_default(), None)
+            }
+            Behaviour::Star(s) if s.knife => {
+                (by_row(crate::entity::KNIFE).unwrap_or_default(), None)
+            }
             Behaviour::Pellet(_) => (
                 Pending {
                     amount: pellet::DAMAGE,
@@ -299,16 +300,32 @@ impl Scene {
     }
 
     /// Acerto do soco (`0x0043afe1`): cada objeto da camada (presente, `0x80001`, sem
-    /// `0x8000`) cuja caixa cruza a do golpe leva a linha `(1, 0, 0)`; só quem trata dano
-    /// (`enemy::hurt`, com crédito, e `interact::hurt`) reage.
+    /// `0x8000`) cuja caixa cruza a do golpe leva a linha do `DAMAGE.TBL` do golpe contra o
+    /// tipo dele (`0x43d629(jogador, vítima, variante)`: o barril explode com o Garathe, a
+    /// mina saltadora e outros têm linhas próprias); só quem trata dano (`enemy::hurt`, com
+    /// crédito, e `interact::hurt`) reage, com o som da linha.
     pub(super) fn apply_punch(&mut self, r: Rect) {
-        let right = self.jake.as_ref().is_some_and(|j| j.facing_right());
-        let p = self.jake.as_ref().and_then(|j| j.blow).unwrap_or(Pending {
-            amount: PUNCH_DAMAGE,
-            shove: true,
-            push: (if right { PUNCH_PUSH } else { -PUNCH_PUSH }, 0),
-            ..Default::default()
-        });
+        let (strike, from, vel) = match self.jake.as_ref() {
+            Some(j) => {
+                let b = j.body.bounds();
+                (
+                    j.blow.unwrap_or(Strike {
+                        attacker: j.character().kind(),
+                        variant: 0,
+                    }),
+                    (b.x + b.w / 2, b.y + b.h / 2),
+                    (j.body.vx / SUB, j.body.vy / SUB),
+                )
+            }
+            None => (
+                Strike {
+                    attacker: 1,
+                    variant: 0,
+                },
+                (r.x, r.y + r.h / 2),
+                (0, 0),
+            ),
+        };
         for e in self.entities.iter_mut() {
             if !e.alive
                 || e.layer != self.jake_layer
@@ -318,13 +335,19 @@ impl Scene {
             {
                 continue;
             }
+            let Some(row) = strike.row(e.kind) else {
+                continue;
+            };
+            let c = e.center();
+            let p = row.pending(Geometry {
+                vel,
+                toward: (c.0 - from.0, c.1 - from.1),
+            });
             if behaviour::enemy::hurt(e, &p, true) || behaviour::interact::hurt(e, &p) {
-                self.events.push(Event::Sound(Cue::at(
-                    SOUND_PUNCH,
-                    PRIORITY_FRAME,
-                    e.center(),
-                    e.layer,
-                )));
+                if let Some(id) = row.sound() {
+                    self.events
+                        .push(Event::Sound(Cue::at(id, PRIORITY_FRAME, c, e.layer)));
+                }
             }
         }
     }
@@ -336,6 +359,11 @@ mod tests {
     use crate::behaviour::laser_eye::LaserEyeState;
     use crate::behaviour::test_support::logic;
     use crate::entity::LASER_EYE;
+
+    /// Linha `(1, 0, 0)` do `DAMAGE.TBL` (soco do Jake num objeto sem linha própria): 8 de
+    /// dano, empurrão (2, 0), som 5062.
+    const PUNCH_DAMAGE: i32 = 8;
+    const SOUND_PUNCH: u16 = 5062;
 
     fn eye(x: i32) -> Entity {
         let mut e = logic(LASER_EYE, x, 0, &[]);
@@ -787,6 +815,22 @@ mod tests {
         use crate::character::Character;
         use crate::jake::weapons::KNIVES;
         let mut s = range_as(250, KNIVES, Character::Garathe);
+        // a caixa da cravada (`okn02.brd`) troca a do voo
+        let stuck_box = openhunted_formats::BorderBox {
+            kind: crate::entity::BOX,
+            x: 1,
+            y: 2,
+            width: 7,
+            height: 5,
+        };
+        s.projectile_borders.insert(
+            crate::behaviour::star::KNIFE_STUCK_BRD.into(),
+            openhunted_formats::Border {
+                name: String::new(),
+                version: 0,
+                boxes: vec![stuck_box],
+            },
+        );
         s.tick(crate::input::SHOOT);
         for _ in 0..40 {
             s.tick(0);
@@ -797,6 +841,15 @@ mod tests {
             .find(|e| e.alive && e.kind == crate::entity::KNIFE)
             .expect("a faca cravada na parede");
         assert!(matches!(&knife.behaviour, Behaviour::Star(st) if st.knife && !st.in_flight()));
+        assert_eq!(
+            knife.boxes,
+            vec![Rect {
+                x: 1,
+                y: 2,
+                w: 7,
+                h: 5
+            }]
+        );
         let c = knife.center();
         let ammo = s.jake.as_ref().unwrap().inventory.ammo(KNIVES);
         assert_eq!(ammo, 9);
@@ -817,16 +870,36 @@ mod tests {
         s.tick(crate::input::LEFT);
         s.tick(crate::input::SHOOT);
         let mut most = (0, 0);
-        for _ in 0..80 {
+        // tique (de vida da 1ª geração) da 1ª divisão; tamanho por geração
+        let (mut born, mut first_split) = (None, None);
+        let mut sizes = std::collections::BTreeMap::new();
+        for t in 0..80 {
             s.tick(0);
             for e in s.entities.iter().filter(|e| e.alive) {
                 if let Behaviour::Pellet(p) = &e.behaviour {
                     assert!(p.whip && p.generation <= 4);
                     most.0 = most.0.max(p.generation);
+                    let size = e.sprite.as_ref().unwrap().scale.0;
+                    assert_eq!(*sizes.entry(p.generation).or_insert(size), size);
                 }
             }
-            most.1 = most.1.max(count(&s, crate::entity::WHIP_SHOT));
+            let n = count(&s, crate::entity::WHIP_SHOT);
+            if n > 0 && born.is_none() {
+                born = Some(t);
+            }
+            if n > 1 && first_split.is_none() {
+                first_split = born.map(|b| t - b + 1);
+            }
+            most.1 = most.1.max(n);
         }
+        // o 1º tique só arma: 6–8 de espera depois dele
+        let fs = first_split.expect("dividiu-se");
+        assert!((7..=9).contains(&fs), "1ª divisão no tique {fs}");
+        assert_eq!(
+            sizes.into_iter().collect::<Vec<_>>(),
+            vec![(1, 10), (2, 6), (3, 5), (4, 4)],
+            "os filhos encolhem"
+        );
         assert_eq!(most.0, 4, "até a 4ª geração");
         assert!(most.1 >= 4, "dividiu-se: {}", most.1);
         assert_eq!(
@@ -836,10 +909,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn garathe_club_blow_uses_its_damage_row() {
+    /// Cena vazia com o Garathe em (0, 0) e um golpe armado (atacante 2, variante `v`).
+    fn garathe_striking(v: u32, entities: Vec<Entity>) -> Scene {
         let mut s = Scene::empty(1000, 1000);
-        s.entities = vec![eye(100)];
+        s.entities = entities;
         let b = Rect {
             x: 0,
             y: 0,
@@ -847,22 +920,116 @@ mod tests {
             h: 1,
         };
         let mut j = crate::Jake::new(0, 0, b, Default::default());
-        j.blow = Some(Pending {
-            amount: 15,
-            knockdown: true,
-            push: (20, 10),
-            ..Default::default()
+        j.blow = Some(Strike {
+            attacker: 2,
+            variant: v,
         });
         s.jake = Some(j);
-        s.apply_punch(Rect {
-            x: 100,
-            y: 10,
-            w: 14,
-            h: 14,
-        });
+        s
+    }
+
+    const BLOW_BOX: Rect = Rect {
+        x: 100,
+        y: 10,
+        w: 14,
+        h: 14,
+    };
+
+    #[test]
+    fn garathe_club_blow_uses_its_damage_row() {
+        let mut s = garathe_striking(2, vec![eye(100)]);
+        s.apply_punch(BLOW_BOX);
         match &s.entities[0].behaviour {
-            Behaviour::LaserEye(st) => assert_eq!(st.hurt.amount, 15),
+            Behaviour::LaserEye(st) => {
+                assert_eq!(
+                    (st.hurt.amount, st.hurt.knockdown, st.hurt.push),
+                    (15, true, (20, 10))
+                )
+            }
             _ => unreachable!(),
         }
+        assert_eq!(s.events[0].sound_id(), Some(SOUND_PUNCH));
+    }
+
+    /// As garras (e qualquer golpe do Garathe) explodem o barril: linha (2, 28) com
+    /// natureza 2 e derrubada.
+    #[test]
+    fn garathe_claw_next_to_a_barrel_blows_it_up() {
+        use crate::behaviour::barrel::BarrelState;
+        let mut b = logic(crate::entity::BARREL, 100, 10, &[]);
+        b.boxes = vec![Rect {
+            x: 0,
+            y: 0,
+            w: 20,
+            h: 20,
+        }];
+        b.behaviour = Behaviour::Barrel(BarrelState::new(0, vec![]));
+        let mut s = garathe_striking(0, vec![b]);
+        s.apply_punch(BLOW_BOX);
+        let Behaviour::Barrel(st) = &s.entities[0].behaviour else {
+            unreachable!()
+        };
+        assert!(st.hurt.explosion && st.hurt.amount == 5);
+        for _ in 0..3 {
+            s.tick(0);
+        }
+        assert_eq!(count(&s, crate::entity::BARREL), 0, "o barril explodiu");
+    }
+
+    /// Na mina saltadora (tipo 11) a garra dá 8 com empurrão e o som 3038 (linha (2, 11)).
+    #[test]
+    fn garathe_claw_on_a_hop_mine_uses_its_own_row() {
+        use crate::behaviour::hop_mine::HopMineState;
+        let mut m = logic(crate::entity::HOP_MINE, 100, 10, &[]);
+        m.behaviour = Behaviour::HopMine(HopMineState::default());
+        let mut s = garathe_striking(0, vec![m]);
+        s.apply_punch(BLOW_BOX);
+        let Behaviour::HopMine(st) = &s.entities[0].behaviour else {
+            unreachable!()
+        };
+        let p = st.wound.pending;
+        assert_eq!((p.amount, p.shove, p.push), (8, true, (2, 0)));
+        assert!(!p.knockdown && !p.explosion);
+        assert_eq!(s.events[0].sound_id(), Some(3038));
+    }
+
+    /// A faca do Garathe explode o barril (linha (25, 28)); o chicote 108 também (natureza 2
+    /// em qualquer vítima).
+    #[test]
+    fn garathe_knife_and_whip_blow_up_a_barrel() {
+        use crate::behaviour::barrel::BarrelState;
+        use crate::character::Character;
+        use crate::jake::weapons::{KNIVES, WHIP};
+        for w in [KNIVES, WHIP] {
+            let mut s = range_as(200, w, Character::Garathe);
+            let mut b = logic(crate::entity::BARREL, 330, 20, &[]);
+            b.boxes = vec![Rect {
+                x: 0,
+                y: 0,
+                w: 20,
+                h: 80,
+            }];
+            b.flags = 0x80801;
+            b.solid_shapes = true;
+            b.behaviour = Behaviour::Barrel(BarrelState::new(0, vec![]));
+            s.entities.push(b);
+            s.tick(crate::input::SHOOT);
+            for _ in 0..40 {
+                s.tick(0);
+            }
+            assert_eq!(count(&s, crate::entity::BARREL), 0, "arma {w}");
+        }
+    }
+
+    /// O soco do Jake também consulta a vítima: na mina saltadora soa 3038.
+    #[test]
+    fn jake_punch_on_a_hop_mine_sounds_3038() {
+        use crate::behaviour::hop_mine::HopMineState;
+        let mut s = Scene::empty(1000, 1000);
+        let mut m = logic(crate::entity::HOP_MINE, 100, 10, &[]);
+        m.behaviour = Behaviour::HopMine(HopMineState::default());
+        s.entities = vec![m];
+        s.apply_punch(BLOW_BOX);
+        assert_eq!(s.events[0].sound_id(), Some(3038));
     }
 }

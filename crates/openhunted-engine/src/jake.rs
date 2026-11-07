@@ -14,7 +14,7 @@ pub use moves::{BAR_BOX, CRAWL_BOX, Env, Skel, SpecialBlast, SpecialEffect, Zone
 
 pub use crate::character::Character;
 use crate::character::Profile;
-use crate::damage::{Health, Pending, apply};
+use crate::damage::{Health, Pending, Strike, apply};
 use crate::input::{DOWN, JUMP, LEFT, NEXT_WEAPON, PREV_WEAPON, PUNCH, RIGHT, SHOOT, UP};
 use crate::physics::{Body, Rect, SUB, World, step};
 pub use weapons::{FISTS, GRENADES, PISTOL, ROCKETS, SHOTGUN, STARS, ShotKind, weapon};
@@ -480,8 +480,9 @@ pub struct Jake {
     pub special: Option<SpecialBlast>,
     /// Caixa do soco no primeiro tique da janela do golpe (a cena fere quem cruza).
     pub punch: Option<Rect>,
-    /// Dano desse golpe (linha do `DAMAGE.TBL` da arma e da mira).
-    pub blow: Option<Pending>,
+    /// Esse golpe (atacante e variante da arma e da mira; a linha do `DAMAGE.TBL` sai por
+    /// vítima).
+    pub blow: Option<Strike>,
     /// Trocou de arma neste tique (a cena toca 3090).
     pub switched: bool,
     /// Tiques restantes da pose "pronto" depois da troca (`+0x26c`).
@@ -491,6 +492,8 @@ pub struct Jake {
     /// Chegou ao fim do rótulo 100 empurrando neste tique (`0x00425d04`: a cena tenta a
     /// porta da célula numa zona PR 0x20).
     pub door_push: bool,
+    /// Garathe empurrando: já passou do 44 ao laço 46.
+    push_loop: bool,
     /// Tiques desde a criação (o veneno age em `tique % 20 = 0`).
     clock: u32,
     /// Quem é (perfil de movimentos, rótulos e armas).
@@ -537,6 +540,7 @@ impl Jake {
             switch_pose: 0,
             poison: 0,
             door_push: false,
+            push_loop: false,
             clock: 0,
             character: Character::Jake,
             sound: None,
@@ -573,6 +577,8 @@ impl Jake {
             (Character::Garathe, State::KnockedDown(right)) => {
                 (garathe::knocked_label(right, self.facing_right), 1)
             }
+            // empurrar: 44 até o fim, depois o laço 46
+            (Character::Garathe, State::Push) if !self.push_loop => (garathe::PUSH_START, 0),
             (Character::Garathe, _) => garathe::anim(s),
         }
     }
@@ -710,17 +716,13 @@ impl Jake {
         }
     }
 
-    /// Dano do golpe corpo a corpo do estado de tiro corrente (linha do `DAMAGE.TBL` da
-    /// variante), com o empurrão pelo lado.
-    fn blow_damage(&self, w: u8, aim: Aim) -> Option<Pending> {
-        let b = self.weapon(w as usize).blow?[weapons::aim_slot(aim)];
-        let dir = self.dir();
-        Some(Pending {
-            amount: b.damage,
-            knockdown: b.knockdown,
-            shove: !b.knockdown,
-            push: (b.push.0 * dir, b.push.1),
-            ..Default::default()
+    /// Golpe corpo a corpo do estado de tiro corrente: o tipo do jogador e a variante da
+    /// arma e da mira.
+    fn blow_damage(&self, w: u8, aim: Aim) -> Option<Strike> {
+        let variant = self.weapon(w as usize).blow?[weapons::aim_slot(aim)];
+        Some(Strike {
+            attacker: self.character.kind(),
+            variant,
         })
     }
 
@@ -1037,6 +1039,7 @@ impl Jake {
     fn set(&mut self, s: State) {
         if s != self.state {
             self.state = s;
+            self.push_loop = false;
             self.ticks = 0;
             self.label_changed = true;
             self.frame = if self.reversed_state(s) {
@@ -1286,6 +1289,8 @@ impl Jake {
             && can_fire
             && shooting
             && self.start_fire(input, world);
+        // Garathe: a animação do pulo 22/25 acabou neste tique
+        let mut jump_over = false;
         match self.state {
             _ if fired => {}
             State::Fire { aim, t, w, alt } => self.tick_fire(input, world, (aim, t, w, alt)),
@@ -1334,8 +1339,10 @@ impl Jake {
                     self.set(State::WildFall);
                 } else {
                     if self.is_garathe() && self.anim_done() {
-                        // 22/25: a animação toca uma vez e para no último quadro
+                        // 22/25: a animação toca uma vez e para no último quadro; só então
+                        // vê chão, parede e contato (`0x429e46`, `0x429c6c`)
                         self.anim_mode = AnimMode::Hold;
+                        jump_over = true;
                     }
                     self.air_reverse(side);
                 }
@@ -1347,11 +1354,19 @@ impl Jake {
             }
             _ => self.tick_move(input, env, jump_edge, side),
         }
-        let (push_label, push_c) = self.anim_of(State::Push);
-        self.door_push = self.state == State::Push
-            && self.ticks + 1 == self.len_of(push_label) as u32 * (push_c + 1);
-        if self.door_push && self.is_garathe() {
-            self.sound = Some(garathe::SOUND_PUSH);
+        if self.is_garathe() {
+            // fim do 44: som 5043 e entrada no 46 (rótulo novo), que pede a porta
+            self.door_push = self.state == State::Push && !self.push_loop && self.anim_done();
+            if self.door_push {
+                self.sound = Some(garathe::SOUND_PUSH);
+                self.push_loop = true;
+                self.frame = 0;
+                self.label_changed = true;
+            }
+        } else {
+            let (push_label, push_c) = self.anim_of(State::Push);
+            self.door_push = self.state == State::Push
+                && self.ticks + 1 == self.len_of(push_label) as u32 * (push_c + 1);
         }
         // a caixa do estado vale já para a física deste tique (o BRD troca com o estado)
         self.fit_box(world);
@@ -1371,8 +1386,13 @@ impl Jake {
         let gravity = self.gravity_on();
         step(&mut self.body, world, gravity);
         match self.state {
-            State::Jump(kind) if self.is_garathe() && self.body.hit_wall => {
-                // 22/25 contra a parede: fala e queda (`0x429e46`, `0x429c6c`)
+            // Garathe no meio do pulo: nada decide até a animação acabar
+            State::Jump(_) if self.is_garathe() && !jump_over => {}
+            State::Jump(kind)
+                if self.is_garathe() && self.body.hit_wall && !self.body.on_ground =>
+            {
+                // 22/25 contra a parede (o chão vem antes): fala e queda (`0x429e46`,
+                // `0x429c6c`)
                 self.sound = Some(if kind == JumpKind::Long {
                     garathe::SPEECH_WALL_LONG
                 } else {

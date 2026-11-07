@@ -88,6 +88,8 @@ impl Ticks for Scene {
 struct Pilot {
     s: Scene,
     t: u32,
+    /// Tiques em escalada (52/53).
+    climbed: u32,
 }
 
 impl Pilot {
@@ -95,6 +97,7 @@ impl Pilot {
         self.s.tick(input);
         self.t += 1;
         let j = self.s.jake.as_ref().unwrap();
+        self.climbed += u32::from(matches!(j.state(), State::Climb(_)));
         if std::env::var_os("OH_TRACE").is_some() {
             eprintln!(
                 "{:5} {input:#06x} ({}, {}) {:?} q{} vida {}",
@@ -153,6 +156,16 @@ impl Pilot {
             self.tick(if c < x { RIGHT } else { LEFT });
         }
         panic!("não chegou a x = {x} (em {:?})", self.center());
+    }
+    /// Anda para `side` segurando CIMA (cai do vão) até agarrar a rede: escalada 52/53.
+    fn grab_net(&mut self, side: u32) {
+        for _ in 0..80 {
+            if matches!(self.s.jake.as_ref().unwrap().state(), State::Climb(_)) {
+                return;
+            }
+            self.tick(side | UP);
+        }
+        panic!("não agarrou a rede (em {:?})", self.center());
     }
     /// Segura `key` (CIMA ou BAIXO, na rede) até os pés passarem de `y`.
     fn climb(&mut self, key: u32, y: i32) {
@@ -226,28 +239,38 @@ impl Pilot {
 }
 
 /// T_M_002 ("Garathe Tutorial 1"): apanha as facas (x 204), corre para a direita pelo
-/// corredor de cima (facas nas minas) até o vão da rede de x ≈ 1216 e desce ao corredor do
-/// meio (pela rede ou caindo pelo vão); vai à rede de x ≈ 830 e desce ao corredor de baixo;
-/// segue para a esquerda até a saída (x ≈ 160).
+/// corredor de cima (facas nas minas) até o vão da rede de x ≈ 1216, cai nele segurando CIMA,
+/// agarra a rede (escalada 52/53) e desce ao corredor do meio, soltando-se com PULAR (5); faz
+/// o mesmo na rede de x ≈ 830 até o corredor de baixo; segue para a esquerda até a saída
+/// (x ≈ 160).
 #[test]
 fn t_m_002_can_be_won() {
     let Some(s) = load("T_M_002.LEV") else {
         return;
     };
-    let mut p = Pilot { s, t: 0 };
+    let mut p = Pilot {
+        s,
+        t: 0,
+        climbed: 0,
+    };
     p.run(10, 0);
     p.go_x(225);
     assert!(
         p.s.jake.as_ref().unwrap().inventory.ammo(4) > 0,
         "pegou as facas"
     );
-    p.go_x(1216);
-    p.tick(UP);
-    p.climb(DOWN, 370);
+    p.go_x(1160);
+    p.grab_net(RIGHT);
+    p.climb(DOWN, 365);
+    let first = p.climbed;
+    assert!(first > 0, "desceu pela 1ª rede");
+    p.tick(JUMP);
     p.settle();
-    p.go_x(830);
-    p.tick(UP);
-    p.climb(DOWN, 495);
+    p.go_x(880);
+    p.grab_net(LEFT);
+    p.climb(DOWN, 490);
+    assert!(p.climbed > first, "desceu pela 2ª rede");
+    p.tick(JUMP);
     p.settle();
     p.win();
 }
@@ -299,8 +322,12 @@ fn fuzz_random_input_on_all_garathe_levels() {
             if hist.len() > 12 {
                 hist.pop_front();
             }
+            assert!(
+                j.box_matches_state(),
+                "{name}: caixa errada no tique {t}: {hist:#?}"
+            );
             // só o cenário: um objeto sólido que se move (porta, bloco) pode encostar nele
-            if j.is_active() && j.box_matches_state() {
+            if j.is_active() {
                 assert!(
                     s.world.contact(&j.body.bounds()) & CONTACT_SCENERY == 0,
                     "{name}: dentro de sólido no tique {t}: {hist:#?}"

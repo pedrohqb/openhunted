@@ -145,31 +145,12 @@ pub struct Weapon {
     pub spread: bool,
     /// Som do tiro tocado pelo quadro ao entrar no estado.
     pub sound: Option<u16>,
-    /// Golpe corpo a corpo por mira (cima, diag., frente, baixo): a linha do `DAMAGE.TBL`.
-    pub blow: Option<[Blow; 4]>,
+    /// Golpe corpo a corpo por mira (cima, diag., frente, baixo): a variante do `DAMAGE.TBL`
+    /// (`0x43d629(atacante, vítima, variante)`; a linha sai por vítima).
+    pub blow: Option<[u32; 4]>,
     /// A linha até a boca só é testada até a metade (chicote, `0x43bbe3`).
     pub half_line: bool,
 }
-
-/// Linha do `DAMAGE.TBL` de um golpe: dano, derrubada (senão empurrão) e empurrão (vx pelo
-/// lado, vy).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Blow {
-    pub damage: i32,
-    pub knockdown: bool,
-    pub push: (i32, i32),
-}
-
-const fn blow(damage: i32, knockdown: bool, push: (i32, i32)) -> Blow {
-    Blow {
-        damage,
-        knockdown,
-        push,
-    }
-}
-
-/// Soco do Jake, linha `(1, 0, 0)`: 8 com empurrão (2, 0).
-const JAKE_PUNCH: Blow = blow(8, false, (2, 0));
 
 const P_BASE: Reg = shell(reg((1, 3), 6, 12, 22), (22, -4), 0, (-10, -10));
 const S_BASE: Reg = reg((1, 1), 8, 12, 112);
@@ -196,7 +177,7 @@ pub const FISTS_W: Weapon = Weapon {
     ],
     spread: false,
     sound: None,
-    blow: Some([JAKE_PUNCH; 4]),
+    blow: Some([0; 4]),
     half_line: false,
 };
 
@@ -375,7 +356,7 @@ pub const CLAWS_W: Weapon = Weapon {
     ],
     spread: false,
     sound: None,
-    blow: Some([blow(15, false, (2, 0)); 4]),
+    blow: Some([0; 4]),
     half_line: false,
 };
 
@@ -395,12 +376,7 @@ pub const CLUB_W: Weapon = Weapon {
     ],
     spread: false,
     sound: None,
-    blow: Some([
-        blow(15, true, (20, 30)),
-        blow(15, true, (20, 30)),
-        blow(15, true, (20, 10)),
-        blow(15, true, (20, -10)),
-    ]),
+    blow: Some([1, 1, 2, 3]),
     half_line: false,
 };
 
@@ -427,12 +403,7 @@ pub const WHIP_W: Weapon = Weapon {
     ],
     spread: false,
     sound: None,
-    blow: Some([
-        blow(18, true, (20, 20)),
-        blow(18, true, (20, 20)),
-        blow(18, true, (20, 10)),
-        blow(18, true, (20, -20)),
-    ]),
+    blow: Some([4, 5, 6, 7]),
     half_line: true,
 };
 

@@ -114,8 +114,9 @@ sons 3772 e 3135; senão 5 (desvira, rótulo 4 ao contrário). Zona 4 + CIMA →
 
 27: chão → 28 (aterrissagem interrompível, depois parado); ataque; zona 4 → escalar;
 controle no ar; desliga 0x8 e 0x4000. 32/33: v = 8·empurrão, uma vez; 32 → 30 no chão ou 29
-(queda descontrolada → 30); 33 → 35 no chão. 30 e 35: com 20 px livres acima, decisão em
-pé; teto baixo ou BAIXO → 36; fim → 31/parado.
+(queda descontrolada → 30); 33 → 35 no chão. 30 (`0x42951f`): com 20 px livres acima
+(`0x40718d(obj, 0, −20)`), decisão em pé; sem eles só anima; fim → 31. 31 e 35 (`0x429555`,
+`0x42a248`): teto a menos de 20 px ou BAIXO → 36; senão decisão em pé; fim → parado.
 
 ## Agachar, rastejar, empurrar [confirmado]
 
