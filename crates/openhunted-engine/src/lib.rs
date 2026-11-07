@@ -5,6 +5,7 @@
 pub mod anim;
 pub mod assets;
 pub mod behaviour;
+pub mod character;
 pub mod damage;
 pub mod difficulty;
 pub mod entity;

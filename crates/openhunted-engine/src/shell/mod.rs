@@ -70,7 +70,7 @@ pub fn solo_missions(list: &[MissionInfo]) -> Vec<MissionInfo> {
 
 /// Próxima missão (`0x440e95`): índice + 1, voltando a 0 no fim; se ainda há missões sem
 /// recorde, pula as que já têm um. Decisão do port: pula também as missões marcadas como não
-/// jogáveis em `playable` (as do Garathe, enquanto ele não existe); índice fora de
+/// jogáveis em `playable` (sem personagem controlável); índice fora de
 /// `playable` conta como jogável. `None` se nenhuma é jogável.
 pub fn next_mission(current: usize, records: &[i32], playable: &[bool]) -> Option<usize> {
     let n = records.len();

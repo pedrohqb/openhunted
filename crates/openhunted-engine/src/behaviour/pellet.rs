@@ -15,6 +15,12 @@ pub const SPLIT_ANGLE: i32 = 0x400;
 pub const SPLIT_WAIT: u32 = 2;
 /// Última geração que ainda se divide.
 const LAST_SPLIT: u8 = 2;
+/// Golpe do chicote do Garathe (108, `0x40cb6c`): divide-se a ±11,25° (`0x800`) depois de
+/// 6–8 tiques (Ruling: 7) até a 4ª geração; 20 de dano com derrubada (módulo 20).
+pub const WHIP_SPLIT_ANGLE: i32 = 0x800;
+pub const WHIP_SPLIT_WAIT: u32 = 7;
+const WHIP_LAST_SPLIT: u8 = 3;
+pub const WHIP_DAMAGE: i32 = 20;
 
 #[derive(Debug, Clone)]
 pub struct PelletState {
@@ -26,6 +32,8 @@ pub struct PelletState {
     pub prev: Option<(i32, i32)>,
     /// Tocou o cenário neste tique (a cena ainda testa objetos antes da faísca).
     pub spent: bool,
+    /// É o golpe do chicote (108), não o chumbo.
+    pub whip: bool,
 }
 
 impl PelletState {
@@ -37,6 +45,24 @@ impl PelletState {
             wait: SPLIT_WAIT,
             prev: None,
             spent: false,
+            whip: false,
+        }
+    }
+
+    /// Golpe do chicote do Garathe.
+    pub fn whip(vx: i32, vy: i32) -> Self {
+        Self {
+            wait: WHIP_SPLIT_WAIT,
+            whip: true,
+            ..Self::new(vx, vy)
+        }
+    }
+
+    fn split(&self) -> (u8, u32, i32) {
+        if self.whip {
+            (WHIP_LAST_SPLIT, WHIP_SPLIT_WAIT, WHIP_SPLIT_ANGLE)
+        } else {
+            (LAST_SPLIT, SPLIT_WAIT, SPLIT_ANGLE)
         }
     }
 }
@@ -55,7 +81,9 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     };
     st.prev = Some(pos);
     let mut split = None;
-    if st.generation <= LAST_SPLIT {
+    let (last, wait, angle) = st.split();
+    let whip = st.whip;
+    if st.generation <= last {
         st.wait = st.wait.saturating_sub(1);
         if st.wait == 0 {
             split = Some((st.vx, st.vy, st.generation + 1));
@@ -64,16 +92,17 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     let v = (st.vx, st.vy);
     if let Some((vx, vy, generation)) = split {
         // dois novos no mesmo ponto, ±0x400, geração + 1; este some
-        for da in [-SPLIT_ANGLE, SPLIT_ANGLE] {
+        for da in [-angle, angle] {
             let (vx, vy) = rotated(vx, vy, da);
             let mut c = e.clone();
             c.behaviour = Behaviour::Pellet(PelletState {
                 vx,
                 vy,
                 generation,
-                wait: SPLIT_WAIT,
+                wait,
                 prev: None,
                 spent: false,
+                whip,
             });
             out.spawn.push(c);
         }

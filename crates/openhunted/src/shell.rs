@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::rc::Rc;
 
-use openhunted_engine::scene::has_controllable_jake;
+use openhunted_engine::scene::has_controllable_player;
 use openhunted_engine::shell::briefing::{self, Briefing};
 use openhunted_engine::shell::generic::GenericBox;
 use openhunted_engine::shell::results::{self, Remains, Results, Stats};
@@ -198,7 +198,7 @@ impl App {
                     .get(&m.file)
                     .ok()
                     .and_then(|d| Level::parse(&d).ok())
-                    .is_some_and(|l| has_controllable_jake(&l))
+                    .is_some_and(|l| has_controllable_player(&l))
             })
             .collect();
         let mut app = Self {
@@ -418,7 +418,10 @@ impl App {
         };
         let outcome = v.outcome().unwrap_or(Outcome::Defeat);
         let scene = v.scene();
-        let jake = scene.jake.is_some();
+        let jake = scene
+            .jake
+            .as_ref()
+            .is_some_and(|j| j.character() == openhunted_engine::character::Character::Jake);
         // locutor: vitória / tempo esgotado / outra derrota, e o nome do personagem
         self.sounds.push(match (outcome, scene.timed_out()) {
             (Outcome::Victory, _) => 3780,
@@ -955,7 +958,7 @@ mod tests {
         win(&mut a, 0);
         a.key_down(Key::Enter); // salta a contagem
         enter(&mut a); // NEXT
-        assert_eq!(a.level_file(), "T_J_003.lev");
+        assert_eq!(a.level_file(), "T_M_002.lev");
         a.key_down(Key::Escape); // CANCEL: volta ao resultado da T_J_001
         assert_eq!(a.mode(), Mode::Results);
         assert_eq!(a.mission_index(), Some(0));
@@ -971,16 +974,16 @@ mod tests {
     }
 
     #[test]
-    fn garathe_level_escape_returns_to_menu() {
+    fn garathe_level_is_playable_and_escape_does_nothing() {
         let Some(mut a) = app_at(Some("T_M_002.LEV")) else {
             return;
         };
-        assert!(!a.playable[1], "T_M_002 sem personagem controlável");
+        assert!(a.playable[1], "T_M_002: o Garathe é controlável (M8)");
         assert!(a.playable[0]);
         enter(&mut a); // GO
         assert_eq!(a.mode(), Mode::Play);
         a.key_down(Key::Escape);
-        assert_eq!(a.mode(), Mode::Menu);
+        assert_eq!(a.mode(), Mode::Play, "com personagem, Esc não faz nada");
     }
 
     #[test]
@@ -1116,9 +1119,9 @@ mod tests {
         }
         enter(&mut a);
         assert_eq!(a.mode(), Mode::Briefing);
-        // a T_M_002 (Garathe, sem personagem controlável) é pulada
-        assert_eq!(a.mission_index(), Some(2));
-        assert_eq!(a.level_file(), "T_J_003.lev");
+        // a T_M_002 (Garathe, M8) não é mais pulada
+        assert_eq!(a.mission_index(), Some(1));
+        assert_eq!(a.level_file(), "T_M_002.lev");
         // CANCEL volta ao resultado; aí o Esc vai ao menu
         a.key_down(Key::Escape);
         assert_eq!(a.mode(), Mode::Results);

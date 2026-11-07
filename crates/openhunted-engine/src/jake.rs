@@ -4,6 +4,7 @@
 //! agachar, barra e o especial (`docs/re/jake-movimentos.md`, `jake-escalada.md`,
 //! `escada-camadas.md`, `furtividade.md`). Os estados novos estão em `jake/moves.rs`.
 
+pub mod garathe;
 mod moves;
 pub mod weapons;
 
@@ -11,21 +12,14 @@ use std::collections::HashMap;
 
 pub use moves::{BAR_BOX, CRAWL_BOX, Env, Skel, SpecialBlast, SpecialEffect, Zone, zone};
 
+pub use crate::character::Character;
+use crate::character::Profile;
 use crate::damage::{Health, Pending, apply};
 use crate::input::{DOWN, JUMP, LEFT, NEXT_WEAPON, PREV_WEAPON, PUNCH, RIGHT, SHOOT, UP};
 use crate::physics::{Body, Rect, SUB, World, step};
 pub use weapons::{FISTS, GRENADES, PISTOL, ROCKETS, SHOTGUN, STARS, ShotKind, weapon};
 
-/// Correr: 12 px/tique (`0x00478928`).
-const RUN: i32 = 12 * SUB;
-/// Velocidade de lançamento dos pulos (vx, vy) em px/tique (`0x0047890c`…).
-const MEDIUM: (i32, i32) = (10, -11);
-const LONG: (i32, i32) = (10, -15);
-const EXTENDED: (i32, i32) = (17, -15);
-/// Distâncias de pouso sondadas para escolher o pulo (`0x00425144`).
-const PROBE_MEDIUM: i32 = 110;
-const PROBE_LONG: i32 = 150;
-const PROBE_EXTENDED: i32 = 255;
+// Corrida, pulos e sondas: no perfil do personagem (`crate::character`).
 /// Queda: descendo a 5 px/tique ou mais sem chão (`0x0042416f`).
 const FALL_SPEED: i32 = 5 * SUB;
 
@@ -132,7 +126,14 @@ pub enum State {
     /// Levado por um teletransporte (`0x4136ef`): invisível, sem entrada nem dano; tiques
     /// desde a partida.
     Teleporting(u32),
+    /// Só o Garathe: levantar depois de derrubado para trás ou do tranco (35 `MNBLGTUP`).
+    Rise,
+    /// Só o Garathe: tranco (59, rótulo 63; desliza pelo esqueleto com k = 2).
+    Jolted,
 }
+
+/// O jogador (o Jake ou o Garathe, pelo perfil).
+pub type Player = Jake;
 
 /// Viagem do teletransporte: some, muda de lugar na metade e reaparece no fim.
 pub const TELEPORT_TICKS: u32 = 42;
@@ -186,6 +187,8 @@ impl Shot {
 pub struct Inventory {
     pub slots: [(i32, i32); 30],
     pub weapon: usize,
+    /// Dono: escolhe a lista das armas e a coleta.
+    pub character: Character,
 }
 /// Som "troca de arma / sem munição".
 pub const SOUND_NO_AMMO: u16 = 3090;
@@ -203,9 +206,23 @@ impl Inventory {
         let mut inv = Self {
             slots,
             weapon: FISTS,
+            character: Character::Jake,
         };
         inv.weapon = inv.best();
         inv
+    }
+
+    /// De `points` do objeto do personagem `ch` (o Garathe também força o par 1 a (1, 20),
+    /// `0x004279b3`).
+    pub fn for_character(p: &[(i32, i32)], ch: Character) -> Self {
+        let mut inv = Self::from_points(p);
+        inv.character = ch;
+        inv.weapon = inv.best();
+        inv
+    }
+
+    fn order(&self) -> &'static [usize; 6] {
+        &self.character.profile().order
     }
 
     pub fn pistol_ammo(&self) -> i32 {
@@ -227,7 +244,7 @@ impl Inventory {
 
     /// A melhor disponível (modo 1 de `0x43a8cc`); nada disponível → punhos.
     pub fn best(&self) -> usize {
-        weapons::ORDER
+        self.order()
             .iter()
             .rev()
             .copied()
@@ -237,15 +254,13 @@ impl Inventory {
 
     /// A disponível seguinte (`next`) ou anterior à corrente, dando a volta (modos 8 e 4).
     pub fn cycle(&self, next: bool) -> usize {
-        let n = weapons::ORDER.len();
-        let i = weapons::ORDER
-            .iter()
-            .position(|&w| w == self.weapon)
-            .unwrap_or(0);
+        let order = self.order();
+        let n = order.len();
+        let i = order.iter().position(|&w| w == self.weapon).unwrap_or(0);
         (1..=n)
             .map(|k| {
                 let j = if next { i + k } else { i + n * 2 - k };
-                weapons::ORDER[j % n]
+                order[j % n]
             })
             .find(|&w| self.available(w))
             .unwrap_or(self.weapon)
@@ -254,7 +269,7 @@ impl Inventory {
     /// Ganhou a arma `w` (`0x43af6c`): se ela fica depois da melhor disponível na lista,
     /// vira a corrente.
     pub fn gained(&mut self, w: usize) {
-        let pos = |x: usize| weapons::ORDER.iter().position(|&o| o == x);
+        let pos = |x: usize| self.order().iter().position(|&o| o == x);
         if pos(w) > pos(self.best()) {
             self.weapon = w;
         }
@@ -329,7 +344,7 @@ const EXIT_MIN_SCALE: i32 = 30;
 
 /// Rótulo do `JAKE.ANM` e campo c (avança um quadro a cada c+1 tiques) de cada estado
 /// (tabela `0x473300`, colunas `+0x10` e `+0x18`).
-fn anim_of(s: State) -> (u16, u32) {
+fn jake_anim(s: State) -> (u16, u32) {
     match s {
         State::Idle => (1, 1),
         State::Run => (10, 0),
@@ -382,11 +397,13 @@ fn anim_of(s: State) -> (u16, u32) {
         State::BarPull | State::BarDown => (105, 0),
         State::BarUp => (104, 0),
         State::Teleporting(_) => (1, 1),
+        State::Rise => (78, 0),
+        State::Jolted => (168, 0),
     }
 }
 
 /// Estados que tocam o rótulo de trás para a frente (`0x00423894`).
-fn reversed(s: State) -> bool {
+fn jake_reversed(s: State) -> bool {
     matches!(
         s,
         State::LetGo | State::StandUp | State::Unhide | State::BarDown
@@ -463,6 +480,8 @@ pub struct Jake {
     pub special: Option<SpecialBlast>,
     /// Caixa do soco no primeiro tique da janela do golpe (a cena fere quem cruza).
     pub punch: Option<Rect>,
+    /// Dano desse golpe (linha do `DAMAGE.TBL` da arma e da mira).
+    pub blow: Option<Pending>,
     /// Trocou de arma neste tique (a cena toca 3090).
     pub switched: bool,
     /// Tiques restantes da pose "pronto" depois da troca (`+0x26c`).
@@ -474,6 +493,11 @@ pub struct Jake {
     pub door_push: bool,
     /// Tiques desde a criação (o veneno age em `tique % 20 = 0`).
     clock: u32,
+    /// Quem é (perfil de movimentos, rótulos e armas).
+    character: Character,
+    /// Som posicional pedido neste tique (Garathe: pouso do pulo longo, empurrar, pulo
+    /// contra a parede; a cena toca).
+    pub sound: Option<u16>,
 }
 
 impl Jake {
@@ -508,16 +532,75 @@ impl Jake {
             rng: 0x4a41_4b45,
             special: None,
             punch: None,
+            blow: None,
             switched: false,
             switch_pose: 0,
             poison: 0,
             door_push: false,
             clock: 0,
+            character: Character::Jake,
+            sound: None,
         }
     }
 
+    fn is_garathe(&self) -> bool {
+        self.character == Character::Garathe
+    }
+
+    /// Passa a ser o personagem `ch` (perfil, rótulos e armas; o inventário segue).
+    pub fn with_character(mut self, ch: Character) -> Self {
+        self.character = ch;
+        self.inventory.character = ch;
+        if let Some(sk) = self.skel.as_mut() {
+            sk.draw = ch.profile().draw;
+        }
+        self.inventory.weapon = self.inventory.best();
+        self
+    }
+
+    pub fn character(&self) -> Character {
+        self.character
+    }
+
+    pub(crate) fn profile(&self) -> &'static Profile {
+        self.character.profile()
+    }
+
+    /// Rótulo e atraso do estado `s` para este personagem.
+    fn anim_of(&self, s: State) -> (u16, u32) {
+        match (self.character, s) {
+            (Character::Jake, _) => jake_anim(s),
+            (Character::Garathe, State::KnockedDown(right)) => {
+                (garathe::knocked_label(right, self.facing_right), 1)
+            }
+            (Character::Garathe, _) => garathe::anim(s),
+        }
+    }
+
+    /// O estado `s` toca o rótulo de trás para a frente.
+    fn reversed_state(&self, s: State) -> bool {
+        match self.character {
+            Character::Jake => jake_reversed(s),
+            Character::Garathe => garathe::reversed(s),
+        }
+    }
+
+    /// Estado de arte espelhada.
+    fn mirrored(&self, s: State) -> bool {
+        match self.character {
+            Character::Jake => moves::mirrored_art(s),
+            Character::Garathe => garathe::mirrored(s),
+        }
+    }
+
+    /// Descritor da arma `w` deste personagem.
+    pub fn weapon(&self, w: usize) -> &'static weapons::Weapon {
+        weapons::weapon_of(self.character, w)
+    }
+
     /// Usa o esqueleto (deslocamento e velocidades dos estados que o seguem).
-    pub fn with_skeleton(mut self, skel: Skel) -> Self {
+    pub fn with_skeleton(mut self, mut skel: Skel) -> Self {
+        skel.draw = self.profile().draw;
         self.skel = Some(skel);
         self
     }
@@ -555,6 +638,7 @@ impl Jake {
 
     pub fn with_inventory(mut self, inv: Inventory) -> Self {
         self.inventory = inv;
+        self.inventory.character = self.character;
         self
     }
 
@@ -568,12 +652,13 @@ impl Jake {
             self.tick_special(input, world);
             return true;
         }
+        let melee = self.melee_weapon();
         let mut w = if input & PUNCH != 0 {
-            FISTS
+            melee
         } else {
             self.inventory.weapon
         };
-        if w != FISTS && !self.inventory.available(w) {
+        if self.weapon(w).shot.is_some() && !self.inventory.available(w) {
             self.no_ammo = true;
             self.inventory.weapon = self.inventory.best();
             self.body.vx = 0;
@@ -582,11 +667,11 @@ impl Jake {
             return true;
         }
         let aim = Aim::from_input(input);
-        if w != FISTS {
-            let r = weapon(w).states[weapons::aim_slot(aim)][0].1;
+        if self.weapon(w).shot.is_some() {
+            let r = self.weapon(w).states[weapons::aim_slot(aim)][0].1;
             let dx = if self.facing_right { r.dx.1 } else { r.dx.0 };
-            if !self.muzzle_clear(world, (self.body.x + dx, self.body.y + r.dy)) {
-                w = FISTS;
+            if !self.muzzle_ok(world, w, (self.body.x + dx, self.body.y + r.dy)) {
+                w = melee;
             }
         }
         self.body.vx = 0;
@@ -602,6 +687,41 @@ impl Jake {
         self.frame = 0;
         self.label_changed = true;
         true
+    }
+
+    /// Arma do SOCO e da boca na parede: os punhos/garras ou, no Garathe com o par 2, a
+    /// clava (`0x43ab05`, ramo `0x43ab82`).
+    fn melee_weapon(&self) -> usize {
+        if self.is_garathe() && self.inventory.slots[weapons::CLUB].0 != 0 {
+            weapons::CLUB
+        } else {
+            FISTS
+        }
+    }
+
+    /// A boca da arma `w` está livre; o chicote só testa a metade da linha (`0x43bbe3`).
+    fn muzzle_ok(&self, world: &World, w: usize, muzzle: (i32, i32)) -> bool {
+        if self.weapon(w).half_line {
+            let b = self.body.bounds();
+            let c = (b.x + b.w / 2, b.y + b.h / 2);
+            self.muzzle_clear(world, ((c.0 + muzzle.0) / 2, (c.1 + muzzle.1) / 2))
+        } else {
+            self.muzzle_clear(world, muzzle)
+        }
+    }
+
+    /// Dano do golpe corpo a corpo do estado de tiro corrente (linha do `DAMAGE.TBL` da
+    /// variante), com o empurrão pelo lado.
+    fn blow_damage(&self, w: u8, aim: Aim) -> Option<Pending> {
+        let b = self.weapon(w as usize).blow?[weapons::aim_slot(aim)];
+        let dir = self.dir();
+        Some(Pending {
+            amount: b.damage,
+            knockdown: b.knockdown,
+            shove: !b.knockdown,
+            push: (b.push.0 * dir, b.push.1),
+            ..Default::default()
+        })
     }
 
     /// Caixa do golpe (`0x0043accb`): metade da frente da caixa do Jake e um terço da altura
@@ -652,7 +772,7 @@ impl Jake {
     /// Som do tiro: no primeiro tique de cada estado de tiro da arma que tem som.
     pub fn fire_sound(&self) -> Option<u16> {
         match self.state {
-            State::Fire { w, .. } if self.label_changed => weapon(w as usize).sound,
+            State::Fire { w, .. } if self.label_changed => self.weapon(w as usize).sound,
             _ => None,
         }
     }
@@ -677,13 +797,14 @@ impl Jake {
     fn tick_fire(&mut self, input: u32, world: &World, st: (Aim, u32, u8, bool)) {
         let (aim, t, w, alt) = st;
         let pressed = |bit: u32| input & bit != 0;
-        let wp = weapon(w as usize);
+        let wp = self.weapon(w as usize);
         let r = wp.states[weapons::aim_slot(aim)][usize::from(alt)].1;
         let t = t + wp.step;
         self.state = State::Fire { aim, t, w, alt };
         let right = self.facing_right;
         if r.hit != (0, 0) && t == r.hit.0 {
             self.punch = Some(self.punch_box(aim));
+            self.blow = self.blow_damage(w, aim);
         }
         let muzzle = (
             self.body.x + if right { r.dx.1 } else { r.dx.0 },
@@ -691,7 +812,7 @@ impl Jake {
         );
         let in_window = r.fire != (0, 0) && r.fire.0 <= t && t < r.fire.1 + wp.step;
         if let Some(kind) = wp.shot.filter(|_| in_window) {
-            if self.inventory.available(w as usize) && self.muzzle_clear(world, muzzle) {
+            if self.inventory.available(w as usize) && self.muzzle_ok(world, w as usize, muzzle) {
                 let slot = &mut self.inventory.slots[w as usize].1;
                 *slot = (*slot - 1).max(0);
                 let sign = if right { 1 } else { -1 };
@@ -811,6 +932,7 @@ impl Jake {
         !matches!(
             self.state,
             State::Pushed
+                | State::Jolted
                 | State::KnockedDown(_)
                 | State::Shocked(_)
                 | State::Dying(_)
@@ -829,20 +951,53 @@ impl Jake {
         {
             return false;
         }
-        if p.knockdown {
+        let g = self.is_garathe();
+        let layering = matches!(self.state, State::LayerUp(_) | State::LayerDown(_));
+        // empurrão: Jake em 1/10/101; Garathe em 1, 54–56 e 58 (`0x428531`)
+        let shovable = if g {
+            matches!(
+                self.state,
+                State::Idle | State::Hide | State::Hidden | State::Unhide | State::Pushed
+            )
+        } else {
+            matches!(self.state, State::Idle | State::Run | State::Push)
+        };
+        if p.knockdown && !(g && layering) {
             let right = p.push.0 >= 0;
             self.body.vx = p.push.0 * SUB;
             self.body.vy = p.push.1 * SUB;
             self.set(State::KnockedDown(right));
-        } else if p.shove && matches!(self.state, State::Idle | State::Run | State::Push) {
+        } else if p.shove && shovable {
             self.body.vx = p.push.0 * SUB;
             self.set(State::Pushed);
-        } else if p.electric && !matches!(self.state, State::Shocked(_)) {
+        } else if g && p.jolt && moves::joltable(self.state) {
+            // tranco (`0x42859e`): 59, ou queda na corda
+            self.body.vx = 0;
+            if matches!(self.state, State::Climb(_)) {
+                self.set(State::Fall);
+            } else {
+                self.set(State::Jolted);
+            }
+        } else if p.electric && !matches!(self.state, State::Shocked(_)) && !(g && layering) {
             self.body.vx = 0;
             self.set(State::Shocked(SHOCK_TICKS));
+            if g {
+                self.frame = garathe::SHOCK_FRAME.min(self.len_of(121) - 1);
+            }
         }
         if apply(&mut self.health, &p, tick) == 0 {
             self.death_label = match self.state {
+                State::KnockedDown(right) if g => {
+                    if garathe::knocked_label(right, self.facing_right) == 32 {
+                        garathe::DIE_FORWARD
+                    } else {
+                        garathe::DIE_BACK
+                    }
+                }
+                State::Land(Landing::Hard) if g => garathe::DIE_FORWARD,
+                State::Rise if g => garathe::DIE_BACK,
+                _ if g && p.poison => garathe::DIE_POISON,
+                _ if g => garathe::DIE_DEFAULT,
                 State::KnockedDown(true) => DIE_KNOCKED_RIGHT,
                 State::KnockedDown(false) => DIE_KNOCKED_LEFT,
                 _ if p.poison => DIE_POISON,
@@ -860,8 +1015,8 @@ impl Jake {
     pub fn label(&self) -> u16 {
         match self.state {
             State::Dead => self.death_label,
-            State::Idle if self.switch_pose > 0 => weapon(self.inventory.weapon).ready,
-            _ => anim_of(self.state).0,
+            State::Idle if self.switch_pose > 0 => self.weapon(self.inventory.weapon).ready,
+            _ => self.anim_of(self.state).0,
         }
     }
     pub fn facing_right(&self) -> bool {
@@ -881,8 +1036,8 @@ impl Jake {
             self.state = s;
             self.ticks = 0;
             self.label_changed = true;
-            self.frame = if reversed(s) {
-                self.len_of(anim_of(s).0) - 1
+            self.frame = if self.reversed_state(s) {
+                self.len_of(self.anim_of(s).0) - 1
             } else {
                 0
             };
@@ -893,7 +1048,7 @@ impl Jake {
     fn set_keep_frame(&mut self, s: State) {
         let f = self.frame;
         self.set(s);
-        self.frame = f.min(self.len_of(anim_of(s).0) - 1);
+        self.frame = f.min(self.len_of(self.anim_of(s).0) - 1);
     }
 
     /// Número de quadros de um rótulo (ao menos 1).
@@ -904,11 +1059,11 @@ impl Jake {
     /// A animação do estado chegou ao fim e avançaria neste tique (o modo "parar no fim" de
     /// `0x00406c71` devolve 1).
     fn anim_done(&self) -> bool {
-        let (label, c) = anim_of(self.state);
+        let (label, c) = self.anim_of(self.state);
         if self.label_changed || self.ticks % (c + 1) != 0 {
             return false;
         }
-        if reversed(self.state) {
+        if self.reversed_state(self.state) {
             self.frame == 0
         } else {
             self.frame + 1 >= self.len_of(label)
@@ -918,7 +1073,7 @@ impl Jake {
     /// Avança o quadro conforme o modo pedido neste tique (antes da física, como o original,
     /// que anima e depois pede a velocidade do quadro).
     fn animate(&mut self) {
-        let (label, c) = anim_of(self.state);
+        let (label, c) = self.anim_of(self.state);
         let n = self.len_of(label);
         self.advance = false;
         self.frame = self.frame.min(n - 1);
@@ -927,7 +1082,7 @@ impl Jake {
         }
         let before = self.frame;
         let mode = match self.anim_mode {
-            AnimMode::Auto if reversed(self.state) => AnimMode::Reverse,
+            AnimMode::Auto if self.reversed_state(self.state) => AnimMode::Reverse,
             m => m,
         };
         self.frame = match mode {
@@ -945,9 +1100,14 @@ impl Jake {
         let (Some(req), Some(sk)) = (self.ske_req, self.skel.as_ref()) else {
             return;
         };
-        let back = reversed(self.state) || self.anim_mode == AnimMode::Reverse;
-        let (mut dx, dy) = sk.delta(anim_of(self.state).0, self.frame, back, self.facing_right);
-        if moves::mirrored_art(self.state) {
+        let back = self.reversed_state(self.state) || self.anim_mode == AnimMode::Reverse;
+        let (mut dx, dy) = sk.delta(
+            self.anim_of(self.state).0,
+            self.frame,
+            back,
+            self.facing_right,
+        );
+        if self.mirrored(self.state) {
             dx = -dx;
         }
         if req.x {
@@ -972,7 +1132,7 @@ impl Jake {
             _ => (self.label(), self.frame),
         };
         let (mut ox, oy) = sk.offset(label, frame, self.facing_right);
-        if moves::mirrored_art(self.state) {
+        if self.mirrored(self.state) {
             ox = -ox;
         }
         (-ox, -oy)
@@ -981,7 +1141,7 @@ impl Jake {
     /// O sprite olha para a direita (a arte olha para a esquerda; os estados de arte
     /// espelhada, como o 149, olham para o outro lado: `0x00422fce`).
     pub fn sprite_mirrored(&self) -> bool {
-        self.facing_right != moves::mirrored_art(self.state)
+        self.facing_right != self.mirrored(self.state)
     }
 
     fn dir(&self) -> i32 {
@@ -1014,11 +1174,12 @@ impl Jake {
                 8,
             )
         };
-        if ahead(PROBE_MEDIUM) {
+        let p = self.profile();
+        if ahead(p.probe_medium) {
             JumpKind::Medium
-        } else if ahead(PROBE_LONG) {
+        } else if ahead(p.probe_long) {
             JumpKind::Long
-        } else if ahead(PROBE_EXTENDED) {
+        } else if p.probe_extended.is_some_and(ahead) {
             JumpKind::Extended
         } else {
             JumpKind::Medium
@@ -1027,9 +1188,9 @@ impl Jake {
 
     fn launch(&mut self, kind: JumpKind) {
         let (vx, vy) = match kind {
-            JumpKind::Medium => MEDIUM,
-            JumpKind::Long => LONG,
-            JumpKind::Extended => EXTENDED,
+            JumpKind::Medium => self.profile().medium,
+            JumpKind::Long => self.profile().long,
+            JumpKind::Extended => self.profile().extended.unwrap_or(self.profile().long),
         };
         self.body.vx = vx * SUB * self.dir();
         self.body.vy = vy * SUB;
@@ -1064,8 +1225,10 @@ impl Jake {
         self.no_ammo = false;
         self.special = None;
         self.punch = None;
+        self.blow = None;
         self.switched = false;
         self.door_push = false;
+        self.sound = None;
         self.anim_mode = AnimMode::Auto;
         self.ske_req = None;
         if self.state == State::Dead {
@@ -1114,7 +1277,8 @@ impl Jake {
                 | State::Hide
                 | State::Hidden
                 | State::Unhide
-        ) || (self.state == State::Crawl && self.free_above(world, 30));
+        ) || (self.state == State::Crawl
+            && self.free_above(world, self.profile().headroom));
         let fired = !matches!(self.state, State::Fire { .. })
             && can_fire
             && shooting
@@ -1139,6 +1303,13 @@ impl Jake {
             State::Idle | State::Run | State::Push => {
                 self.decide_standing(input, env, jump_edge, side);
             }
+            State::RunUp if self.is_garathe() => {
+                // preparo 24 (uma vez) → pulo longo 25 (`0x429a0b`)
+                self.body.vx = 0;
+                if self.anim_done() {
+                    self.launch(JumpKind::Long);
+                }
+            }
             State::RunUp => {
                 // Impulso (`0x00425382`): vx pelo esqueleto com k = 2, mantendo a vertical;
                 // no fim, o pulo estendido sai de onde o impulso levou o Jake.
@@ -1159,6 +1330,10 @@ impl Jake {
                     // fim do 80 ainda no ar → queda descontrolada (76)
                     self.set(State::WildFall);
                 } else {
+                    if self.is_garathe() && self.anim_done() {
+                        // 22/25: a animação toca uma vez e para no último quadro
+                        self.anim_mode = AnimMode::Hold;
+                    }
                     self.air_reverse(side);
                 }
             }
@@ -1169,7 +1344,12 @@ impl Jake {
             }
             _ => self.tick_move(input, env, jump_edge, side),
         }
-        self.door_push = self.state == State::Push && self.ticks + 1 == self.len_of(100) as u32;
+        let (push_label, push_c) = self.anim_of(State::Push);
+        self.door_push = self.state == State::Push
+            && self.ticks + 1 == self.len_of(push_label) as u32 * (push_c + 1);
+        if self.door_push && self.is_garathe() {
+            self.sound = Some(garathe::SOUND_PUSH);
+        }
         // a caixa do estado vale já para a física deste tique (o BRD troca com o estado)
         self.fit_box(world);
         if matches!(self.state, State::Run | State::Push) {
@@ -1185,8 +1365,19 @@ impl Jake {
         self.animate();
         self.apply_ske();
         let was_rising = self.body.vy < 0;
-        step(&mut self.body, world, moves::gravity(self.state));
+        let gravity = self.gravity_on();
+        step(&mut self.body, world, gravity);
         match self.state {
+            State::Jump(kind) if self.is_garathe() && self.body.hit_wall => {
+                // 22/25 contra a parede: fala e queda (`0x429e46`, `0x429c6c`)
+                self.sound = Some(if kind == JumpKind::Long {
+                    garathe::SPEECH_WALL_LONG
+                } else {
+                    garathe::SPEECH_WALL_MEDIUM
+                });
+                self.body.vx = 0;
+                self.set(State::Fall);
+            }
             State::Jump(_) | State::Fall | State::WildFall
                 if self.body.on_ground && !was_rising =>
             {
@@ -1199,6 +1390,9 @@ impl Jake {
                     _ => Landing::Hard,
                 };
                 self.set(State::Land(landing));
+                if landing == Landing::Long && self.is_garathe() {
+                    self.sound = Some(garathe::SOUND_LONG_LANDING);
+                }
             }
             State::JumpUp(_) if self.body.hit_ceiling && self.ceiling_is_bar(world) => {
                 self.body.vx = 0;
@@ -1271,6 +1465,26 @@ impl Jake {
                     self.state = State::Shocked(n - 1);
                 }
             }
+            State::Jolted => {
+                // 59: desliza pelo esqueleto (k = 2, só x), depois levanta (35)
+                if self.anim_done() {
+                    self.body.vx = 0;
+                    self.set(State::Rise);
+                } else {
+                    self.animate();
+                    self.ske_req = Some(SkeReq {
+                        k: 2,
+                        x: true,
+                        y: false,
+                        diag: 0,
+                    });
+                    self.apply_ske();
+                    step(&mut self.body, world, true);
+                    self.fit_box(world);
+                    self.finish_tick();
+                    return;
+                }
+            }
             State::Pushed => {
                 step(&mut self.body, world, true);
                 if self.anim_done() {
@@ -1291,7 +1505,18 @@ impl Jake {
                 if self.body.on_ground && !was_rising {
                     self.body.vx = 0;
                     self.body.vy = 0;
-                    self.set(State::Land(Landing::Fall));
+                    let next = match self.state {
+                        // 32 → 30 no chão; 33 → 35 (`0x42a115`, `0x42a1b3`)
+                        State::KnockedDown(right) if self.is_garathe() => {
+                            if garathe::knocked_label(right, self.facing_right) == 32 {
+                                State::Land(Landing::Hard)
+                            } else {
+                                State::Rise
+                            }
+                        }
+                        _ => State::Land(Landing::Fall),
+                    };
+                    self.set(next);
                 }
             }
             State::Dying(_) => {

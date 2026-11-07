@@ -159,7 +159,7 @@ impl Viewer {
     pub fn hud_state(&self) -> HudState {
         let (character, health, armor, slots, weapon, face_alt) = match self.scene.jake.as_ref() {
             Some(j) => (
-                Character::Jake,
+                j.character(),
                 j.health.hp,
                 j.health.armor,
                 j.inventory.slots,

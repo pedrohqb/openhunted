@@ -198,6 +198,7 @@ impl Scene {
                 j.body.y.div_euclid(super::CELL) * super::CELL,
             );
             let mask = key_mask(&j.inventory);
+            let ch = j.character();
             let snapshot: Vec<(i32, bool)> = self
                 .entities
                 .iter()
@@ -215,7 +216,8 @@ impl Scene {
                 let ok = crate::triggers::satisfied(&d.door_triggers(), &on);
                 let before = d.state;
                 if let Some(id) = d.push(mask, ok) {
-                    self.events.push(Event::Sound(Cue::ui(id, PRIORITY_PICKUP)));
+                    self.events
+                        .push(Event::Sound(Cue::ui(ch.speech(id), PRIORITY_PICKUP)));
                 }
                 changed |= before != d.state && d.state == CLOSING;
             }

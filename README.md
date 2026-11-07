@@ -17,6 +17,12 @@ bote), dardos, catapulta, Entidade (inverte os controles de perto) e formigueiro
 das opções vale no jogo: dano nos inimigos ×2/÷2 e munição ×1,5/×0,75. Regras em
 `docs/superpowers/specs/2026-11-06-m10-inimigos-secundarios-design.md`.
 
+**M8: o Garathe Den jogável.** Nas missões do Minotauro (`T_M`, `I_M`, `H_M`, `D_M`) o
+jogador controla o Garathe, com os movimentos dele (corrida a 15 px/tique, pose de luta, pulo
+longo com investida, rastejar, barra, esconder, especial) e as armas dele (garras, clava,
+chicote, facas, granadas, estrelas). A `T_M_002` é vencida de ponta a ponta. Regras em
+`docs/superpowers/specs/2026-11-06-m8-garathe-design.md`.
+
 **M9: a casca completa.** Todos os botões do menu principal levam às telas originais:
 carregar (Restore), escolher missão (`SLEVL`, com a marca nas vencidas e o retrato do
 personagem), opções (`SOPTI`: dificuldade, brilho, volumes da música e dos efeitos, gravadas
@@ -62,31 +68,22 @@ ponta.
 
 **M5: as telas em volta do jogo.** Menu principal (`SMAIN.ITF`), briefing (`SLEVD.ITF`),
 partida em 640×405 com a barra de estado (`INVBAR01.BMP`), pausa (P ou Pause) e resultado
-(`SMISS.ITF`: mortos, pontos, bônus, recorde; REPLAY, NEXT, MAIN MENU). Decisão do port:
-enquanto o Garathe não existe, o NEXT pula as missões dele; uma fase aberta com `--level` fora
+(`SMISS.ITF`: mortos, pontos, bônus, recorde; REPLAY, NEXT, MAIN MENU). Uma fase aberta com `--level` fora
 da lista de missões não grava recorde nem jogo.
 
-**M4c: efeitos sonoros.** **M4b: a pistola.** **M4a: a primeira missão é jogável de ponta a ponta.** Na `T_J_001`, o
-Jake corre, pula e cai, colide com o cenário e com os objetos sólidos, apanha a vida e a
-armadura, lê as dicas do tutorial, atira com a pistola (rajadas de 3, mira para cima e nas
-diagonais, munição no HUD) nas minas flutuantes que o perseguem (ou elas explodem nele,
-tiram vida, empurram e derrubam), chega à saída, aperta CIMA e vence; se a vida acaba, morre
-e perde. Os efeitos sonoros tocam (tiro, cápsulas, faíscas, explosões, coleta, dicas, choque
-da saída), posicionados em relação à câmera, com volume e pan pela distância e 16 canais com
-prioridade, como no original. Tudo com as
-constantes e as regras lidas do executável original (`docs/re/`).
+**M4: a primeira missão (`T_J_001`) jogável de ponta a ponta**, com a pistola e os efeitos
+sonoros posicionados (16 canais com prioridade, como no original).
 
 Etapas anteriores: M1 formatos (a biblioteca `openhunted-formats` lê os dados do CD, pasta ou
 `.iso`: bitmaps, paletas, sons, textos, animações, cenários, interfaces, fontes, fases;
 estado em [`docs/formats/`](docs/formats/README.md)); M2 visualizador de fase; M3a o Jake
 corre e pula; M3b objetos sólidos e presença por modo de jogo.
 
-Ainda não há: o Minotauro e o Jake inimigos, o equilíbrio na beirada (162/163),
-os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, o logotipo, o
-título e a história da abertura (só o filme toca) e o laço de demonstração, a troca de teclas e o joystick, os modos de dois jogadores, tesouros e
-segredos, outras missões jogáveis, o Garathe. Os obstáculos `OPO` (gotas, bloco que cai,
-portão) ainda não agem. Nas missões do Garathe não há personagem controlável (as setas rolam a
-tela).
+Ainda não há: o Minotauro e o Jake inimigos, o equilíbrio na beirada (162/163), os passos e
+demais sons por quadro do Jake e do cenário, o zumbido das minas, o logotipo, o título e a
+história da abertura (só o filme toca) e o laço de demonstração, a troca de teclas e o joystick,
+os modos de dois jogadores, tesouros e segredos, as cores do herói (o Garathe usa a paleta da
+fase). Os obstáculos `OPO` (gotas, bloco que cai, portão) ainda não agem.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
 reversa, em [`docs/re/`](docs/re/).
@@ -132,14 +129,14 @@ Enter carrega. Nos campos de nome, digita-se pelo teclado, Backspace apaga, Ente
 Esc desiste (no nome do arquivo, desistir não grava). "Restore" já traz o nome do jogo salvo
 mais recente.
 
-No jogo: setas movem o Jake, espaço pula (correndo, o pulo escolhe a distância conforme o chão
+No jogo: setas movem o personagem (o Jake ou, nas missões do Minotauro, o Garathe), espaço pula (correndo, o pulo escolhe a distância conforme o chão
 adiante; com CIMA, para cima), Ctrl atira (segurando, rajadas; com as setas mira para cima e
-nas diagonais; BAIXO+Ctrl é o especial), X anda furtivo, Z é o soco, PgUp/PgDn trocam de arma (1–6 escolhem direto), CIMA
+nas diagonais; BAIXO+Ctrl é o especial), X anda furtivo (o Garathe, em pose de luta), Z é o soco (o Garathe usa a clava se a tem), PgUp/PgDn trocam de arma (1–6 escolhem direto), CIMA
 usa a saída ou o interruptor quando ele está parado diante deles, agarra cordas e escadas, passa pelas portas
 de camada ou o esconde, e BAIXO agacha (e engatinha com as setas) ou desce de camada; a
 câmera o acompanha. P ou Pause pausa (Enter,
 espaço ou OKAY retomam). A dica do tutorial pausa o jogo e fecha ao soltar uma tecla. Esc não
-faz nada (como no original). Em fases sem o Jake, as setas rolam a tela, PageUp/PageDown pulam
+faz nada (como no original). Em fases sem personagem, as setas rolam a tela, PageUp/PageDown pulam
 uma tela, Home/End vão às pontas e Esc volta ao menu (sem personagem, a fase nunca acaba).
 Quando a janela perde o foco, o jogo pausa. Só o botão esquerdo do mouse clica. Tab mostra as caixas de colisão e os objetos de lógica. O
 som sai pelo dispositivo de áudio padrão; sem ele, o jogo avisa uma vez e segue mudo.

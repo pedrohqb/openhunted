@@ -1090,7 +1090,7 @@ mod tests {
         b.key_down(Key::Enter); // o nome do mais recente já vem preenchido
         assert_eq!(b.mode(), super::super::Mode::Briefing);
         assert_eq!(b.records, a.records);
-        assert_eq!(b.mission_index(), Some(2), "pula a do Garathe");
+        assert_eq!(b.mission_index(), Some(1), "a do Garathe (M8) é jogável");
         // nome inválido: caixa 10009
         let mut c = app(&root, None).unwrap();
         click(&mut c, menu::RESTORE);

@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use openhunted_formats::Skeleton;
 
-use super::{AnimMode, Climb, Jake, JumpKind, Landing, RUN, SkeReq, State, anim_of, reversed};
+use super::{AnimMode, Climb, Jake, JumpKind, Landing, SkeReq, State};
 use crate::damage::Pending;
 use crate::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, STEALTH, UP};
 use crate::physics::{CONTACT_SCENERY, Rect, SUB, World};
@@ -44,17 +44,12 @@ pub const BAR_BOX: Rect = Rect {
 
 /// Vida mínima para o especial (`tiro-jake.md`: "vida > 25").
 pub const SPECIAL_MIN_HP: i32 = 25;
-/// Cada tique do efeito do especial custa 3 de vida ao próprio Jake (`+0x24c = 3`).
-pub const SPECIAL_SELF_DAMAGE: i32 = 3;
-/// Último tique do especial (registro `0x47d7bc`: janela 0..5 e `+0x18 = 5`).
-pub const SPECIAL_LAST_TICK: u32 = 5;
+// Janela e custo do especial (Jake: 1..5 e 3 por tique, `+0x24c = 3`): no perfil.
 /// Dano do especial nos "demais" por tique (linha `(1, 0, 9)` do `DAMAGE.TBL`).
 pub const SPECIAL_DAMAGE: i32 = 15;
 /// Alcance do especial: distância entre centros < 70 px (`0x00427643`).
 pub const SPECIAL_RADIUS: i32 = 70;
 
-/// Espaço livre acima para levantar, atirar ou pular agachado (`0x0040718d(0, −30)`).
-const HEADROOM: i32 = 30;
 /// Espaço livre acima para a decisão em pé no 77 (`0x0040718d(0, −25)`).
 const HEADROOM_77: i32 = 25;
 /// Sondas de 4 px (corda, barra, engatinhar).
@@ -152,12 +147,19 @@ pub struct Skel {
     pub ske: Rc<Skeleton>,
     pub s: (i32, i32),
     pub k: (i32, i32),
+    /// Fator da compensação do desenho (Jake 12/20; Garathe 587/1000, `0x427a3d`).
+    pub draw: (i32, i32),
 }
 
 impl Skel {
     pub fn new(ske: Rc<Skeleton>, s: (i32, i32)) -> Self {
         let k = (i32::from(ske.width).max(1), i32::from(ske.height).max(1));
-        Self { ske, s, k }
+        Self {
+            ske,
+            s,
+            k,
+            draw: (12, 20),
+        }
     }
 
     fn roots(&self, label: u16) -> &[(i16, i16)] {
@@ -195,7 +197,7 @@ impl Skel {
     }
 
     /// Deslocamento do desenho (`+0x16c`, `+0x170`) no quadro `frame`: a raiz acumulada,
-    /// escalada e vezes 12/20; `+0x170` com o sinal trocado.
+    /// escalada e vezes o fator de desenho; `+0x170` com o sinal trocado.
     pub fn offset(&self, label: u16, frame: usize, right: bool) -> (i32, i32) {
         let p = self.roots(label);
         if p.is_empty() {
@@ -203,7 +205,8 @@ impl Skel {
         }
         let r = p[frame.min(p.len() - 1)];
         let (x, y) = self.scale((i32::from(r.0), i32::from(r.1)), right);
-        (x * 12 / 20, -(y * 12 / 20))
+        let (n, d) = self.draw;
+        (x * n / d, -(y * n / d))
     }
 }
 
@@ -235,6 +238,28 @@ pub fn gravity(s: State) -> bool {
     )
 }
 
+/// Estados em que o Garathe sente o tranco (`0x42859e`): 1, 10, 28, 31, 35–37, 44–46, 58,
+/// os de arma e a corda (52/53, que viram queda).
+pub fn joltable(s: State) -> bool {
+    matches!(
+        s,
+        State::Idle
+            | State::Run
+            | State::Land(Landing::Fall)
+            | State::GetUp
+            | State::Rise
+            | State::Crawl
+            | State::Crouch
+            | State::Push
+            | State::Pushed
+            | State::Fire { .. }
+            | State::Ready(..)
+            | State::Holster(_)
+            | State::Recover(_)
+            | State::Climb(_)
+    )
+}
+
 /// Estados "no chão" que viram queda quando o chão some (`0x0042415c`).
 pub fn can_fall(s: State) -> bool {
     matches!(
@@ -253,12 +278,24 @@ pub fn can_fall(s: State) -> bool {
             | State::Unhide
             | State::Land(_)
             | State::GetUp
+            | State::Rise
             | State::Shake
             | State::Special(_)
     )
 }
 
 impl Jake {
+    /// Gravidade neste tique: a do estado, salvo o pulo da corda do Garathe (19), parado e
+    /// sem gravidade até o quadro 9.
+    pub(super) fn gravity_on(&self) -> bool {
+        match self.state {
+            State::JumpUp(true) if self.is_garathe() => {
+                self.ticks as usize >= super::garathe::ROPE_JUMP_FRAME
+            }
+            s => gravity(s),
+        }
+    }
+
     /// OU dos tipos das zonas PR da camada do Jake que cruzam a caixa dele (`0x004075af`).
     pub fn zones_under(&self, env: &Env) -> u16 {
         let b = self.body.bounds();
@@ -325,6 +362,14 @@ impl Jake {
     /// Caixa do estado (BRD da coluna `+0x01`): engatinhando, `JK_CRAWL`; puxando o corpo
     /// na barra, `JK_BARUP`; senão a padrão.
     fn state_box(&self) -> Rect {
+        if self.is_garathe() {
+            // `MN_CRAWL` em 36–38, `MN_BARUP` em 49–51
+            return match self.state {
+                State::Crouch | State::Crawl | State::StandUp => self.box_crawl,
+                State::BarPull | State::BarMove | State::BarDown => self.box_bar,
+                _ => self.box_default,
+            };
+        }
         match self.state {
             State::Crouch | State::Crawl | State::StandUp => self.box_crawl,
             State::BarPull | State::BarUp | State::BarDown => self.box_bar,
@@ -381,6 +426,9 @@ impl Jake {
             self.body.vx = 0;
             if side.is_some() {
                 match self.choose_jump(world) {
+                    // Garathe: PULAR+CIMA+lado → longo direto (`0x428f56`)
+                    _ if self.is_garathe() && pressed(UP) => self.launch(JumpKind::Long),
+                    JumpKind::Long if self.is_garathe() => self.set(State::RunUp),
                     JumpKind::Extended => self.set(State::RunUp),
                     k => self.launch(k),
                 }
@@ -395,18 +443,23 @@ impl Jake {
             if pressed(STEALTH) && self.free_ahead(world, PROBE) {
                 self.set(State::Stealth);
                 self.ske_req = Some(SkeReq {
-                    k: 3,
+                    k: self.profile().k.walk,
                     x: true,
                     y: false,
                     diag: 0,
                 });
             } else {
-                self.body.vx = RUN * self.dir();
                 let next = if self.body.hit_wall || !self.free_ahead(world, PROBE) {
                     State::Push
                 } else {
                     State::Run
                 };
+                let speed = if next == State::Push {
+                    self.profile().push
+                } else {
+                    self.profile().run
+                };
+                self.body.vx = speed * SUB * self.dir();
                 self.set(next);
             }
             return true;
@@ -544,6 +597,7 @@ impl Jake {
             self.launch(JumpKind::Long);
         } else {
             match self.choose_jump(world) {
+                JumpKind::Long if run_up && self.is_garathe() => self.set(State::RunUp),
                 JumpKind::Extended if run_up => self.set(State::RunUp),
                 k => self.launch(k),
             }
@@ -555,6 +609,54 @@ impl Jake {
         let pressed = |bit: u32| input & bit != 0;
         let world = env.world;
         match self.state {
+            State::JumpUp(true) if self.is_garathe() => {
+                // 19: parado até o quadro 9, então vy = −30 com gravidade (`0x4296df`)
+                let n = self.ticks as usize;
+                self.body.vx = 0;
+                if n < super::garathe::ROPE_JUMP_FRAME {
+                    self.body.vy = 0;
+                } else if n == super::garathe::ROPE_JUMP_FRAME {
+                    self.body.vy = super::garathe::ROPE_JUMP_VY * SUB;
+                } else if self.anim_done() {
+                    self.set(State::Idle);
+                }
+            }
+            State::Land(Landing::Medium | Landing::Long) if self.is_garathe() => {
+                // 23 e 26: deslizam pelo esqueleto com k = 1; no fim, parado
+                if self.anim_done() {
+                    self.body.vx = 0;
+                    self.set(State::Idle);
+                } else {
+                    self.ske_req = Some(SkeReq {
+                        k: 1,
+                        x: true,
+                        y: false,
+                        diag: 0,
+                    });
+                }
+            }
+            State::Land(Landing::Hard) | State::GetUp | State::Rise if self.is_garathe() => {
+                // 30/35: com 20 px livres, decisão em pé; teto baixo ou BAIXO → 36; fim → 31
+                // (30) ou parado (31, 35)
+                self.body.vx = 0;
+                let head = self.free_above(world, self.profile().headroom);
+                if head && self.decide(input, env, jump_edge, side) {
+                } else if !head || pressed(DOWN) {
+                    self.set(State::Crawl);
+                } else if self.anim_done() {
+                    let next = if self.state == State::Land(Landing::Hard) {
+                        State::GetUp
+                    } else {
+                        State::Idle
+                    };
+                    self.set(next);
+                }
+            }
+            State::BarHang | State::BarMove | State::BarPull | State::BarDown | State::BarUp
+                if self.is_garathe() =>
+            {
+                self.tick_bar_garathe(input, world, side)
+            }
             State::StandJump | State::JumpUp(_) => {
                 if self.frame < LAUNCH_WINDOW && pressed(JUMP) && side.is_some() {
                     self.launch_from(input, world, self.body.on_ground);
@@ -573,7 +675,11 @@ impl Jake {
                     return;
                 }
                 self.ske_req = Some(SkeReq {
-                    k: 3,
+                    k: if self.state == State::StandJump {
+                        self.profile().k.stand_jump
+                    } else {
+                        self.profile().k.jump_up
+                    },
                     x: false,
                     y: true,
                     diag: 0,
@@ -596,7 +702,7 @@ impl Jake {
             State::Land(Landing::Medium | Landing::Long) => {
                 // dois quadros por tique; a velocidade usa o Δ do último (k = 1, só x). Se
                 // um dos dois `0x423835` passa do último quadro, parado (`0x425946`).
-                let n = self.len_of(anim_of(self.state).0);
+                let n = self.len_of(self.anim_of(self.state).0);
                 let t = self.ticks as usize;
                 if t >= 1 && 2 * t > n {
                     self.body.vx = 0;
@@ -617,7 +723,7 @@ impl Jake {
                     return;
                 }
                 if self.anim_done() {
-                    if self.free_above(world, HEADROOM) {
+                    if self.free_above(world, self.profile().headroom) {
                         self.set(State::GetUp);
                     } else {
                         self.set(State::Crawl);
@@ -626,7 +732,7 @@ impl Jake {
             }
             State::GetUp => {
                 self.body.vx = 0;
-                if !self.free_above(world, HEADROOM) || pressed(DOWN) {
+                if !self.free_above(world, self.profile().headroom) || pressed(DOWN) {
                     self.set(State::Crawl);
                 } else if self.decide(input, env, jump_edge, side) {
                 } else if self.anim_done() {
@@ -697,7 +803,7 @@ impl Jake {
         let sides = input & (LEFT | RIGHT);
         let one_side = sides == LEFT || sides == RIGHT;
         let t = t + 1;
-        if input & UP != 0 || one_side || t > SPECIAL_LAST_TICK {
+        if input & UP != 0 || one_side || t > self.profile().special.end {
             self.state = State::Special(t);
             let shoot = input & SHOOT != 0 && self.body.on_ground;
             if !(shoot && self.start_fire(input, world)) {
@@ -706,13 +812,17 @@ impl Jake {
             return;
         }
         self.state = State::Special(t);
+        let sp = self.profile().special;
+        if t < sp.first || t > sp.last {
+            return;
+        }
         let b = self.body.bounds();
         self.special = Some(SpecialBlast {
             center: (b.x + b.w / 2, b.y + b.h / 2),
             layer: self.layer,
         });
         self.hurt(Pending {
-            amount: SPECIAL_SELF_DAMAGE,
+            amount: self.profile().special.self_damage,
             ..Default::default()
         });
     }
@@ -765,7 +875,7 @@ impl Jake {
             }
             // diagonal: vx = ±vy (CIMA+ESQ e BAIXO+DIR: vx = vy)
             self.ske_req = Some(SkeReq {
-                k: 2,
+                k: self.profile().k.rope,
                 x: false,
                 y: true,
                 diag: lateral * vertical,
@@ -773,7 +883,7 @@ impl Jake {
         } else if lateral != 0 {
             self.set(State::Climb(Climb::Side));
             self.ske_req = Some(SkeReq {
-                k: 2,
+                k: self.profile().k.rope,
                 x: true,
                 y: false,
                 diag: 0,
@@ -787,7 +897,7 @@ impl Jake {
     fn tick_crouch(&mut self, input: u32, env: &Env, jump_edge: bool, side: Option<bool>) {
         let pressed = |bit: u32| input & bit != 0;
         let world = env.world;
-        let head = self.free_above(world, HEADROOM);
+        let head = self.free_above(world, self.profile().headroom);
         self.body.vx = 0;
         match self.state {
             State::Crouch => {
@@ -806,7 +916,7 @@ impl Jake {
                     self.set(State::StandUp);
                 } else if side.is_some() && self.free_ahead(world, PROBE) {
                     self.ske_req = Some(SkeReq {
-                        k: 2,
+                        k: self.profile().k.crawl,
                         x: true,
                         y: false,
                         diag: 0,
@@ -908,7 +1018,7 @@ impl Jake {
                     } else {
                         self.set(State::BarMove);
                         self.ske_req = Some(SkeReq {
-                            k: 4,
+                            k: self.profile().k.bar,
                             x: true,
                             y: false,
                             diag: 0,
@@ -940,6 +1050,65 @@ impl Jake {
         }
     }
 
+    /// Barra do Garathe (`0x42a29b`, `0x42a4af`, `0x42a7c2`, `0x42a8bb`): pendurado (47);
+    /// CIMA ou lado → agarrar (50, uma vez) → mão ante mão (49, k = 6 em x); sem direção →
+    /// soltar a mão (51: o 50 ao contrário) → 47. Não há "subir na barra".
+    fn tick_bar_garathe(&mut self, input: u32, world: &World, side: Option<bool>) {
+        let pressed = |bit: u32| input & bit != 0;
+        self.body.vx = 0;
+        self.body.vy = 0;
+        if self.probe(world, 0, -1) & CONTACT_SCENERY == 0
+            || pressed(SHOOT)
+            || pressed(JUMP)
+            || (pressed(DOWN) && self.state == State::BarHang)
+        {
+            self.fall();
+            return;
+        }
+        match self.state {
+            State::BarHang => {
+                if pressed(UP) || side.is_some() {
+                    self.set(State::BarPull);
+                }
+            }
+            State::BarPull => {
+                if self.anim_done() {
+                    self.set(State::BarMove);
+                }
+            }
+            State::BarMove => {
+                if side.is_none() {
+                    self.set(State::BarDown);
+                    return;
+                }
+                let b = self.body.bounds();
+                let front = if self.facing_right {
+                    b.x + b.w
+                } else {
+                    b.x - 1
+                };
+                let ahead = front + 3 * self.dir();
+                if self.probe(world, self.dir(), 0) & CONTACT_SCENERY != 0 {
+                    self.anim_mode = AnimMode::Hold;
+                } else if !self.bar_at(world, front) && !self.bar_at(world, ahead) {
+                    self.fall();
+                } else {
+                    self.ske_req = Some(SkeReq {
+                        k: self.profile().k.bar,
+                        x: true,
+                        y: false,
+                        diag: 0,
+                    });
+                }
+            }
+            _ => {
+                if self.anim_done() {
+                    self.set(State::BarHang);
+                }
+            }
+        }
+    }
+
     /// Está escondido (o teste dos inimigos, `0x0041db0f`, olha os estados 164–166).
     pub fn is_hidden(&self) -> bool {
         matches!(self.state, State::Hide | State::Hidden | State::Unhide)
@@ -947,7 +1116,7 @@ impl Jake {
 
     /// O estado toca de trás para a frente.
     pub fn reversed(&self) -> bool {
-        reversed(self.state)
+        self.reversed_state(self.state)
     }
 }
 
@@ -1736,7 +1905,7 @@ mod tests {
         j.tick(0, &w);
         assert_eq!(
             j.health.hp,
-            50 - 5 * SPECIAL_SELF_DAMAGE,
+            50 - 5 * crate::character::JAKE.special.self_damage,
             "3 de vida por tique"
         );
         // segurando BAIXO+ATIRAR repete enquanto a vida passar de 25

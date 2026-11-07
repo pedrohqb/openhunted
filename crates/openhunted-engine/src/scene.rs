@@ -3,6 +3,7 @@
 
 mod arsenal;
 mod cell_door;
+mod garathe;
 mod switches;
 
 use std::rc::Rc;
@@ -100,6 +101,8 @@ pub struct Scene {
     /// O Jake controlável: o início de jogador de tipo 1 no modo solo (ou, sem modo solo, o
     /// primeiro objeto de tipo 1), se a fase tiver um.
     pub jake: Option<Jake>,
+    /// Objetos já atingidos pela investida do pulo longo do Garathe (índices).
+    body_checked: Vec<usize>,
     /// Sprite do Jake (desenhado depois dos objetos).
     pub jake_sprite: Option<Sprite>,
     /// Geometria sólida da camada do Jake.
@@ -168,6 +171,13 @@ const JAKE: u32 = 1;
 /// de tipo 1 no modo solo ou, sem modo solo, algum objeto de tipo 1. Nas fases do Garathe
 /// (ainda sem personagem controlável) é `false`.
 pub fn has_controllable_jake(level: &Level) -> bool {
+    player_character(level) == Some(crate::character::Character::Jake)
+}
+
+/// O personagem controlável da fase no modo solo (como em `Scene::build`): o tipo do objeto
+/// de vaga do solo (`modos & 3 = 3`, `0x43cc17`), 1 (Jake) ou 2 (Garathe); sem vaga solo, o
+/// Jake se houver algum objeto de tipo 1.
+pub fn player_character(level: &Level) -> Option<crate::character::Character> {
     let objects: Vec<&LevelObject> = level
         .objects
         .iter()
@@ -176,8 +186,24 @@ pub fn has_controllable_jake(level: &Level) -> bool {
     let solo = objects.iter().any(|o| is_player_start(o, SOLO));
     objects
         .iter()
-        .any(|o| o.kind == JAKE && (!solo || is_player_start(o, SOLO)))
+        .find(|o| is_player(o, solo))
+        .and_then(|o| crate::character::Character::from_kind(o.kind))
 }
+
+/// A fase tem um personagem controlável (Jake ou Garathe) no modo solo.
+pub fn has_controllable_player(level: &Level) -> bool {
+    player_character(level).is_some()
+}
+
+/// O objeto é o jogador: no solo, a vaga de tipo 1 ou 2; sem solo, um objeto de tipo 1.
+fn is_player(o: &LevelObject, solo: bool) -> bool {
+    if solo {
+        is_player_start(o, SOLO) && crate::character::Character::from_kind(o.kind).is_some()
+    } else {
+        o.kind == JAKE
+    }
+}
+
 /// Caixa de colisão de reserva do Jake (envolvente do `JK_DEFLT.BRD`).
 const JAKE_BOX: Rect = Rect {
     x: 2,
@@ -306,6 +332,7 @@ impl Scene {
             borders: Vec::new(),
             warnings: Vec::new(),
             jake: None,
+            body_checked: Vec::new(),
             jake_sprite: None,
             world: World::default(),
             object_solids: Vec::new(),
@@ -355,6 +382,7 @@ impl Scene {
             borders: Vec::new(),
             warnings: Vec::new(),
             jake: None,
+            body_checked: Vec::new(),
             jake_sprite: None,
             world: World::default(),
             object_solids: Vec::new(),
@@ -555,9 +583,10 @@ impl Scene {
         if solo {
             objects.retain(|o| present(o, SOLO) || is_player_start(o, SOLO));
         }
-        let is_jake = |o: &LevelObject| o.kind == JAKE && (!solo || is_player_start(o, SOLO));
         for o in objects {
-            if is_jake(o) && s.jake.is_none() {
+            if is_player(o, solo) && s.jake.is_none() {
+                let ch = crate::character::Character::from_kind(o.kind).unwrap_or_default();
+                let prof = ch.profile();
                 match assets.animation(&o.names[0]) {
                     Ok(a) => {
                         let n = o.fields.len();
@@ -576,17 +605,21 @@ impl Scene {
                         // o esqueleto do Jake tem id 1 (o do Garathe, 2)
                         let skel = match assets
                             .archive()
-                            .get("JAKE.SKE")
+                            .get(prof.ske)
                             .and_then(openhunted_formats::Skeleton::parse)
                         {
-                            Ok(k) if k.id == 1 => Some(Skel::new(Rc::new(k), (sc(rw), sc(rh)))),
+                            Ok(k) if k.id == prof.ske_id => {
+                                Some(Skel::new(Rc::new(k), (sc(rw), sc(rh))))
+                            }
                             Ok(k) => {
-                                s.warnings
-                                    .push(format!("JAKE.SKE: id {} (esperado 1)", k.id));
+                                s.warnings.push(format!(
+                                    "{}: id {} (esperado {})",
+                                    prof.ske, k.id, prof.ske_id
+                                ));
                                 None
                             }
                             Err(e) => {
-                                s.warnings.push(format!("JAKE.SKE: {e}"));
+                                s.warnings.push(format!("{}: {e}", prof.ske));
                                 None
                             }
                         };
@@ -599,8 +632,8 @@ impl Scene {
                                 .and_then(|b| border_bounds(&b))
                                 .unwrap_or(fallback)
                         };
-                        let crawl = brd("JK_CRAWL.BRD", crate::jake::CRAWL_BOX);
-                        let bar = brd("JK_BARUP.BRD", crate::jake::BAR_BOX);
+                        let crawl = brd(prof.crawl_brd, crate::jake::CRAWL_BOX);
+                        let bar = brd(prof.bar_brd, crate::jake::BAR_BOX);
                         let boxr = assets
                             .archive()
                             .get(&o.names[1])
@@ -613,8 +646,9 @@ impl Scene {
                         let player = AnimPlayer::at_label(&a, 1).unwrap_or(player);
                         let field = |i: usize| o.fields.get(i).copied().unwrap_or(0);
                         let mut j = Jake::new(o.x, o.y, boxr, label_lengths(&a))
+                            .with_character(ch)
                             .with_health(field(14), field(15))
-                            .with_inventory(crate::jake::Inventory::from_points(&o.points))
+                            .with_inventory(crate::jake::Inventory::for_character(&o.points, ch))
                             .with_layer(jake_layer)
                             .with_boxes(crawl, bar);
                         if let Some(k) = skel {
@@ -797,6 +831,7 @@ impl Scene {
         if let Some(r) = self.jake.as_mut().and_then(|j| j.punch.take()) {
             self.apply_punch(r);
         }
+        self.tick_player_extras();
         self.tick_cell_doors();
         self.spawn_shots();
         if self.outcome.is_none() {
