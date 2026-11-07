@@ -82,6 +82,10 @@ Soco do Jake: linhas `(1, 105)`/`(1, 89)` dano 8, som 3038.
 
 ## Em aberto
 
+Trajetórias (o "ricochete" é uma volta completa do passeio) e natureza `0x10` (inerte): ver
+[`inimigos-menores-2.md`](inimigos-menores-2.md).
+
+
 - O que a natureza `0x10` faz na vítima (também usada pelo Camaleão, tipo 4); não aparece em
   `0x4231f9` como lido em `dano-vida.md`.
 - Detalhes de `0x421fd6`, `0x42221b`, `0x4221b0` (trajetórias) e o campo `+0x38`.

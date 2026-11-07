@@ -89,7 +89,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     };
     // nasceu dentro de um sólido (boca na parede): impacto imediato
     if let Some(b) = e.bounds() {
-        if ctx.cells.blocked(&b) {
+        if ctx.cells_for(e.layer).blocked(&b) {
             let c = e.center();
             e.alive = false;
             out.impacts.push((c.0, c.1, e.layer));
@@ -99,7 +99,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     let mut body = Body::new(e.x, e.y, boxr);
     body.vx = vx;
     body.vy = vy;
-    step(&mut body, ctx.cells, false);
+    step(&mut body, ctx.cells_for(e.layer), false);
     // qualquer desvio do deslocamento pedido (parede, teto ou chão) é um toque
     let full = (vx >> 3, vy >> 3);
     let moved = (body.x - e.x, body.y - e.y) == full;

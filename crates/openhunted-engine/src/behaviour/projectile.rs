@@ -26,7 +26,7 @@ pub fn fly(e: &mut Entity, v: (i32, i32), ctx: &Ctx, gravity: bool) -> Option<Fl
     body.vx = v.0;
     body.vy = v.1;
     let full = (v.0 >> 3, v.1 >> 3);
-    step(&mut body, ctx.cells, gravity);
+    step(&mut body, ctx.cells_for(e.layer), gravity);
     let want = if gravity {
         (full.0, (v.1 + crate::physics::GRAVITY) >> 3)
     } else {
@@ -67,5 +67,6 @@ pub fn swept(e: &Entity, prev: Option<(i32, i32)>) -> Option<Rect> {
 
 /// Nasceu dentro de um sólido das células.
 pub fn inside_wall(e: &Entity, ctx: &Ctx) -> bool {
-    e.bounds().is_some_and(|b| ctx.cells.blocked(&b))
+    e.bounds()
+        .is_some_and(|b| ctx.cells_for(e.layer).blocked(&b))
 }

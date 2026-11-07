@@ -76,8 +76,10 @@ prioridade 7 (nome fora do `SOUND.RES`).
 ## Destruição
 
 Linha `(103, 0)`: efeito sorteado, raio 48, empurrão 15, dano de área 10 → `R = 72` px.
-Bala da pistola: dano 2 (linha `(19, 0)`); um Alpha com vida 35 resiste a 18 tiros no
-normal; um Delta (40 %) a 44.
+Bala da pistola: dano 2 (linha `(19, 0)`); a conta é inteira (`2 · % / 100`): um Alpha com
+vida 35 cai com 18 tiros no normal; Beta, Gamma e All (70/60/50 %) tiram 1 por tiro (35
+tiros); o **Delta (40 %) é imune à pistola** (`2 · 40 / 100 = 0`) e só cai com armas mais
+fortes ou explosões. [inferido do cálculo]
 
 ## Em aberto
 

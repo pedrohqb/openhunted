@@ -980,7 +980,16 @@ mod tests {
 
     fn win(a: &mut App, kills: i32) {
         let s = a.viewer.as_mut().unwrap().scene_mut();
-        s.kills = kills;
+        // a cena conta os mortos pelas vidas (`enemy::kills`): mata `kills` inimigos
+        for e in s
+            .entities
+            .iter_mut()
+            .filter(|e| openhunted_engine::behaviour::enemy::counted(e))
+            .take(kills as usize)
+        {
+            e.health = 0;
+            e.alive = false;
+        }
         s.outcome = Some(Outcome::Victory);
         a.advance(END_DELAY_MS + 50);
     }

@@ -25,21 +25,21 @@ pub const LABELS: [Label; 12] = [
     (13, 143, 5),
     (15, 148, 1),
 ];
-/// `SOUND.TBL` tipo 7: passos, fogo, virada, tranco, morte.
+/// `SOUND.TBL` lista 7 (quadro, som, prioridade): passos, fogo, virada, tranco, morte.
 pub const SOUNDS: [(usize, u16, u16); 13] = [
-    (1, 3107, 0),
-    (12, 3107, 0),
+    (1, 3107, 5),
+    (2, 3111, 5),
+    (12, 3107, 5),
     (22, 3107, 0),
-    (40, 3107, 0),
-    (2, 3111, 0),
-    (96, 3111, 0),
-    (58, 3105, 0),
-    (83, 3106, 0),
+    (40, 3107, 5),
+    (58, 3105, 8),
+    (83, 3106, 5),
     (95, 3106, 0),
-    (115, 3143, 0),
-    (124, 3109, 0),
-    (130, 3140, 0),
-    (144, 3140, 0),
+    (96, 3111, 5),
+    (115, 3143, 9),
+    (124, 3109, 5),
+    (130, 3140, 5),
+    (144, 3140, 5),
 ];
 /// Velocidade dos passos por quadro absoluto dos rótulos 1–3 (1/8 px, `0x472498`); o fim do
 /// rótulo 3 não foi lido (spec M7a: 0).
@@ -67,6 +67,9 @@ pub const MUZZLE_C: [(i32, i32); 2] = [(68, 5), (-10, 5)];
 /// Terremoto (`0x418229`): som 3131 e cambaleio de 20–39 tiques a até 300 px.
 pub const SOUND_QUAKE: u16 = 3131;
 pub const QUAKE_RANGE: i32 = 300;
+/// O 3131 não recomeça enquanto toca (`0x44e130` antes de `0x44dc20`): sem saber do mixer, a
+/// cena o filtra pela duração do `SX_3131.WAV` (23 448 amostras a 11 025 Hz ≈ 2,13 s).
+pub const SOUND_QUAKE_TICKS: u32 = 43;
 /// Esmagar (linha `(7, 0, 0)`): derrubada, 15 de dano, empurrão fixo (48, −3).
 pub const SMASH: i32 = 15;
 pub const SMASH_PUSH: (i32, i32) = (48, -3);
@@ -211,7 +214,7 @@ fn can_walk(e: &Entity, st: &BruiserState, ctx: &Ctx) -> bool {
         x: me.x + STEP_AHEAD * st.dir(),
         ..me
     };
-    ctx.cells.floor_at(&ahead, FLOOR_PROBE)
+    ctx.cells_for(e.layer).floor_at(&ahead, FLOOR_PROBE)
 }
 
 /// Tiro (`0x417e47`): 35 % balas (uma em B e, com 48 %, outra em A), senão um foguete em C.
@@ -276,14 +279,14 @@ fn attack(e: &Entity, st: &mut BruiserState, j: Rect, ctx: &mut Ctx, out: &mut O
     }
 }
 
-/// Terremoto (`0x418229`): todo Jake vivo a até 300 px cambaleia.
-fn quake(e: &Entity, ctx: &mut Ctx, out: &mut Out) {
-    out.events.push(Event::Sound(Cue::at(
-        SOUND_QUAKE,
-        PRIORITY_FRAME,
-        e.center(),
-        e.layer,
-    )));
+/// Terremoto (`0x418229`): só com alvo (`+0x280`); som 3131 sem posição e todo Jake vivo a
+/// até 300 px cambaleia.
+fn quake(e: &Entity, j: Option<Rect>, ctx: &mut Ctx, out: &mut Out) {
+    if j.is_none() {
+        return;
+    }
+    out.events
+        .push(Event::Sound(Cue::ui(SOUND_QUAKE, PRIORITY_FRAME)));
     let near = ctx
         .jake_bounds()
         .is_some_and(|j| super::mine::distance(e.center(), enemy::center(&j)) < QUAKE_RANGE);
@@ -410,9 +413,6 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         e.health -= w.pending.amount * 50 / 100;
         if e.health <= 0 {
             st.set(DIE);
-            if w.by_player {
-                out.kills += 1;
-            }
         } else if !matches!(st.state, STAGGER | TURN | GROUND_FIRE) {
             st.set(STAGGER);
         }
@@ -443,11 +443,13 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     }
     // 7. animação, ataques nos quadros e fim
     let (_, _, len) = enemy::label(&LABELS, st.clip.label);
-    if st.state == QUAKE && st.clip.step + 5 == len && st.abilities[3] {
-        quake(e, ctx, out);
+    // `0x417761` (QUAKE) e `0x417718` (TURN) chamam `0x418229` sem olhar a capacidade 3,
+    // que só decide se o ataque escolhe o estado QUAKE
+    if st.state == QUAKE && st.clip.step + 5 == len {
+        quake(e, j, ctx, out);
     }
-    if st.state == TURN && st.clip.step + 1 == len && st.abilities[3] {
-        quake(e, ctx, out);
+    if st.state == TURN && st.clip.step + 1 == len {
+        quake(e, j, ctx, out);
     }
     if st.clip.advance(len) {
         end_of_animation(e, &mut st, j, ctx, out);
@@ -471,7 +473,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         body.vy = -16;
     }
     if !st.dead {
-        step(&mut body, ctx.cells, true);
+        step(&mut body, ctx.cells_for(e.layer), true);
         e.x = body.x;
         e.y = body.y;
         st.vy = body.vy;
@@ -564,7 +566,7 @@ mod tests {
         enemy::hurt(&mut b, &bullet, true);
         tick(&mut b, &mut c, &mut out);
         assert_eq!(st(&b).state, DIE);
-        assert_eq!(out.kills, 1);
+        assert!(enemy::killed(&b), "a morte conta");
         for _ in 0..10 {
             tick(&mut b, &mut c, &mut out);
         }
@@ -660,5 +662,62 @@ mod tests {
         assert_eq!(out2.jake_damage.amount, SMASH);
         assert!(out2.jake_damage.knockdown);
         assert!(!st(&b2).facing_right, "encara o Jake, à esquerda do centro");
+    }
+
+    /// Bruiser acordado no estado `state`, a um tique do quadro do terremoto.
+    fn about_to_quake(state: i32, abilities: [bool; 4]) -> Entity {
+        let mut b = bruiser(100, 47, vec![]);
+        let Behaviour::Bruiser(s) = &mut b.behaviour else {
+            panic!()
+        };
+        s.awake = true;
+        s.abilities = abilities;
+        s.set(state);
+        let (_, _, len) = enemy::label(&LABELS, s.clip.label);
+        s.clip.step = if state == QUAKE { len - 5 } else { len - 1 };
+        b
+    }
+
+    fn quake_cues(out: &Out) -> Vec<Cue> {
+        out.events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Sound(c) if c.id == SOUND_QUAKE => Some(*c),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn quake_needs_a_target_not_the_ability() {
+        let on = |_: i32| None;
+        // sem alvo (Jake longe): nada, nem som (`0x418229`: `+0x280 = 0` → sai)
+        let (far, w) = ctx_with_jake(5000, 0);
+        for state in [QUAKE, TURN] {
+            let mut c = ctx(&far, &w, &on);
+            let mut b = about_to_quake(state, [true; 4]);
+            let mut out = Out::default();
+            tick(&mut b, &mut c, &mut out);
+            assert!(
+                out.quake.is_none() && quake_cues(&out).is_empty(),
+                "{state}"
+            );
+        }
+        // com alvo e sem a capacidade 3: o quadro do estado faz tremer mesmo assim
+        // (`0x417718`/`0x417761` não olham a capacidade); som sem posição
+        let (near, w) = ctx_with_jake(250, 0);
+        for state in [QUAKE, TURN] {
+            let mut c = ctx(&near, &w, &on);
+            let mut b = about_to_quake(state, [true, true, true, false]);
+            let mut out = Out::default();
+            tick(&mut b, &mut c, &mut out);
+            assert!(out.quake.is_some(), "{state}");
+            assert_eq!(
+                quake_cues(&out),
+                vec![Cue::ui(SOUND_QUAKE, PRIORITY_FRAME)],
+                "{state}"
+            );
+        }
+        assert_eq!(enemy::throttle(SOUND_QUAKE), Some(SOUND_QUAKE_TICKS));
     }
 }

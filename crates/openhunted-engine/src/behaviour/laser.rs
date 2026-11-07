@@ -156,7 +156,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     let mut body = Body::new(x, y, BOX);
     body.vx = st.vx;
     body.vy = st.vy;
-    step(&mut body, ctx.cells, false);
+    step(&mut body, ctx.cells_for(e.layer), false);
     let moved = (body.x - x, body.y - y) == (st.vx >> 3, st.vy >> 3);
     e.x = body.x;
     e.y = body.y;

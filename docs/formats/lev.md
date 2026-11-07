@@ -15,8 +15,9 @@ d=Get to the exit.  Use the pistol to shoot the hovering mines.  Good luck Jake!
 
 - linha 1: arquivo da fase;
 - `p=`: dois números. O primeiro é o personagem (1 = Jake, 2 = Garathe, 3 e 4 = modos
-  para dois jogadores); o segundo tem significado ainda desconhecido (35 a 38). Os dois
-  coincidem com os dois últimos campos do cabeçalho da fase;
+  para dois jogadores); o segundo (35 a 38) é a tabela de cor do `DLS.TBL` do retrato na tela de missões
+  (`../re/menus-restantes.md`). Os dois coincidem com os dois últimos campos do cabeçalho da
+  fase, que o leitor da fase descarta;
 - `t=`: título; `d=`: descrição, com `\n` literal para quebra de linha.
 
 São 100 missões na versão 1.00, na ordem em que o jogo as apresenta: tutoriais (`T_`),
@@ -40,7 +41,7 @@ Um bloco `LEV:` com o cabeçalho, seguido do corpo binário (fora de qualquer bl
 | versão | | `s16`; o original recusa > 1006; todas as fases são 1006 |
 | título, descrição | versão ≥ 1002 | dois ASCIIZ (descartados se o nome contém `|`) |
 | notas | versão ≥ 1003 | ASCIIZ (notas do autor, ex.: "RichT 9/19") |
-| campo 1004 | versão ≥ 1004 | `s16` (desconhecido) |
+| campo 1004 | versão ≥ 1004 | `s16` tempo limite em segundos (0 = sem limite; `../re/menu.md`) |
 | grade x | versão ≥ 1000 | `s16` (nas anteriores, o próprio número da versão) |
 | grade y, grade z | | `s16`, `s16` |
 | jogador, extra | versão ≥ 1006 | `s16`, `s16` (os dois números do `p=`) |

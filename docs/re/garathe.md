@@ -177,7 +177,7 @@ estados 54–56 (`furtividade.md`).
 
 ## Em aberto
 
-- IA do Minotauro (`0x42ec1c`, `0x42d520…`, `0x42c5cc`, que usa o 3º pulo).
+- IA do Minotauro: ver [`minotauro-ia.md`](minotauro-ia.md).
 - Quanto a faca cravada devolve; geração final e fim do chicote 108.
 - `desc+0x08` (103, 113) e `+0x00` do registro do especial (8): não lidos.
 - Conferir no jogo o efeito visual de `0x4282d3` (`0x43becd`).

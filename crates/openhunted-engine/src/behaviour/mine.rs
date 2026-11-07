@@ -189,7 +189,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             let can_move = |dy: i32| {
                 let mut probe = Body::new(e.x, e.y, boxr);
                 probe.vy = dy;
-                step(&mut probe, ctx.cells, false);
+                step(&mut probe, ctx.cells_for(e.layer), false);
                 probe.y != e.y
             };
             if above && can_move(v.speed) {
@@ -217,7 +217,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let mut body = Body::new(e.x, e.y, boxr);
     body.vx = vel.0;
     body.vy = vel.1;
-    step(&mut body, ctx.cells, false);
+    step(&mut body, ctx.cells_for(e.layer), false);
     e.x = body.x;
     e.y = body.y;
     let _ = SUB;

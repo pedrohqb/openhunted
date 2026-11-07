@@ -165,6 +165,10 @@ Variante 0: um raio a cada 4 tiques alternando os canhões, 6 por rajada, pausa 
 
 ## Em aberto
 
+Bits de célula: `0x2` embaixo, `0x8` direita, `0x10` esquerda, `0x40` em cima (fechados), pela
+busca de caminho de [`minotauro-ia.md`](minotauro-ia.md).
+
+
 - Significado exato dos bits de célula `0x2/0x8/0x10/0x40` usados na patrulha e na
   perseguição.
 - O ramo de `0x41d08c` para o estado −2 com vida > 0 (recupera 1 de vida por tique abaixo de
