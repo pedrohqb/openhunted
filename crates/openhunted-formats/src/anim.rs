@@ -52,7 +52,7 @@ pub struct Animation {
     pub height: u16,
     /// Três valores das versões ≥ 1002 (o original os descarta).
     pub extra: [i16; 3],
-    /// Tabela `A` (vazia em todos os ANM da versão 1.00 vistos até aqui).
+    /// Tabela `A` (vazia na maioria dos ANM; quando não, mapeia quadros lógicos em físicos (`docs/formats/anm.md`) da versão 1.00 vistos até aqui).
     pub table_a: Vec<u16>,
     pub frames: Vec<AnimFrame>,
     pub labels: Vec<AnimLabel>,

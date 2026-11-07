@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use openhunted_formats::Sound;
 
@@ -66,13 +67,21 @@ pub fn track_name(path: &Path, system: &[String]) -> String {
         })
 }
 
-/// Lê um arquivo de áudio: `.wav` direto, os demais pelo `ffmpeg`.
+/// `.wav` acima disso passam pelo `ffmpeg` (que corta em `MAX_AUDIO_SECS` e reduz a
+/// 22 050 Hz) em vez de lidos inteiros na taxa original.
+pub const WAV_DIRECT_MAX: u64 = 64 << 20;
+/// Intervalo entre as conferências de "a faixa acabou?" na partida.
+pub const CHECK_MS: u32 = 1000;
+
+/// Lê um arquivo de áudio: `.wav` pequeno direto, os demais pelo `ffmpeg` (até
+/// `video::MAX_AUDIO_SECS`). Bloqueia: `Music` chama numa thread.
 pub fn decode_file(path: &Path) -> Option<Pcm> {
     let wav = path
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("wav"));
-    if wav {
+    let small = std::fs::metadata(path).is_ok_and(|m| m.len() <= WAV_DIRECT_MAX);
+    if wav && small {
         if let Some(p) = std::fs::read(path)
             .ok()
             .and_then(|d| Sound::parse(&d).ok())
@@ -90,10 +99,14 @@ pub struct Music {
     menu: Option<Arc<Pcm>>,
     tracks: Vec<PathBuf>,
     current: Option<usize>,
-    /// Faixas que não decodificaram (não tenta de novo).
+    /// Faixas que não decodificaram ou vieram vazias (não tenta de novo).
     bad: Vec<bool>,
     gain: u8,
     decode: fn(&Path) -> Option<Pcm>,
+    /// Faixa decodificando numa thread: índice e o canal do resultado.
+    loading: Option<(usize, Receiver<Option<Pcm>>)>,
+    /// Tempo até a próxima conferência da faixa.
+    check_in: u32,
 }
 
 impl Music {
@@ -107,6 +120,8 @@ impl Music {
             bad,
             gain: 100,
             decode: decode_file,
+            loading: None,
+            check_in: 0,
         }
     }
 
@@ -122,7 +137,7 @@ impl Music {
         self.out.set_master(gain);
     }
 
-    /// Faixa corrente.
+    /// Faixa corrente (a que toca ou a que está sendo lida).
     pub fn current(&self) -> Option<&Path> {
         self.current.map(|i| self.tracks[i].as_path())
     }
@@ -132,6 +147,7 @@ impl Music {
     pub fn menu(&mut self) {
         self.out.stop(TRACK_ID);
         self.out.stop(FILM_ID);
+        self.check_in = 0;
         if self.gain == 0 {
             return;
         }
@@ -142,13 +158,46 @@ impl Music {
         }
     }
 
-    /// Partida: para a música dos menus; quando nenhuma faixa toca, começa a próxima (da
-    /// última volta à primeira). Devolve o caminho da faixa que começou.
-    pub fn game(&mut self) -> Option<PathBuf> {
+    /// Partida, a cada quadro (`ms` desde o anterior): para a música dos menus; a cada
+    /// `CHECK_MS`, se nenhuma faixa toca, manda ler a próxima (da última volta à primeira)
+    /// numa thread, e ela começa quando fica pronta. Devolve o caminho da faixa que começou.
+    pub fn game(&mut self, ms: u32) -> Option<PathBuf> {
         self.out.stop(MENU_ID);
-        if self.gain == 0 || self.tracks.is_empty() || self.out.is_playing(TRACK_ID) {
+        if self.gain == 0 || self.tracks.is_empty() {
             return None;
         }
+        if let Some((i, rx)) = &self.loading {
+            let i = *i;
+            match rx.try_recv() {
+                Err(TryRecvError::Empty) => return None,
+                Ok(Some(p)) if p.frames() > 0 => {
+                    self.loading = None;
+                    self.check_in = CHECK_MS;
+                    self.out.play(TRACK_ID, Arc::new(p), TRACK_PRIORITY, 100, 0);
+                    return Some(self.tracks[i].clone());
+                }
+                _ => {
+                    eprintln!("aviso: faixa ilegível: {}", self.tracks[i].display());
+                    self.bad[i] = true;
+                    self.loading = None;
+                }
+            }
+        } else {
+            self.check_in = self.check_in.saturating_sub(ms);
+            if self.check_in > 0 {
+                return None;
+            }
+            self.check_in = CHECK_MS;
+            if self.out.is_playing(TRACK_ID) {
+                return None;
+            }
+        }
+        self.load_next();
+        None
+    }
+
+    /// Manda ler a próxima faixa legível numa thread.
+    fn load_next(&mut self) {
         let n = self.tracks.len();
         for _ in 0..n {
             let i = self.current.map_or(0, |c| (c + 1) % n);
@@ -156,18 +205,20 @@ impl Music {
             if self.bad[i] {
                 continue;
             }
-            match (self.decode)(&self.tracks[i]) {
-                Some(p) => {
-                    self.out.play(TRACK_ID, Arc::new(p), TRACK_PRIORITY, 100, 0);
-                    return Some(self.tracks[i].clone());
-                }
-                None => {
-                    eprintln!("aviso: faixa ilegível: {}", self.tracks[i].display());
-                    self.bad[i] = true;
-                }
+            let (tx, rx) = channel();
+            let (path, decode) = (self.tracks[i].clone(), self.decode);
+            let spawned = std::thread::Builder::new()
+                .name("musica".into())
+                .spawn(move || {
+                    // a música pode ter mudado de ideia: o envio sem ouvinte é esperado
+                    let _ = tx.send(decode(&path));
+                });
+            if spawned.is_ok() {
+                self.loading = Some((i, rx));
+                return;
             }
+            self.bad[i] = true;
         }
-        None
     }
 
     /// Para tudo (filmes e a tela preta da sequência).
@@ -175,6 +226,7 @@ impl Music {
         for id in [MENU_ID, TRACK_ID, FILM_ID] {
             self.out.stop(id);
         }
+        self.check_in = 0;
     }
 
     /// Toca o áudio de um filme ou uma voz, a volume cheio (decisão do port).
@@ -197,6 +249,7 @@ mod tests {
     use crate::audio::Mixer;
     use std::cell::RefCell;
     use std::rc::Rc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     /// Registro: o que tocou, o que está tocando e o volume mestre.
     type Log = (Vec<String>, Vec<u16>, u8);
@@ -236,11 +289,27 @@ mod tests {
     }
 
     fn fake_decode(p: &Path) -> Option<Pcm> {
-        (!p.to_string_lossy().contains("bad")).then(|| Pcm {
+        let p = p.to_string_lossy();
+        (!p.contains("bad")).then(|| Pcm {
             rate: 11025,
             channels: 1,
-            samples: vec![1],
+            // cabeçalho válido sem quadros
+            samples: if p.contains("empty") { vec![] } else { vec![1] },
         })
+    }
+
+    /// Chama `game` (com a conferência devida) até uma faixa começar ou desistir.
+    fn wait(m: &mut Music) -> Option<PathBuf> {
+        for _ in 0..2000 {
+            if let Some(p) = m.game(CHECK_MS) {
+                return Some(p);
+            }
+            if m.loading.is_none() && (m.out.is_playing(TRACK_ID) || m.bad.iter().all(|&b| b)) {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        None
     }
 
     #[test]
@@ -250,7 +319,7 @@ mod tests {
         m.menu();
         m.menu();
         assert_eq!(f.0.borrow().0, ["loop 3000"]);
-        assert_eq!(m.game(), None, "sem faixas");
+        assert_eq!(m.game(CHECK_MS), None, "sem faixas");
         assert!(f.0.borrow().1.is_empty(), "a partida para a dos menus");
         m.set_gain(0);
         m.menu();
@@ -266,16 +335,23 @@ mod tests {
             .map(PathBuf::from)
             .collect();
         let mut m = Music::new(Box::new(f.clone()), Some(pcm()), tracks).with_decoder(fake_decode);
-        assert_eq!(m.game(), Some(PathBuf::from("a01.wav")));
-        assert_eq!(m.game(), None, "ainda toca");
+        assert_eq!(wait(&mut m), Some(PathBuf::from("a01.wav")));
+        assert_eq!(m.game(CHECK_MS), None, "ainda toca");
         f.0.borrow_mut().1.clear(); // a faixa acabou
+        assert_eq!(m.game(CHECK_MS - 1), None, "confere a cada segundo");
+        assert!(m.loading.is_none());
         assert_eq!(
-            m.game(),
+            wait(&mut m),
             Some(PathBuf::from("c03.wav")),
             "a ilegível é pulada"
         );
+        assert!(m.bad[1]);
         f.0.borrow_mut().1.clear();
-        assert_eq!(m.game(), Some(PathBuf::from("a01.wav")), "volta à primeira");
+        assert_eq!(
+            wait(&mut m),
+            Some(PathBuf::from("a01.wav")),
+            "volta à primeira"
+        );
         m.menu();
         assert_eq!(f.0.borrow().1, [MENU_ID], "o menu para a faixa");
         m.play_film(pcm());
@@ -285,6 +361,51 @@ mod tests {
         m.end_film();
         assert!(f.0.borrow().1.is_empty());
         assert_eq!(f.0.borrow().2, 40);
+    }
+
+    static GATE: AtomicBool = AtomicBool::new(false);
+
+    /// Decodificador lento: espera o teste abrir a porteira (até 5 s).
+    fn gated_decode(p: &Path) -> Option<Pcm> {
+        for _ in 0..5000 {
+            if GATE.load(Ordering::SeqCst) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        fake_decode(p)
+    }
+
+    #[test]
+    fn decoding_does_not_block_the_game_loop() {
+        let f = Fake::default();
+        let mut m = Music::new(Box::new(f.clone()), None, vec![PathBuf::from("a01.ogg")])
+            .with_decoder(gated_decode);
+        let t = std::time::Instant::now();
+        assert_eq!(m.game(CHECK_MS), None, "ainda decodificando");
+        assert_eq!(m.game(16), None);
+        assert!(t.elapsed().as_secs() < 2, "não esperou a decodificação");
+        assert!(f.0.borrow().1.is_empty());
+        GATE.store(true, Ordering::SeqCst);
+        assert_eq!(
+            wait(&mut m),
+            Some(PathBuf::from("a01.ogg")),
+            "começa quando pronta"
+        );
+        assert_eq!(f.0.borrow().1, [TRACK_ID]);
+    }
+
+    #[test]
+    fn empty_tracks_are_marked_bad_once() {
+        let f = Fake::default();
+        let tracks = vec![PathBuf::from("empty01.wav")];
+        let mut m = Music::new(Box::new(f.clone()), None, tracks).with_decoder(fake_decode);
+        assert_eq!(wait(&mut m), None);
+        assert!(m.bad[0], "zero quadros = ilegível");
+        for _ in 0..5 {
+            assert_eq!(m.game(CHECK_MS), None);
+        }
+        assert!(m.loading.is_none(), "não tenta ler de novo");
     }
 
     #[test]

@@ -4,7 +4,9 @@
 //! (`docs/re/menus-restantes.md`, `opcoes-salvamento.md`).
 
 use openhunted_engine::shell::config::Config;
-use openhunted_engine::shell::heroes::{Car, Heroes, Info, InfoKind, NameEntry, car_ids, info_ids};
+use openhunted_engine::shell::heroes::{
+    Car, Heroes, Info, InfoKind, NameEntry, car_ids, info_ids, name_ids,
+};
 use openhunted_engine::shell::levels::{self, Entry, LevelSelect};
 use openhunted_engine::shell::options::{self, Options};
 use openhunted_engine::shell::{Dir, Input, Page, Placement, Reply, Screen};
@@ -168,6 +170,32 @@ fn heroes_name_car_and_info_pages() {
         Some(Reply::Name("JAKE ".into()))
     );
     assert_eq!(n.handle(Input::Cancel, &mut snd), Some(Reply::Close));
+    // texto longo: aparece no campo, recortado nele (nada fora do campo muda)
+    let draw = |text: &str, a: &mut Assets| {
+        let s = screen(a, "SHIGH.ITF", Placement::Centered);
+        let n = NameEntry::new(s, font.clone(), Some("Save Game As:".into()), text);
+        let mut fb = Framebuffer::new(640, 480);
+        n.draw(&mut fb);
+        (fb, n.screen.rect(name_ids::FIELD).unwrap())
+    };
+    let (empty, r) = draw("", &mut a);
+    let (long, _) = draw(&"W".repeat(name_ids::MAX), &mut a);
+    let (x0, x1) = (r.x + 4, r.x + r.w - 4);
+    let mut inside = 0;
+    for y in 0..480 {
+        for x in 0..640 {
+            let i = y as usize * 640 + x as usize;
+            if (x0..x1).contains(&x) && (r.y..r.y + r.h).contains(&y) {
+                inside += usize::from(long.pixels[i] == name_ids::COLOR);
+            } else {
+                assert_eq!(
+                    long.pixels[i], empty.pixels[i],
+                    "fora do campo em ({x}, {y})"
+                );
+            }
+        }
+    }
+    assert!(inside > 50, "texto no campo ({inside} pixels)");
 
     let s = screen(&mut a, "S_CAR.ITF", Placement::Full);
     let mut c = Car::new(s, 7);
