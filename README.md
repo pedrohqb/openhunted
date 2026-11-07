@@ -11,6 +11,17 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M7b: o arsenal do Jake e os itens da campanha.** Além da pistola, o Jake soca (Z, ou
+ATIRAR com os punhos: 8 de dano na frente), atira com a espingarda (o chumbo se divide em
+quatro, com cartucho), o lança-foguetes (20 diretos e explosão de raio 64 que também fere o
+Jake de perto), as estrelas ninja (voo em onda; na parede cravam e podem ser recolhidas) e as
+granadas (quicam, explodem pelo pavio ou ao tocar um objeto). PgUp/PgDn trocam de arma na
+ordem do original (1–6 escolhem direto, extensão do port); sem munição, ele passa à melhor
+arma. Os itens da campanha funcionam: munição das armas, comida, veneno (perde vida a cada
+20 tiques) e antídoto, armaduras, chaves (abrem as portas de célula empurrando, sem serem
+gastas), bandeiras (objetivo "acionar"), o pistão (anda pelos gatilhos e esmaga) e o
+interruptor (CIMA diante dele).
+
 **M7a: os inimigos principais da campanha.** O robô de segurança voador (`OSR`) flutua,
 patrulha, persegue o Jake a 80–200 px e dispara raios laser alternando os dois canhões, em
 rajadas; não vê o Jake escondido contra a parede; atingido, a vida cai a 45 e, abaixo de 0,
@@ -71,8 +82,8 @@ Etapas anteriores: M1 formatos (a biblioteca `openhunted-formats` lê os dados d
 estado em [`docs/formats/`](docs/formats/README.md)); M2 visualizador de fase; M3a o Jake
 corre e pula; M3b objetos sólidos e presença por modo de jogo.
 
-Ainda não há: as outras armas, o soco e a troca de arma; os demais inimigos (Morte, Camaleão,
-catapulta, dardos, Anticorpo, Manta, Entidade, Minotauro), empurrar blocos (zona 0x20), o equilíbrio na beirada (162/163),
+Ainda não há: os demais inimigos (Morte, Camaleão,
+catapulta, dardos, Anticorpo, Manta, Entidade, Minotauro), o equilíbrio na beirada (162/163),
 música, os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, a
 abertura (logotipo, filme, história, créditos), os demais botões do menu (carregar, escolher
 missão, opções, dispositivos, heróis, ajuda, dois jogadores), tesouros e segredos, gravação de
@@ -105,8 +116,8 @@ resultado, uma tecla salta a contagem.
 
 No jogo: setas movem o Jake, espaço pula (correndo, o pulo escolhe a distância conforme o chão
 adiante; com CIMA, para cima), Ctrl atira (segurando, rajadas; com as setas mira para cima e
-nas diagonais; BAIXO+Ctrl é o especial), X anda furtivo, Z é o soco (ainda sem efeito), CIMA
-usa a saída quando ele está parado diante dela, agarra cordas e escadas, passa pelas portas
+nas diagonais; BAIXO+Ctrl é o especial), X anda furtivo, Z é o soco, PgUp/PgDn trocam de arma (1–6 escolhem direto), CIMA
+usa a saída ou o interruptor quando ele está parado diante deles, agarra cordas e escadas, passa pelas portas
 de camada ou o esconde, e BAIXO agacha (e engatinha com as setas) ou desce de camada; a
 câmera o acompanha. P ou Pause pausa (Enter,
 espaço ou OKAY retomam). A dica do tutorial pausa o jogo e fecha ao soltar uma tecla. Esc não

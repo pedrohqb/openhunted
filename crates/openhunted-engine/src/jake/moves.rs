@@ -647,7 +647,7 @@ impl Jake {
                 }
             }
             State::Stealth => self.decide_or_idle(input, env, jump_edge, side),
-            State::Special(_) => self.tick_special(input),
+            State::Special(_) => self.tick_special(input, world),
             State::Grab => {
                 self.body.vx = 0;
                 if pressed(SHOOT) {
@@ -689,7 +689,7 @@ impl Jake {
     /// com `t > 5` (`+0x18`) volta ao `0x0043b43e`, que com BAIXO+ATIRAR recomeça o 9 no
     /// mesmo tique. As duas setas de lado juntas contam como nenhuma (como em
     /// `wants_special`), senão o original recursaria sem fim.
-    pub(super) fn tick_special(&mut self, input: u32) {
+    pub(super) fn tick_special(&mut self, input: u32, world: &World) {
         let State::Special(t) = self.state else {
             return;
         };
@@ -700,7 +700,7 @@ impl Jake {
         if input & UP != 0 || one_side || t > SPECIAL_LAST_TICK {
             self.state = State::Special(t);
             let shoot = input & SHOOT != 0 && self.body.on_ground;
-            if !(shoot && self.start_fire(input)) {
+            if !(shoot && self.start_fire(input, world)) {
                 self.set(State::Idle);
             }
             return;

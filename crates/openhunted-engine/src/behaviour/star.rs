@@ -1,0 +1,137 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Estrela ninja (tipo 27, `0x0040bc98`; `docs/re/armas-2.md`): voo em onda perpendicular
+//! (±32 px, período de 32 tiques); na parede crava e vira item (1 estrela) por 100 tiques;
+//! num objeto, 5 de dano e área 20 (raio 30).
+
+use super::{Ctx, Event, Out, cos_sin14, projectile};
+use crate::entity::{Behaviour, Entity};
+
+/// Linhas `(27, …)`: 5 diretos com empurrão; explosão de raio 30, empurrão 30, área 20.
+pub const DAMAGE: i32 = 5;
+pub const RADIUS: i32 = 30;
+pub const PUSH: i32 = 30;
+pub const AREA: i32 = 20;
+/// Amplitude da onda (px) e passo da fase por tique (32 tiques por volta).
+pub const WAVE: i32 = 32;
+const PHASE_STEP: i32 = 2048;
+/// Vida da estrela cravada (`+0x264 = 100`).
+pub const STUCK_TICKS: u32 = 100;
+/// Recuo ao cravar (px) e som "Knife stick in wall".
+const BACK_OFF: i32 = 4;
+pub const SOUND_STICK: u16 = 3030;
+/// Rótulos do `ONS.ANM`: voo e cravada.
+pub const LABEL_FLY: u16 = 1;
+pub const LABEL_STUCK: u16 = 5;
+
+#[derive(Debug, Clone)]
+pub struct StarState {
+    /// Velocidade base (1/8 px).
+    pub vx: i32,
+    pub vy: i32,
+    /// Tiques de voo e fase inicial (0, ou 0x8000 espelhada).
+    pub k: i32,
+    pub phase: i32,
+    pub prev: Option<(i32, i32)>,
+    /// Cravada: tiques restantes como item.
+    pub stuck: Option<u32>,
+}
+
+impl StarState {
+    pub fn new(vx: i32, vy: i32) -> Self {
+        Self {
+            vx,
+            vy,
+            k: 0,
+            phase: if vx < 0 { 0x8000 } else { 0 },
+            prev: None,
+            stuck: None,
+        }
+    }
+
+    /// Deslocamento perpendicular (px) da onda no tique `k`.
+    fn wave(&self, k: i32) -> i32 {
+        let (_, s) = cos_sin14((k % 32) * PHASE_STEP + self.phase);
+        (WAVE * s) >> 14
+    }
+
+    /// Velocidade deste tique: a base mais a variação da onda na perpendicular.
+    pub fn velocity(&self) -> (i32, i32) {
+        let d = self.wave(self.k + 1) - self.wave(self.k);
+        let len = f64::from(self.vx).hypot(f64::from(self.vy)).max(1.0);
+        let (px, py) = (-f64::from(self.vy) / len, f64::from(self.vx) / len);
+        (
+            self.vx + (px * f64::from(d * 8)).round() as i32,
+            self.vy + (py * f64::from(d * 8)).round() as i32,
+        )
+    }
+
+    pub fn in_flight(&self) -> bool {
+        self.stuck.is_none()
+    }
+}
+
+pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
+    let pos = (e.x, e.y);
+    let Behaviour::Star(st) = &mut e.behaviour else {
+        return;
+    };
+    if let Some(n) = st.stuck {
+        // item no chão: o Jake recolhe 1 estrela; acabado o prazo, some
+        if n == 0 {
+            e.alive = false;
+            return;
+        }
+        st.stuck = Some(n - 1);
+        super::pickup::collect_star(e, ctx, out);
+        return;
+    }
+    st.prev = Some(pos);
+    let v = st.velocity();
+    st.k += 1;
+    let Some(f) = projectile::fly(e, v, ctx, false) else {
+        e.alive = false;
+        return;
+    };
+    if f.outside {
+        e.alive = false;
+        return;
+    }
+    if f.blocked {
+        let Behaviour::Star(st) = &mut e.behaviour else {
+            return;
+        };
+        let len = f64::from(st.vx).hypot(f64::from(st.vy)).max(1.0);
+        e.x -= (f64::from(st.vx) / len * f64::from(BACK_OFF)).round() as i32;
+        e.y -= (f64::from(st.vy) / len * f64::from(BACK_OFF)).round() as i32;
+        st.stuck = Some(STUCK_TICKS);
+        e.flags |= 0x28;
+        super::restart(e, LABEL_STUCK);
+        out.events.push(Event::Sound(crate::sound::Cue::at(
+            SOUND_STICK,
+            crate::sound::PRIORITY_FRAME,
+            e.center(),
+            e.layer,
+        )));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wave_returns_to_the_line_after_a_period() {
+        let mut st = StarState::new(18 * 8, 0);
+        let (mut x, mut y, mut max) = (0, 0, 0);
+        for _ in 0..32 {
+            let (vx, vy) = st.velocity();
+            x += vx;
+            y += vy;
+            st.k += 1;
+            max = max.max((y / 8).abs());
+        }
+        assert_eq!(x / 8, 18 * 32);
+        assert!(y.abs() <= 8, "volta à linha: {y}");
+        assert!((30..=33).contains(&max), "±32 px: {max}");
+    }
+}

@@ -15,6 +15,7 @@ pub mod explosion;
 pub mod fence;
 pub mod fire;
 pub mod graffiti;
+pub mod grenade;
 pub mod hint;
 pub mod hop_mine;
 pub mod interact;
@@ -22,9 +23,15 @@ pub mod laser;
 pub mod laser_eye;
 pub mod mine;
 pub mod mine_generator;
+pub mod pellet;
 pub mod pickup;
+pub mod piston;
+pub mod projectile;
+pub mod rocket;
 pub mod security_robot;
 pub mod sentinel;
+pub mod star;
+pub mod switch;
 pub mod teleporter;
 pub mod zone;
 
@@ -106,6 +113,8 @@ pub struct Out {
     pub blasts: Vec<Blast>,
     /// Vida do Jake depois de apanhar itens neste tique (acumulada item a item).
     pub heal: Option<crate::damage::Health>,
+    /// Veneno do Jake (`+0x270`) depois de apanhar veneno ou antídoto neste tique.
+    pub poison: Option<i32>,
     /// Impactos de bala (centro x, y, camada): faísca `oex15` e som.
     pub impacts: Vec<(i32, i32, i32)>,
     /// Efeitos do `OEX.ANM` com rótulo fixo e sem dano (o `oex01` do raio laser).

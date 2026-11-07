@@ -51,8 +51,49 @@ pub const MINE_GENERATOR: u32 = 103;
 pub const ENEMIES: [u32; 5] = [BRUISER, SECURITY_ROBOT, SENTINEL, HOP_MINE, MINE_GENERATOR];
 /// Paredes e portas `OH` (tipos 50–52).
 pub const DOORS: std::ops::RangeInclusive<u32> = 50..=52;
-/// Itens de coleta genérica tratados: armas e munição, vida, comida e armaduras.
-pub const PICKUPS: [u32; 10] = [12, 14, 16, 26, HEALTH_ITEM, 34, 76, 77, 78, ARMOR_ITEM];
+/// Itens de coleta genérica tratados: armas e munição (12–14, 16–18, 26, 27), vida e comida
+/// (32, 34), veneno (33, 35), antídoto (37), armaduras (76–79), chaves (62–67) e bandeiras
+/// (80–85).
+pub const PICKUPS: [u32; 29] = [
+    12,
+    13,
+    14,
+    16,
+    17,
+    18,
+    26,
+    27,
+    HEALTH_ITEM,
+    33,
+    34,
+    35,
+    37,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    76,
+    77,
+    78,
+    ARMOR_ITEM,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+];
+/// Projéteis das armas 3–6 do Jake.
+pub const PELLET: u32 = 20;
+pub const ROCKET: u32 = 21;
+pub const SHELL: u32 = 23;
+pub const GRENADE: u32 = 26;
+pub const STAR: u32 = 27;
+/// Pistão e interruptor.
+pub const PISTON: u32 = 39;
+pub const SWITCH: u32 = 74;
 
 /// Estado por tipo.
 #[derive(Debug, Clone)]
@@ -75,6 +116,12 @@ pub enum Behaviour {
     CarPiece,
     Teleporter(TeleporterState),
     Door(DoorState),
+    Pellet(crate::behaviour::pellet::PelletState),
+    Rocket(crate::behaviour::rocket::RocketState),
+    Star(crate::behaviour::star::StarState),
+    Grenade(crate::behaviour::grenade::GrenadeState),
+    Piston(crate::behaviour::piston::PistonState),
+    Switch(crate::behaviour::switch::SwitchState),
     Sentinel(SentinelState),
     HopMine(HopMineState),
     MineGenerator(MineGeneratorState),
@@ -185,8 +232,10 @@ pub fn object_scale(a: i32, b: i32, ref_w: i32, ref_h: i32) -> (i32, i32) {
 /// barril, porta, cerca).
 pub fn object_start(o: &LevelObject, a: &Animation) -> (usize, AnimPlayer, bool) {
     let n = a.frames.len();
-    let frozen = matches!(o.kind, GRAFFITI | LASER_EYE | BARREL | FENCE | TELEPORTER)
-        || DOORS.contains(&o.kind)
+    let frozen = matches!(
+        o.kind,
+        GRAFFITI | LASER_EYE | BARREL | FENCE | TELEPORTER | PISTON | SWITCH
+    ) || DOORS.contains(&o.kind)
         || ENEMIES.contains(&o.kind);
     let state = o.fields.get(5).copied().unwrap_or(0);
     let label = match o.kind {
@@ -196,7 +245,10 @@ pub fn object_start(o: &LevelObject, a: &Animation) -> (usize, AnimPlayer, bool)
         // teletransporte: rótulo 2 (`obo01`, parado); peça do carro: rótulo 1 [ruling: sem
         // campanha, a peça é a primeira].
         BARREL => Some(if state == 3 { 3 } else { 1 }),
-        LASER_EYE | FENCE | CAR_PIECE => Some(1),
+        LASER_EYE | FENCE | CAR_PIECE | PISTON => Some(1),
+        // chaves e bandeiras: rótulo = tipo (`0x40f214`, `0x40b2c8`); estrela no chão: 4
+        62..=67 | 80..=85 => Some(o.kind as u16),
+        STAR => Some(4),
         TELEPORTER => Some(crate::behaviour::teleporter::LABEL_IDLE),
         GRAFFITI => None,
         _ => o.start_label.and_then(|l| u16::try_from(l).ok()),
@@ -363,6 +415,21 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
             }
         }
         CAR_PIECE => Behaviour::CarPiece,
+        PISTON => {
+            // caixa = retângulo do quadro (só contato, `|= 0x28`)
+            if let Some(fb) = frame_box {
+                boxes = vec![fb];
+                solid_shapes = false;
+            }
+            Behaviour::Piston(crate::behaviour::piston::PistonState::default())
+        }
+        SWITCH => {
+            if let Some(fb) = frame_box {
+                boxes = vec![fb];
+                solid_shapes = false;
+            }
+            Behaviour::Switch(crate::behaviour::switch::SwitchState::default())
+        }
         SENTINEL => Behaviour::Sentinel(SentinelState::new(&o.values)),
         HOP_MINE => Behaviour::HopMine(HopMineState::default()),
         MINE_GENERATOR => Behaviour::MineGenerator(MineGeneratorState::new(value(0))),
@@ -431,7 +498,7 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
         solid_shapes,
         on: match &behaviour {
             Behaviour::Door(d) => d.state > crate::behaviour::door::CLOSING,
-            _ => f & 0x40 != 0 || (o.kind == EXIT && value(0) != 0),
+            _ => f & 0x40 != 0 || (matches!(o.kind, EXIT | SWITCH) && value(0) != 0),
         },
         alive: true,
         sprite,

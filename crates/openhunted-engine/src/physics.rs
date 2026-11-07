@@ -38,7 +38,7 @@ impl Rect {
             && i64::from(o.y) < ay1
     }
 
-    fn moved(&self, dx: i32, dy: i32) -> Rect {
+    pub fn moved(&self, dx: i32, dy: i32) -> Rect {
         Rect {
             x: self.x.saturating_add(dx),
             y: self.y.saturating_add(dy),

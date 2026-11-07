@@ -5,14 +5,16 @@
 //! `escada-camadas.md`, `furtividade.md`). Os estados novos estão em `jake/moves.rs`.
 
 mod moves;
+pub mod weapons;
 
 use std::collections::HashMap;
 
 pub use moves::{BAR_BOX, CRAWL_BOX, Env, Skel, SpecialBlast, SpecialEffect, Zone, zone};
 
 use crate::damage::{Health, Pending, apply};
-use crate::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
+use crate::input::{DOWN, JUMP, LEFT, NEXT_WEAPON, PREV_WEAPON, PUNCH, RIGHT, SHOOT, UP};
 use crate::physics::{Body, Rect, SUB, World, step};
+pub use weapons::{FISTS, GRENADES, PISTOL, ROCKETS, SHOTGUN, STARS, ShotKind, weapon};
 
 /// Correr: 12 px/tique (`0x00478928`).
 const RUN: i32 = 12 * SUB;
@@ -113,17 +115,20 @@ pub enum State {
     Dead,
     /// Entrando na porta de saída (estado 13, `0x00426820`); tiques desde a entrada.
     EnteringExit(u32),
-    /// Atirando com a pistola (`0x0043b50b`): mira e contador `t` (`+0x260`).
+    /// Atirando ou socando (`0x0043b50b`): mira, contador `t` (`+0x260`), arma e qual dos
+    /// dois estados do par (sorteio `rand & 1`).
     Fire {
         aim: Aim,
         t: u32,
+        w: u8,
+        alt: bool,
     },
-    /// Recuperação após a rajada (estado 22, `J022`).
-    Recover,
-    /// Arma pronta (estado 18, `J018`); tiques nela.
-    Ready(u32),
-    /// Guardando a arma (estado 19, `J019`).
-    Holster,
+    /// Recuperação após o tiro (pistola 22, `J022`…) da arma.
+    Recover(u8),
+    /// Arma pronta (pistola 18, `J018`…); tiques nela e a arma.
+    Ready(u32, u8),
+    /// Guardando a arma (pistola 19, `J019`…).
+    Holster(u8),
     /// Levado por um teletransporte (`0x4136ef`): invisível, sem entrada nem dano; tiques
     /// desde a partida.
     Teleporting(u32),
@@ -156,71 +161,32 @@ impl Aim {
             _ => Aim::Forward,
         }
     }
-
-    /// Rótulo do `JAKE.ANM` (estado de tiro da pistola, descritor `0x47dfa8`).
-    pub fn label(self) -> u16 {
-        match self {
-            Aim::Forward => 23,
-            Aim::Up => 56,
-            Aim::DiagUp => 54,
-            Aim::DiagDown => 55,
-        }
-    }
-
-    /// Boca da arma relativa à posição do Jake (registro `0x43ac05`), olhando para o lado.
-    pub fn muzzle(self, right: bool) -> (i32, i32) {
-        match (self, right) {
-            (Aim::Forward, false) => (-25, 2),
-            (Aim::Forward, true) => (25, 2),
-            (Aim::Up, false) => (9, -35),
-            (Aim::Up, true) => (12, -35),
-            (Aim::DiagUp, false) => (-16, -23),
-            (Aim::DiagUp, true) => (24, -23),
-            (Aim::DiagDown, false) => (-23, 33),
-            (Aim::DiagDown, true) => (27, 33),
-        }
-    }
-
-    /// Velocidade da bala em px/tique.
-    pub fn velocity(self, right: bool) -> (i32, i32) {
-        let sx = if right { 20 } else { -20 };
-        match self {
-            Aim::Forward => (sx, 0),
-            Aim::Up => (0, -20),
-            Aim::DiagUp => (sx, -20),
-            Aim::DiagDown => (sx, 20),
-        }
-    }
-
-    /// Cápsula: posição relativa e velocidade (px/tique), para trás e para cima.
-    pub fn casing(right: bool) -> ((i32, i32), (i32, i32)) {
-        if right {
-            ((-4, 0), (-10, -10))
-        } else {
-            ((22, 0), (10, -10))
-        }
-    }
 }
 
-/// Uma bala (ou cápsula) saindo do cano: posição e velocidade em px/tique.
+/// Um projétil (ou cápsula) saindo do cano: posição e velocidade em px/tique.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Shot {
     pub x: i32,
     pub y: i32,
     pub vx: i32,
     pub vy: i32,
-    /// `true` = cápsula (tipo 22); `false` = bala (tipo 19).
-    pub casing: bool,
+    pub kind: ShotKind,
 }
 
-/// Inventário: 30 pares (tem, munição), índice = número da arma (1 punhos, 2 pistola…).
+impl Shot {
+    /// Cápsula ou cartucho (tipos 22/23).
+    pub fn is_casing(&self) -> bool {
+        self.kind.is_casing()
+    }
+}
+
+/// Inventário: 30 pares (tem, munição), índice = número da arma (1 punhos, 2 pistola…), e a
+/// arma corrente (`+0x254`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Inventory {
     pub slots: [(i32, i32); 30],
+    pub weapon: usize,
 }
-
-/// Número da pistola no inventário.
-pub const PISTOL: usize = 2;
 /// Som "troca de arma / sem munição".
 pub const SOUND_NO_AMMO: u16 = 3090;
 /// Ticks em "pronto" antes de guardar a arma (descritor da pistola, `+0x14`).
@@ -234,14 +200,63 @@ impl Inventory {
             *s = v;
         }
         slots[1] = (1, 20);
-        Self { slots }
+        let mut inv = Self {
+            slots,
+            weapon: FISTS,
+        };
+        inv.weapon = inv.best();
+        inv
     }
 
     pub fn pistol_ammo(&self) -> i32 {
-        if self.slots[PISTOL].0 != 0 {
-            self.slots[PISTOL].1
-        } else {
-            0
+        self.ammo(PISTOL)
+    }
+
+    /// Munição de uma arma que o Jake tem (0 sem o "tem").
+    pub fn ammo(&self, w: usize) -> i32 {
+        match self.slots.get(w) {
+            Some(&(has, n)) if has != 0 => n,
+            _ => 0,
+        }
+    }
+
+    /// Disponível: tem ≠ 0 e munição > 0 (`0x43a8cc`).
+    pub fn available(&self, w: usize) -> bool {
+        self.ammo(w) > 0
+    }
+
+    /// A melhor disponível (modo 1 de `0x43a8cc`); nada disponível → punhos.
+    pub fn best(&self) -> usize {
+        weapons::ORDER
+            .iter()
+            .rev()
+            .copied()
+            .find(|&w| self.available(w))
+            .unwrap_or(FISTS)
+    }
+
+    /// A disponível seguinte (`next`) ou anterior à corrente, dando a volta (modos 8 e 4).
+    pub fn cycle(&self, next: bool) -> usize {
+        let n = weapons::ORDER.len();
+        let i = weapons::ORDER
+            .iter()
+            .position(|&w| w == self.weapon)
+            .unwrap_or(0);
+        (1..=n)
+            .map(|k| {
+                let j = if next { i + k } else { i + n * 2 - k };
+                weapons::ORDER[j % n]
+            })
+            .find(|&w| self.available(w))
+            .unwrap_or(self.weapon)
+    }
+
+    /// Ganhou a arma `w` (`0x43af6c`): se ela fica depois da melhor disponível na lista,
+    /// vira a corrente.
+    pub fn gained(&mut self, w: usize) {
+        let pos = |x: usize| weapons::ORDER.iter().position(|&o| o == x);
+        if pos(w) > pos(self.best()) {
+            self.weapon = w;
         }
     }
 }
@@ -303,6 +318,10 @@ pub const ALL_LABELS: [u16; 48] = [
     107,
     DIE_POISON,
 ];
+/// Alcance do soco além da caixa do Jake (`0x0043accb`, segmento até x + l + 5).
+pub const PUNCH_REACH: i32 = 5;
+/// Período do veneno em tiques.
+pub const POISON_PERIOD: u32 = 20;
 /// Tiques do choque elétrico.
 const SHOCK_TICKS: u32 = 10;
 /// Escala mínima ao entrar na porta (numerador sobre a altura do quadro de referência).
@@ -335,10 +354,16 @@ fn anim_of(s: State) -> (u16, u32) {
         State::Dying(label) => (label, 0),
         State::Dead => (0, 0),
         State::EnteringExit(_) => (12, 0),
-        State::Fire { aim, .. } => (aim.label(), 0),
-        State::Recover => (22, 0),
-        State::Ready(_) => (18, 0),
-        State::Holster => (19, 0),
+        State::Fire { aim, w, alt, .. } => (
+            weapon(w as usize).states[weapons::aim_slot(aim)][usize::from(alt)].0,
+            0,
+        ),
+        State::Recover(w) => {
+            let wp = weapon(w as usize);
+            (wp.states[2][0].1.recover, 0)
+        }
+        State::Ready(_, w) => (weapon(w as usize).ready, 0),
+        State::Holster(w) => (weapon(w as usize).holster, 0),
         State::Stealth => (149, 0),
         State::JumpUp(false) => (16, 0),
         State::JumpUp(true) => (17, 0),
@@ -436,6 +461,19 @@ pub struct Jake {
     rng: u32,
     /// Especial disparado neste tique (a cena aplica nos objetos).
     pub special: Option<SpecialBlast>,
+    /// Caixa do soco no primeiro tique da janela do golpe (a cena fere quem cruza).
+    pub punch: Option<Rect>,
+    /// Trocou de arma neste tique (a cena toca 3090).
+    pub switched: bool,
+    /// Tiques restantes da pose "pronto" depois da troca (`+0x26c`).
+    switch_pose: u32,
+    /// Veneno (`+0x270`): quanto perde a cada 20 tiques.
+    pub poison: i32,
+    /// Chegou ao fim do rótulo 100 empurrando neste tique (`0x00425d04`: a cena tenta a
+    /// porta da célula numa zona PR 0x20).
+    pub door_push: bool,
+    /// Tiques desde a criação (o veneno age em `tique % 20 = 0`).
+    clock: u32,
 }
 
 impl Jake {
@@ -469,6 +507,12 @@ impl Jake {
             box_bar: moves::BAR_BOX,
             rng: 0x4a41_4b45,
             special: None,
+            punch: None,
+            switched: false,
+            switch_pose: 0,
+            poison: 0,
+            door_push: false,
+            clock: 0,
         }
     }
 
@@ -514,26 +558,103 @@ impl Jake {
         self
     }
 
-    /// Começa (ou recomeça) uma rajada com a mira da entrada; sem munição, avisa uma vez
-    /// (na borda da tecla) e devolve `false`, deixando o controle normal seguir.
-    fn start_fire(&mut self, input: u32) -> bool {
+    /// Começa (ou recomeça) um tiro ou soco com a mira da entrada (`0x0043b43e`). Sem
+    /// munição (`0x0043b1d0`): aviso (som 3090), a melhor arma e a pose "pronto" dela. A boca
+    /// dentro da parede dá um soco (`0x47d7b8 = 2`).
+    fn start_fire(&mut self, input: u32, world: &World) -> bool {
         if moves::wants_special(input) && self.health.hp > moves::SPECIAL_MIN_HP {
             self.body.vx = 0;
             self.set(State::Special(0));
-            self.tick_special(input);
+            self.tick_special(input, world);
             return true;
         }
-        if self.inventory.pistol_ammo() <= 0 {
-            self.no_ammo = self.prev_input & SHOOT == 0;
-            return false;
+        let mut w = if input & PUNCH != 0 {
+            FISTS
+        } else {
+            self.inventory.weapon
+        };
+        if w != FISTS && !self.inventory.available(w) {
+            self.no_ammo = true;
+            self.inventory.weapon = self.inventory.best();
+            self.body.vx = 0;
+            let nw = self.inventory.weapon as u8;
+            self.set(State::Ready(0, nw));
+            return true;
+        }
+        let aim = Aim::from_input(input);
+        if w != FISTS {
+            let r = weapon(w).states[weapons::aim_slot(aim)][0].1;
+            let dx = if self.facing_right { r.dx.1 } else { r.dx.0 };
+            if !self.muzzle_clear(world, (self.body.x + dx, self.body.y + r.dy)) {
+                w = FISTS;
+            }
         }
         self.body.vx = 0;
-        let aim = Aim::from_input(input);
-        self.state = State::Fire { aim, t: 0 };
+        self.rng = self.rng.wrapping_mul(1_103_515_245).wrapping_add(12345);
+        let alt = w == FISTS && (self.rng >> 16) & 1 != 0;
+        self.state = State::Fire {
+            aim,
+            t: 0,
+            w: w as u8,
+            alt,
+        };
         self.ticks = 0;
         self.frame = 0;
         self.label_changed = true;
         true
+    }
+
+    /// Caixa do golpe (`0x0043accb`): metade da frente da caixa do Jake e um terço da altura
+    /// (cima, meio ou baixo conforme a mira). Ruling: o alcance vai até a ponta do segmento
+    /// do recorte (5 px além da caixa), sem o recorte pela parede.
+    pub fn punch_box(&self, aim: Aim) -> Rect {
+        let b = self.body.bounds();
+        let mut r = Rect {
+            x: b.x - PUNCH_REACH,
+            y: b.y,
+            w: b.w / 2 + PUNCH_REACH,
+            h: b.h / 3,
+        };
+        if self.facing_right {
+            r.x = b.x + b.w / 2;
+        }
+        match aim {
+            Aim::Up | Aim::DiagUp => {}
+            Aim::Forward => r.y += b.h / 3,
+            Aim::DiagDown => r.y += 2 * b.h / 3,
+        }
+        r
+    }
+
+    /// Troca de arma (`0x0043b0cb`): PRÓXIMA/ANTERIOR na borda, ou a escolha direta dos bits
+    /// `SELECT` (extensão do port).
+    fn switch_weapon(&mut self, input: u32) {
+        let edge = |bit: u32| input & bit != 0 && self.prev_input & bit == 0;
+        let sel = ((input & crate::input::SELECT_MASK) >> crate::input::SELECT_SHIFT) as usize;
+        let prev_sel =
+            ((self.prev_input & crate::input::SELECT_MASK) >> crate::input::SELECT_SHIFT) as usize;
+        let new = if edge(PREV_WEAPON) {
+            self.inventory.cycle(false)
+        } else if edge(NEXT_WEAPON) {
+            self.inventory.cycle(true)
+        } else if sel != 0 && sel != prev_sel && self.inventory.available(sel) {
+            sel
+        } else {
+            return;
+        };
+        if new != self.inventory.weapon {
+            self.inventory.weapon = new;
+            self.switched = true;
+            self.switch_pose = weapons::SWITCH_POSE_TICKS;
+        }
+    }
+
+    /// Som do tiro: no primeiro tique de cada estado de tiro da arma que tem som.
+    pub fn fire_sound(&self) -> Option<u16> {
+        match self.state {
+            State::Fire { w, .. } if self.label_changed => weapon(w as usize).sound,
+            _ => None,
+        }
     }
 
     /// A linha do centro da caixa até a boca da arma está livre de sólidos
@@ -552,54 +673,67 @@ impl Jake {
         })
     }
 
-    /// Tique de um estado de tiro (`0x0043b50b`/`0x0043b1d0`).
-    fn tick_fire(&mut self, input: u32, world: &World, aim: Aim, t: u32) {
+    /// Tique de um estado de tiro ou soco (`0x0043b50b`/`0x0043b1d0`).
+    fn tick_fire(&mut self, input: u32, world: &World, st: (Aim, u32, u8, bool)) {
+        let (aim, t, w, alt) = st;
         let pressed = |bit: u32| input & bit != 0;
-        let t = t + 1;
-        self.state = State::Fire { aim, t };
+        let wp = weapon(w as usize);
+        let r = wp.states[weapons::aim_slot(aim)][usize::from(alt)].1;
+        let t = t + wp.step;
+        self.state = State::Fire { aim, t, w, alt };
         let right = self.facing_right;
-        let (mx, my) = aim.muzzle(right);
-        let muzzle = (self.body.x + mx, self.body.y + my);
-        if (1..=3).contains(&t)
-            && self.inventory.pistol_ammo() > 0
-            && self.muzzle_clear(world, muzzle)
-        {
-            self.inventory.slots[PISTOL].1 -= 1;
-            let (vx, vy) = aim.velocity(right);
-            // 1ª e 3ª balas desviam 1 px/tique perpendicular (`0x0043bab7`): (−vy, vx)/|v|,
-            // negado olhando para a esquerda — na mira de frente a 1ª desce e a 3ª sobe
-            let sign = if right { 1 } else { -1 };
-            let (px, py) = (-vy / 20 * sign, vx / 20 * sign);
-            let (dx, dy) = match t {
-                1 => (px, py),
-                3 => (-px, -py),
-                _ => (0, 0),
-            };
-            self.shots.push(Shot {
-                x: muzzle.0,
-                y: muzzle.1,
-                vx: vx + dx,
-                vy: vy + dy,
-                casing: false,
-            });
-            if t == 1 {
-                let ((cx, cy), (cvx, cvy)) = Aim::casing(right);
+        if r.hit != (0, 0) && t == r.hit.0 {
+            self.punch = Some(self.punch_box(aim));
+        }
+        let muzzle = (
+            self.body.x + if right { r.dx.1 } else { r.dx.0 },
+            self.body.y + r.dy,
+        );
+        let in_window = r.fire != (0, 0) && r.fire.0 <= t && t < r.fire.1 + wp.step;
+        if let Some(kind) = wp.shot.filter(|_| in_window) {
+            if self.inventory.available(w as usize) && self.muzzle_clear(world, muzzle) {
+                let slot = &mut self.inventory.slots[w as usize].1;
+                *slot = (*slot - 1).max(0);
+                let sign = if right { 1 } else { -1 };
+                let (vx, vy) = (r.v.0 * sign, r.v.1);
+                // 1ª e 3ª balas da pistola desviam 1 px/tique perpendicular (`0x0043bab7`):
+                // (−vy, vx)/|v|, negado olhando para a esquerda
+                let (px, py) = (-vy / 20 * sign, vx / 20 * sign);
+                let n = t + 1 - r.fire.0;
+                let (dx, dy) = match n {
+                    1 if wp.spread => (px, py),
+                    3 if wp.spread => (-px, -py),
+                    _ => (0, 0),
+                };
                 self.shots.push(Shot {
-                    x: self.body.x + cx,
-                    y: self.body.y + cy,
-                    vx: cvx,
-                    vy: cvy,
-                    casing: true,
+                    x: muzzle.0,
+                    y: muzzle.1,
+                    vx: vx + dx,
+                    vy: vy + dy,
+                    kind,
                 });
+                if let (Some(ck), Some(c), 1) = (wp.casing, r.casing, n) {
+                    self.shots.push(Shot {
+                        x: self.body.x + if right { c.dx.1 } else { c.dx.0 },
+                        y: self.body.y + c.dy,
+                        vx: c.v.0 * sign,
+                        vy: c.v.1,
+                        kind: ck,
+                    });
+                }
             }
         }
         let moving = pressed(LEFT) || pressed(RIGHT) || pressed(JUMP);
-        if t >= 7 && pressed(SHOOT) && self.inventory.pistol_ammo() > 0 {
-            self.start_fire(input);
-        } else if t > 6 && moving && !pressed(SHOOT) {
+        if t > r.again && pressed(SHOOT | PUNCH) {
+            self.start_fire(input, world);
+        } else if t > r.again && moving {
             self.set(State::Idle);
-        } else if t > 12 {
-            self.set(State::Recover);
+        } else if t > r.reeval {
+            if r.recover != 0 {
+                self.set(State::Recover(w));
+            } else {
+                self.set(State::Ready(0, w));
+            }
         }
     }
 
@@ -726,6 +860,7 @@ impl Jake {
     pub fn label(&self) -> u16 {
         match self.state {
             State::Dead => self.death_label,
+            State::Idle if self.switch_pose > 0 => weapon(self.inventory.weapon).ready,
             _ => anim_of(self.state).0,
         }
     }
@@ -928,17 +1063,31 @@ impl Jake {
         self.label_changed = false;
         self.no_ammo = false;
         self.special = None;
+        self.punch = None;
+        self.switched = false;
+        self.door_push = false;
         self.anim_mode = AnimMode::Auto;
         self.ske_req = None;
         if self.state == State::Dead {
             self.advance = false;
             return;
         }
+        self.clock = self.clock.wrapping_add(1);
+        // veneno (`0x004231f9`, passo 3): a cada 20 tiques, `+0x270` de dano de veneno
+        if self.poison > 0 && self.clock % POISON_PERIOD == 0 && self.is_active() {
+            self.pending.add(&Pending {
+                amount: self.poison,
+                poison: true,
+                ..Default::default()
+            });
+        }
         self.take_damage(self.ticks);
         if !self.controllable() {
             self.tick_passive(input, env);
             return;
         }
+        self.switch_pose = self.switch_pose.saturating_sub(1);
+        self.switch_weapon(input);
         let pressed = |bit: u32| input & bit != 0;
         let jump_edge = pressed(JUMP) && self.prev_input & JUMP == 0;
         let side = self.wanted_side(input);
@@ -947,7 +1096,7 @@ impl Jake {
             self.facing_right = right;
         }
         let moving = side.is_some();
-        let shooting = pressed(SHOOT) && self.body.on_ground;
+        let shooting = pressed(SHOOT | PUNCH) && self.body.on_ground;
         let can_fire = matches!(
             self.state,
             State::Idle
@@ -957,9 +1106,9 @@ impl Jake {
                 | State::Stealth
                 | State::GetUp
                 | State::Shake
-                | State::Recover
-                | State::Ready(_)
-                | State::Holster
+                | State::Recover(_)
+                | State::Ready(..)
+                | State::Holster(_)
                 | State::Crouch
                 | State::StandUp
                 | State::Hide
@@ -969,19 +1118,19 @@ impl Jake {
         let fired = !matches!(self.state, State::Fire { .. })
             && can_fire
             && shooting
-            && self.start_fire(input);
+            && self.start_fire(input, world);
         match self.state {
             _ if fired => {}
-            State::Fire { aim, t } => self.tick_fire(input, world, aim, t),
-            State::Recover | State::Ready(_) | State::Holster => {
+            State::Fire { aim, t, w, alt } => self.tick_fire(input, world, (aim, t, w, alt)),
+            State::Recover(_) | State::Ready(..) | State::Holster(_) => {
                 if moving || jump_edge || pressed(UP) || pressed(DOWN) {
                     self.set(State::Idle);
                 } else {
                     match self.state {
-                        State::Recover if self.anim_done() => self.set(State::Ready(0)),
-                        State::Ready(n) if n + 1 >= READY_TICKS => self.set(State::Holster),
-                        State::Ready(n) => self.state = State::Ready(n + 1),
-                        State::Holster if self.anim_done() => self.set(State::Idle),
+                        State::Recover(w) if self.anim_done() => self.set(State::Ready(0, w)),
+                        State::Ready(n, w) if n + 1 >= READY_TICKS => self.set(State::Holster(w)),
+                        State::Ready(n, w) => self.state = State::Ready(n + 1, w),
+                        State::Holster(_) if self.anim_done() => self.set(State::Idle),
                         _ => {}
                     }
                 }
@@ -1020,6 +1169,7 @@ impl Jake {
             }
             _ => self.tick_move(input, env, jump_edge, side),
         }
+        self.door_push = self.state == State::Push && self.ticks + 1 == self.len_of(100) as u32;
         // a caixa do estado vale já para a física deste tique (o BRD troca com o estado)
         self.fit_box(world);
         if matches!(self.state, State::Run | State::Push) {
@@ -1530,8 +1680,9 @@ mod tests {
         assert_eq!(Aim::from_input(UP | RIGHT), Aim::DiagUp);
         assert_eq!(Aim::from_input(DOWN | LEFT), Aim::DiagDown);
         assert_eq!(Aim::from_input(DOWN), Aim::DiagDown);
-        assert_eq!(Aim::Forward.muzzle(true), (25, 2));
-        assert_eq!(Aim::Up.velocity(false), (0, -20));
+        let r = |a: Aim| weapons::PISTOL_W.states[weapons::aim_slot(a)][0];
+        assert_eq!((r(Aim::Forward).0, r(Aim::Forward).1.dx.1), (23, 25));
+        assert_eq!(r(Aim::Up).1.v, (0, -20));
     }
 
     #[test]
@@ -1542,9 +1693,9 @@ mod tests {
         let mut fired = vec![];
         for t in 0..20 {
             j.tick(SHOOT, &w);
-            let bullets = j.shots.iter().filter(|s| !s.casing).count();
+            let bullets = j.shots.iter().filter(|s| !s.is_casing()).count();
             if bullets > 0 {
-                fired.push((t, bullets, j.shots.iter().any(|s| s.casing)));
+                fired.push((t, bullets, j.shots.iter().any(|s| s.is_casing())));
             }
             j.shots.clear();
         }
@@ -1578,7 +1729,7 @@ mod tests {
         let mut rounds = vec![];
         for _ in 0..3 {
             j.tick(SHOOT, &w);
-            rounds.extend(j.shots.drain(..).filter(|s| !s.casing));
+            rounds.extend(j.shots.drain(..).filter(|s| !s.is_casing()));
         }
         assert_eq!(rounds.len(), 3);
         assert_eq!((rounds[0].x, rounds[0].y), (x + 25, y + 2));
@@ -1609,7 +1760,7 @@ mod tests {
         for _ in 0..5 {
             j.tick(SHOOT, &w);
         }
-        assert!(j.shots.iter().all(|s| s.casing), "{:?}", j.shots);
+        assert!(j.shots.iter().all(|s| s.is_casing()), "{:?}", j.shots);
         assert_eq!(j.inventory.pistol_ammo(), 80, "não gasta munição");
     }
 
@@ -1641,24 +1792,26 @@ mod tests {
         assert!(j.is_firing());
         j.tick(RIGHT | SHOOT, &w);
         assert_eq!(j.body.x, x, "parou para atirar");
-        // sem munição: nada sai, o aviso uma vez só, e o Jake continua a correr
-        let mut empty = jake_on(&w, 0).with_inventory(Inventory::from_points(&[]));
+        // sem munição na pistola (só ela e os punhos): aviso, troca para os punhos e soca
+        let mut empty =
+            jake_on(&w, 0).with_inventory(Inventory::from_points(&[(0, 0), (1, 20), (1, 0)]));
+        empty.inventory.weapon = PISTOL;
         empty.tick(SHOOT | RIGHT, &w);
-        assert!(empty.no_ammo && !empty.is_firing() && empty.shots.is_empty());
-        let x = empty.body.x;
-        for _ in 0..5 {
-            empty.tick(SHOOT | RIGHT, &w);
-            assert!(!empty.no_ammo, "aviso repetido");
-        }
-        assert!(empty.body.x > x, "não anda segurando ATIRAR sem munição");
-        // acabou a munição no meio: sai da rajada e volta ao controle
+        assert!(empty.no_ammo && empty.shots.is_empty());
+        assert_eq!(empty.inventory.weapon, FISTS);
+        assert_eq!(empty.label(), 146, "pose \"pronto\" dos punhos");
+        empty.tick(SHOOT, &w);
+        assert!(!empty.no_ammo, "aviso repetido");
+        assert!(empty.is_firing());
+        assert!(matches!(empty.label(), 150 | 151), "{}", empty.label());
+        // acabou a munição no meio: passa aos punhos
         let mut j =
             jake_on(&w, 0).with_inventory(Inventory::from_points(&[(0, 0), (1, 20), (1, 2)]));
         for _ in 0..30 {
             j.tick(SHOOT, &w);
         }
         assert_eq!(j.inventory.pistol_ammo(), 0);
-        assert!(!j.is_firing(), "{:?}", j.state());
+        assert_eq!(j.inventory.weapon, FISTS);
     }
 
     #[test]
@@ -1716,5 +1869,131 @@ mod tests {
             j.tick(0, &w);
         }
         assert_eq!(j.state(), State::Idle);
+    }
+
+    fn arsenal() -> Inventory {
+        // punhos, pistola 10, espingarda 5, foguetes 3, estrelas 4, granadas 2
+        Inventory::from_points(&[(0, 0), (1, 20), (1, 10), (1, 5), (1, 3), (1, 4), (1, 2)])
+    }
+
+    #[test]
+    fn best_weapon_and_cycling_follow_the_list() {
+        use crate::input::{NEXT_WEAPON, PREV_WEAPON, SELECT_SHIFT};
+        let mut inv = arsenal();
+        assert_eq!(inv.weapon, ROCKETS, "melhor: foguetes");
+        // lista 1, 6, 5, 2, 3, 4: a seguinte dos foguetes dá a volta aos punhos
+        assert_eq!(inv.cycle(true), FISTS);
+        assert_eq!(inv.cycle(false), SHOTGUN);
+        inv.slots[SHOTGUN].1 = 0;
+        assert_eq!(inv.cycle(false), PISTOL, "pula a espingarda vazia");
+        let inv = Inventory::from_points(&[(0, 0), (1, 20), (0, 90)]);
+        assert_eq!((inv.weapon, inv.cycle(true)), (FISTS, FISTS));
+        // ganhar uma arma melhor que a melhor disponível a torna corrente (`0x43af6c` roda
+        // antes de a arma entrar no inventário)
+        let mut inv = Inventory::from_points(&[(0, 0), (1, 20), (1, 10)]);
+        inv.gained(GRENADES);
+        assert_eq!(inv.weapon, PISTOL);
+        inv.gained(SHOTGUN);
+        assert_eq!(inv.weapon, SHOTGUN);
+        // no Jake: PRÓXIMA na borda troca, com aviso e pose "pronto"; segurar não repete
+        let w = long_floor();
+        let mut j = jake_on(&w, 0).with_inventory(arsenal());
+        j.tick(PREV_WEAPON, &w);
+        assert!(j.switched);
+        assert_eq!((j.inventory.weapon, j.label()), (SHOTGUN, 108));
+        j.tick(PREV_WEAPON, &w);
+        assert!(!j.switched);
+        assert_eq!(j.inventory.weapon, SHOTGUN);
+        j.tick(NEXT_WEAPON, &w);
+        assert_eq!(j.inventory.weapon, ROCKETS);
+        // escolha direta (extensão do port): 5 → estrelas
+        j.tick((STARS as u32) << SELECT_SHIFT, &w);
+        assert_eq!(j.inventory.weapon, STARS);
+        for _ in 0..8 {
+            j.tick(0, &w);
+        }
+        assert_eq!(j.label(), 1, "a pose da troca dura 7 tiques");
+    }
+
+    /// Disparos de cada arma com ATIRAR seguro por 30 tiques: (tiques com tiro, tipos).
+    fn fire_log(w: usize, ammo: i32) -> (Vec<u32>, Vec<ShotKind>, i32) {
+        let world = long_floor();
+        let mut inv = Inventory::from_points(&[(0, 0), (1, 20)]);
+        inv.slots[w] = (1, ammo);
+        inv.weapon = w;
+        let mut j = jake_on(&world, 0).with_inventory(inv);
+        let (mut ticks, mut kinds) = (vec![], vec![]);
+        for t in 0..30 {
+            j.tick(SHOOT, &world);
+            for s in j.shots.drain(..) {
+                if !s.is_casing() {
+                    ticks.push(t);
+                }
+                kinds.push(s.kind);
+            }
+        }
+        (ticks, kinds, j.inventory.slots[w].1)
+    }
+
+    #[test]
+    fn each_weapon_has_its_cadence_and_projectile() {
+        // espingarda: um tiro a cada 9 tiques (t > 8 recomeça), com o cartucho
+        let (t, k, left) = fire_log(SHOTGUN, 20);
+        assert_eq!(t, vec![1, 10, 19, 28]);
+        assert_eq!(&k[..2], &[ShotKind::Pellet, ShotKind::Shell]);
+        assert_eq!(left, 16);
+        // foguetes: a cada 25
+        let (t, k, _) = fire_log(ROCKETS, 20);
+        assert_eq!(t, vec![1, 26]);
+        assert!(k.iter().all(|&k| k == ShotKind::Rocket));
+        // estrelas e granadas: passo 2, dispara em t = 8, recomeça com t > 11 (6 tiques)
+        let (t, k, _) = fire_log(STARS, 20);
+        assert_eq!(t, vec![4, 10, 16, 22, 28]);
+        assert!(k.iter().all(|&k| k == ShotKind::Star));
+        let (t, _, left) = fire_log(GRENADES, 2);
+        assert_eq!(&t[..2], &[4, 10]);
+        assert_eq!(left, 0, "munição nunca negativa");
+    }
+
+    #[test]
+    fn rockets_aim_up_diagonally_and_velocities_follow_the_side() {
+        let w = long_floor();
+        let mut inv = Inventory::from_points(&[(0, 0), (1, 20)]);
+        inv.slots[ROCKETS] = (1, 5);
+        inv.weapon = ROCKETS;
+        let mut j = jake_on(&w, 0).with_inventory(inv);
+        j.tick(UP | SHOOT, &w);
+        assert_eq!(j.label(), 67);
+        j.tick(UP | SHOOT, &w);
+        let s = j.shots[0];
+        assert_eq!((s.vx, s.vy), (-30, -30), "olhando à esquerda");
+        assert_eq!((s.x - j.body.x, s.y - j.body.y), (-20, -23));
+    }
+
+    #[test]
+    fn punch_strikes_once_per_blow_in_front() {
+        use crate::input::PUNCH;
+        let w = long_floor();
+        let mut j = jake_on(&w, 0).with_inventory(arsenal());
+        j.tick(RIGHT, &w);
+        let mut strikes = vec![];
+        for t in 0..12 {
+            j.tick(PUNCH, &w);
+            if let Some(r) = j.punch {
+                strikes.push((t, r));
+            }
+        }
+        assert!(j.shots.is_empty(), "o soco não dispara");
+        assert_eq!(j.inventory.slots[ROCKETS].1, 3, "nem gasta munição");
+        assert!(!strikes.is_empty());
+        let b = j.body.bounds();
+        let (_, r) = strikes[0];
+        assert_eq!(
+            (r.x, r.w, r.h),
+            (b.x + b.w / 2, b.w / 2 + PUNCH_REACH, b.h / 3)
+        );
+        assert_eq!(r.y, b.y + b.h / 3, "terço do meio");
+        // um acerto por golpe: tiques distintos e espaçados
+        assert!(strikes.windows(2).all(|p| p[1].0 > p[0].0 + 1));
     }
 }
