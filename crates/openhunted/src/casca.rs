@@ -14,7 +14,7 @@ use openhunted_engine::shell::generic::GenericBox;
 use openhunted_engine::shell::heroes::{Car, Heroes, Info, InfoKind, NameEntry};
 use openhunted_engine::shell::levels::{Entry, LevelSelect};
 use openhunted_engine::shell::options::Options;
-use openhunted_engine::shell::results::Results;
+use openhunted_engine::shell::results::{Choice, Results};
 use openhunted_engine::shell::{Dir, Input, Page, Placement, Reply, Screen, menu, next_mission};
 use openhunted_engine::{TICK_MS, display_palette};
 use openhunted_formats::{Palette, SaveGame, Sound, parse_text_list};
@@ -108,6 +108,8 @@ pub(super) struct Casca {
     pub(super) improved: bool,
     /// A contagem do resultado já chegou a 100 (nome e gravação feitos).
     count_done: bool,
+    /// Escolha do resultado feita antes da contagem acabar, à espera do nome e da gravação.
+    after_count: Option<Choice>,
     /// Resultado à espera sob uma tela (carro, nome) e o filme depois do carro.
     pending: Option<Box<Results>>,
     film: Option<Film>,
@@ -647,6 +649,7 @@ impl App {
         first_win: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.m9.count_done = false;
+        self.m9.after_count = None;
         let piece = first_win
             && self.viewer.as_ref().is_some_and(|v| {
                 v.scene()
@@ -677,9 +680,32 @@ impl App {
 
     fn back_to_results(&mut self) {
         match self.m9.pending.take() {
-            Some(r) => self.state = State::Results(r),
+            Some(r) => {
+                self.state = State::Results(r);
+                if let Some(c) = self.m9.after_count.take() {
+                    self.dispatch_results(Some(c));
+                }
+            }
             None => self.go_menu(),
         }
+    }
+
+    /// Antes de seguir uma escolha do resultado: se a contagem não acabou, acaba agora (nome
+    /// do herói e gravação). Devolve se a escolha segue já; senão ela fica à espera da tela
+    /// aberta e segue quando o resultado volta.
+    pub(super) fn finish_count_before(&mut self, c: Choice) -> bool {
+        if self.m9.count_done {
+            return true;
+        }
+        if let State::Results(r) = &mut self.state {
+            r.skip_count();
+        }
+        self.count_finished();
+        if matches!(self.state, State::Results(_)) {
+            return true;
+        }
+        self.m9.after_count = Some(c);
+        false
     }
 
     /// A contagem chegou a 100 (uma vez): nome na lista de heróis e gravação do jogo.
@@ -1100,6 +1126,43 @@ mod tests {
         assert_eq!(c.notice(), Some("UNABLE TO LOAD. INVALID GAME FORMAT."));
         c.key_down(Key::Enter);
         assert_eq!(c.notice(), None);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_results_choice_before_the_count_ends_still_asks_and_saves() {
+        use openhunted_engine::shell::results;
+        let root = temp("app-early");
+        let Some(mut a) = app(&root, None) else {
+            return;
+        };
+        a.key_down(Key::Enter); // New Game
+        run(&mut a, 6);
+        a.key_down(Key::Enter); // GO
+        run(&mut a, 6);
+        win(&mut a, false);
+        assert_eq!(a.mode(), super::super::Mode::Results);
+        // clique em NEXT com a contagem no começo: o botão ativa sem a contagem fechar
+        let r = a.screen().unwrap().rect(results::NEXT).unwrap();
+        a.pointer_move(r.x + r.w / 2, r.y + r.h / 2);
+        a.pointer_button(true);
+        a.pointer_button(false);
+        a.dispatch_results(Some(results::Choice::Next));
+        assert_eq!(
+            a.page_kind(),
+            Some(PageKind::HeroName),
+            "o nome antes do NEXT"
+        );
+        a.text_input("ANA");
+        a.key_down(Key::Enter);
+        assert_eq!(a.page_kind(), Some(PageKind::SaveName));
+        a.key_down(Key::Enter); // o nome do herói já vem
+        let st = Storage::at(&root);
+        assert_eq!(st.heroes().heroes[0].name, "ANA");
+        assert!(read_save(&st.save_path("ANA")).is_some(), "gravado");
+        // e então o NEXT pedido
+        assert_eq!(a.mode(), super::super::Mode::Briefing);
+        assert_eq!(a.mission_index(), Some(1));
         std::fs::remove_dir_all(&root).unwrap();
     }
 
