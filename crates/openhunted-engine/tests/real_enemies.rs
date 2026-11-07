@@ -411,6 +411,7 @@ fn check_enemy(s: &Scene, i: usize, started_inside: bool, ctx: &str) {
 /// Em toda fase solo com estes inimigos, 2000 tiques de entrada aleatória: sem pânico, nenhum
 /// inimigo sai da fase, entra nas células da própria camada ou some sem morrer.
 #[test]
+#[ignore = "fuzz longo: rode com check.sh --full"]
 fn enemies_fuzz_without_panics() {
     let Some(gd) = data() else {
         return;
@@ -488,6 +489,7 @@ const SETTLE_TICKS: u32 = 40;
 /// (formigas, clones, minas, ao fim de `SETTLE_TICKS` de vida) ficam na fase e fora das
 /// células da própria camada; mortos ≤ total.
 #[test]
+#[ignore = "fuzz longo: rode com check.sh --full"]
 fn m10_fuzz_all_levels_with_spawned() {
     use openhunted_engine::Difficulty;
     if data().is_none() {
