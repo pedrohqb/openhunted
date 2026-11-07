@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! As missões tutoriais `T_J_003`, `T_J_005` e `T_J_007` jogadas de ponta a ponta sobre os
+//! As missões `T_J_003`, `T_J_005`, `T_J_007` e `I_J_002` jogadas de ponta a ponta sobre os
 //! dados reais (OPENHUNTED_DATA), por rotas roteirizadas (`docs/re/missoes-tutorial.md`):
 //! sem tirar perigos, só com a entrada do jogador.
 
-use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
+use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SELECT_SHIFT, SHOOT, UP};
 use openhunted_engine::jake::zone;
-use openhunted_engine::{Assets, Outcome, Scene};
+use openhunted_engine::{Assets, Entity, Outcome, Scene};
 use openhunted_formats::{Level, open_data};
 
 fn load(level: &str) -> Option<Scene> {
@@ -17,6 +17,27 @@ fn load(level: &str) -> Option<Scene> {
     let l = Level::parse(&gd.levels().unwrap().get(level).unwrap()).unwrap();
     let mut a = Assets::new(gd.resources().unwrap());
     Some(Scene::build(&l, &mut a).unwrap())
+}
+
+/// Como lutar: desistir se a vida dos alvos não cai em `patience` tiques; só alvos a até
+/// `dy_max` px na vertical.
+#[derive(Clone, Copy)]
+struct Fight {
+    patience: u32,
+    dy_max: i32,
+}
+
+impl Fight {
+    /// Minas e olhos: até o fim.
+    const PATIENT: Fight = Fight {
+        patience: u32::MAX,
+        dy_max: i32::MAX,
+    };
+    /// Robôs: os do mesmo andar, e desiste do que não se fere (fora da mira, sem munição).
+    const ROBOTS: Fight = Fight {
+        patience: 80,
+        dy_max: 90,
+    };
 }
 
 /// Piloto: um tique por vez, sem deixar o Jake morrer nem o tempo estourar.
@@ -37,7 +58,7 @@ impl Pilot {
                     .s
                     .entities
                     .iter()
-                    .filter(|e| e.alive && matches!(e.kind, 102 | 104 | 28 | 36))
+                    .filter(|e| e.alive && matches!(e.kind, 8 | 102 | 104 | 28 | 36))
                     .map(|e| (e.kind, e.center()))
                     .collect();
                 eprintln!("      {m:?}");
@@ -154,15 +175,32 @@ impl Pilot {
     /// `max` tiques): mira pelo lado e pela altura delas. Desiste do alvo inalcançável
     /// (atrás de parede): `STUCK` tiques empurrando sem nada morrer.
     fn fight(&mut self, range: i32, max: u32) {
+        self.fight_with(range, max, Fight::PATIENT, |e| {
+            (e.kind == 102 && e.health > 0) || e.kind == 104
+        });
+    }
+
+    /// `fight` contra os alvos de `hostile` (vivos, na camada do Jake); desiste também se a
+    /// vida somada deles não cai em `patience` tiques (alvo fora da mira ou sem munição).
+    fn fight_with(&mut self, range: i32, max: u32, how: Fight, hostile: fn(&Entity) -> bool) {
         const STUCK: u32 = 30;
-        let alive = |s: &Scene| {
+        let alive = |s: &Scene| s.entities.iter().filter(|e| e.alive && hostile(e)).count();
+        let hp = |s: &Scene| -> i32 {
             s.entities
                 .iter()
-                .filter(|e| e.alive && ((e.kind == 102 && e.health > 0) || e.kind == 104))
-                .count()
+                .filter(|e| e.alive && hostile(e))
+                .map(|e| e.health)
+                .sum()
         };
         let (mut pushing, mut left) = (0, alive(&self.s));
+        let (mut best, mut idle) = (hp(&self.s), 0);
         for _ in 0..max {
+            let h = hp(&self.s);
+            idle = if h < best { 0 } else { idle + 1 };
+            best = best.min(h);
+            if idle >= how.patience {
+                return;
+            }
             let now = alive(&self.s);
             let push = self.s.jake.as_ref().unwrap().state() == openhunted_engine::State::Push;
             pushing = if push && now == left { pushing + 1 } else { 0 };
@@ -176,16 +214,12 @@ impl Pilot {
                 .s
                 .entities
                 .iter()
-                .filter(|e| {
-                    e.alive
-                        && e.layer == layer
-                        && ((e.kind == 102 && e.health > 0) || e.kind == 104)
-                })
+                .filter(|e| e.alive && e.layer == layer && hostile(e))
                 .map(|e| {
                     let m = e.center();
                     (m.0 - c.0, m.1 - c.1)
                 })
-                .filter(|(dx, dy)| dx * dx + dy * dy < range * range)
+                .filter(|(dx, dy)| dx * dx + dy * dy < range * range && dy.abs() <= how.dy_max)
                 .min_by_key(|(dx, dy)| dx * dx + dy * dy);
             let Some((dx, dy)) = target else {
                 return;
@@ -210,12 +244,111 @@ impl Pilot {
         }
     }
 
+    /// Anda até `x` como `go_x`, parando para lutar (`fight_with`) com quem chegar a
+    /// `range` px.
+    /// Três pulos sem passar: parede; volta sem chegar (quem chamou confere onde está).
+    fn hunt_x(&mut self, x: i32, range: i32, hostile: fn(&Entity) -> bool) {
+        let mut jumps = 0;
+        for _ in 0..600 {
+            let before = self
+                .s
+                .entities
+                .iter()
+                .filter(|e| e.alive && hostile(e))
+                .count();
+            self.fight_with(range, 400, Fight::ROBOTS, hostile);
+            if self
+                .s
+                .entities
+                .iter()
+                .filter(|e| e.alive && hostile(e))
+                .count()
+                < before
+            {
+                // o robô abatido cai e explode: longe dele até passar
+                self.run(40, 0);
+            }
+            let c = self.center().0;
+            if (c - x).abs() <= 6 {
+                self.settle();
+                return;
+            }
+            let side = if c < x { RIGHT } else { LEFT };
+            if self.s.jake.as_ref().unwrap().state() == openhunted_engine::State::Push {
+                // obstáculo baixo: recua um pouco e pula por cima; parede: desiste
+                if jumps == 3 {
+                    return;
+                }
+                jumps += 1;
+                self.run(4, side ^ (LEFT | RIGHT));
+                self.settle();
+                self.jump_side(side);
+                continue;
+            }
+            self.tick(side);
+        }
+        panic!(
+            "{}: não chegou a x = {x} (em {:?})",
+            self.name,
+            self.center()
+        );
+    }
+
+    /// Atravessa a porta 50–52 mais próxima da camada que abre sozinha (gatilho sem
+    /// condição: `values[1]` tiques fechada sem o Jake encostado, `values[2]` aberta):
+    /// espera a 40 px dela até abrir e passa correndo para `side`.
+    fn through_door(&mut self, side: u32) {
+        let c = self.center();
+        let layer = self.s.jake_layer;
+        let i = (0..self.s.entities.len())
+            .filter(|&i| {
+                let e = &self.s.entities[i];
+                (50..=52).contains(&e.kind) && e.layer == layer
+            })
+            .min_by_key(|&i| {
+                let d = self.s.entities[i].center();
+                (d.0 - c.0).abs() + (d.1 - c.1).abs()
+            })
+            .expect("porta");
+        let dx = self.s.entities[i].center().0;
+        let dir = if side == RIGHT { 1 } else { -1 };
+        self.go_x(dx - dir * 40);
+        for _ in 0..300 {
+            if self.s.entities[i].on {
+                break;
+            }
+            self.tick(0);
+        }
+        assert!(
+            self.s.entities[i].on,
+            "{}: a porta de x {dx} não abriu",
+            self.name
+        );
+        for _ in 0..40 {
+            if (self.center().0 - dx) * dir > 40 {
+                break;
+            }
+            self.tick(side);
+        }
+        assert!(
+            (self.center().0 - dx) * dir > 40,
+            "{}: não passou a porta de x {dx} (em {:?})",
+            self.name,
+            self.center()
+        );
+    }
+
     /// Pulo correndo para a direita (a sonda escolhe médio, longo ou estendido) até pousar.
     fn jump_right(&mut self) {
-        self.tick(RIGHT);
-        self.tick(RIGHT | JUMP);
+        self.jump_side(RIGHT);
+    }
+
+    /// Pulo correndo para `side` até pousar.
+    fn jump_side(&mut self, side: u32) {
+        self.tick(side);
+        self.tick(side | JUMP);
         for _ in 0..80 {
-            self.tick(RIGHT);
+            self.tick(side);
             if self.on_ground() && self.s.jake.as_ref().unwrap().body.vy == 0 {
                 break;
             }
@@ -386,5 +519,89 @@ fn t_j_005_can_be_won() {
     p.jump_right();
     assert_eq!(p.feet(), 244, "caiu no fogo: {:?}", p.center());
     p.fight(300, 300);
+    p.win();
+}
+
+/// Robôs de segurança (tipo 8) vivos abaixo do teto do corredor de cima da I_J_002 (os da
+/// sala de cima descem e atiram; lá em cima, atrás do teto, não se alcançam).
+fn robot(e: &Entity) -> bool {
+    e.kind == 8 && e.health > 0 && e.center().1 > 128
+}
+
+/// I_J_002 (seis robôs-objetivo): apanha a espingarda e os foguetes da sala do início
+/// (camada 2) e fica com a espingarda (o foguete de perto fere o próprio Jake); sobe à
+/// camada 1 pela porta de x ≈ 1270 e limpa o corredor para a esquerda, passando a porta que
+/// abre sozinha (x ≈ 1107); sobe a escada de x 682–721 ao corredor de cima, empurra a porta
+/// de x ≈ 792 até a vida grande e a armadura (os robôs da sala de cima descem e atiram),
+/// volta, pula o vão da escada da esquerda (x 278–362) até a chave 62 e torna; desce,
+/// passa à camada 0 pela porta de x ≈ 581, cruza a porta que abre sozinha (x ≈ 809),
+/// empurra a porta de célula (8, 2, 0) com a chave, abate o último robô e sai.
+#[test]
+fn i_j_002_can_be_won() {
+    let Some(s) = load("I_J_002.LEV") else {
+        return;
+    };
+    let mut p = Pilot {
+        s,
+        t: 0,
+        name: "I_J_002",
+    };
+    let jake = |p: &Pilot| p.s.jake.as_ref().unwrap().clone();
+    p.run(10, 0);
+    p.go_x(1290);
+    p.tick(3 << SELECT_SHIFT);
+    p.run(20, 0);
+    assert_eq!(jake(&p).inventory.weapon, 3, "espingarda");
+    p.zone_key(zone::LAYER_UP, UP);
+    p.run(10, 0);
+    assert_eq!(p.s.jake_layer, 1);
+    p.fight_with(400, 600, Fight::ROBOTS, robot);
+    p.hunt_x(1160, 300, robot);
+    p.through_door(LEFT);
+    p.hunt_x(450, 300, robot);
+    p.go_x(701);
+    p.climb_to(236);
+    p.leap(RIGHT);
+    assert_eq!(p.feet(), 244, "corredor de cima: {:?}", p.center());
+    p.go_x(960);
+    assert!(jake(&p).health.armor > 100, "armadura 77");
+    p.go_x(770);
+    p.jump_side(LEFT);
+    // se cair no vão da esquerda (uma luta, um tranco), sobe de novo pela escada dele
+    let climb_back = |p: &mut Pilot, side: u32| {
+        if p.feet() > 300 {
+            p.go_x(323);
+            p.climb_to(236);
+            p.leap(side);
+        }
+    };
+    p.hunt_x(392, 300, robot);
+    if p.feet() <= 300 {
+        p.jump_side(LEFT);
+    }
+    climb_back(&mut p, LEFT);
+    p.go_x(238);
+    assert_ne!(jake(&p).inventory.slots[13].1, 0, "chave 62");
+    p.go_x(250);
+    p.jump_side(RIGHT);
+    climb_back(&mut p, RIGHT);
+    p.hunt_x(701, 300, robot);
+    p.settle();
+    assert_eq!(p.feet(), 372, "desceu: {:?}", p.center());
+    p.zone_key(zone::LAYER_UP, UP);
+    p.run(10, 0);
+    assert_eq!(p.s.jake_layer, 0);
+    p.hunt_x(760, 300, robot);
+    p.through_door(RIGHT);
+    // o robô atrás da porta de célula fica para depois dela
+    p.hunt_x(1000, 150, robot);
+    p.go_x(1150);
+    p.hunt_x(1200, 300, robot);
+    assert!(
+        !p.s.entities
+            .iter()
+            .any(|e| e.alive && e.objective & 4 != 0 && e.health > 0),
+        "robôs-objetivo vivos"
+    );
     p.win();
 }
