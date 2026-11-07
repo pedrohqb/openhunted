@@ -5,6 +5,7 @@
 //! para os punhos, `furtividade.md` (registros `0x47d804…0x47d96c`).
 
 use super::Aim;
+use crate::character::Character;
 
 /// Números das armas no inventário (par = arma).
 pub const FISTS: usize = 1;
@@ -35,6 +36,10 @@ pub enum ShotKind {
     Grenade,
     /// Estrela ninja (27).
     Star,
+    /// Faca do Garathe (25, `0x40ba54`).
+    Knife,
+    /// Golpe do chicote do Garathe (108, `0x40cb6c`).
+    Whip,
 }
 
 impl ShotKind {
@@ -47,6 +52,8 @@ impl ShotKind {
             ShotKind::Shell => 23,
             ShotKind::Grenade => 26,
             ShotKind::Star => 27,
+            ShotKind::Knife => 25,
+            ShotKind::Whip => 108,
         }
     }
     pub fn is_casing(self) -> bool {
@@ -138,7 +145,31 @@ pub struct Weapon {
     pub spread: bool,
     /// Som do tiro tocado pelo quadro ao entrar no estado.
     pub sound: Option<u16>,
+    /// Golpe corpo a corpo por mira (cima, diag., frente, baixo): a linha do `DAMAGE.TBL`.
+    pub blow: Option<[Blow; 4]>,
+    /// A linha até a boca só é testada até a metade (chicote, `0x43bbe3`).
+    pub half_line: bool,
 }
+
+/// Linha do `DAMAGE.TBL` de um golpe: dano, derrubada (senão empurrão) e empurrão (vx pelo
+/// lado, vy).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Blow {
+    pub damage: i32,
+    pub knockdown: bool,
+    pub push: (i32, i32),
+}
+
+const fn blow(damage: i32, knockdown: bool, push: (i32, i32)) -> Blow {
+    Blow {
+        damage,
+        knockdown,
+        push,
+    }
+}
+
+/// Soco do Jake, linha `(1, 0, 0)`: 8 com empurrão (2, 0).
+const JAKE_PUNCH: Blow = blow(8, false, (2, 0));
 
 const P_BASE: Reg = shell(reg((1, 3), 6, 12, 22), (22, -4), 0, (-10, -10));
 const S_BASE: Reg = reg((1, 1), 8, 12, 112);
@@ -165,6 +196,8 @@ pub const FISTS_W: Weapon = Weapon {
     ],
     spread: false,
     sound: None,
+    blow: Some([JAKE_PUNCH; 4]),
+    half_line: false,
 };
 
 pub const PISTOL_W: Weapon = Weapon {
@@ -181,6 +214,8 @@ pub const PISTOL_W: Weapon = Weapon {
     ],
     spread: true,
     sound: Some(3040),
+    blow: None,
+    half_line: false,
 };
 
 pub const SHOTGUN_W: Weapon = Weapon {
@@ -219,6 +254,8 @@ pub const SHOTGUN_W: Weapon = Weapon {
     ],
     spread: false,
     sound: Some(3045),
+    blow: None,
+    half_line: false,
 };
 
 /// Foguetes: "cima" usa o estado diagonal 67 (não sobem na vertical).
@@ -236,6 +273,8 @@ pub const ROCKETS_W: Weapon = Weapon {
     ],
     spread: false,
     sound: Some(3035),
+    blow: None,
+    half_line: false,
 };
 
 pub const STARS_W: Weapon = Weapon {
@@ -252,6 +291,8 @@ pub const STARS_W: Weapon = Weapon {
     ],
     spread: false,
     sound: Some(3110),
+    blow: None,
+    half_line: false,
 };
 
 /// Granadas. Ruling: o 3 do lançamento para cima leva o sinal do lado, como os demais.
@@ -269,6 +310,8 @@ pub const GRENADES_W: Weapon = Weapon {
     ],
     spread: false,
     sound: None,
+    blow: None,
+    half_line: false,
 };
 
 /// Descritor da arma `w` (0 e as desconhecidas → punhos, como em `0x0043ab05`).
@@ -280,6 +323,188 @@ pub fn weapon(w: usize) -> &'static Weapon {
         STARS => &STARS_W,
         GRENADES => &GRENADES_W,
         _ => &FISTS_W,
+    }
+}
+
+/// Armas do Garathe (pares do inventário, `docs/re/garathe.md`).
+pub const CLAWS: usize = 1;
+pub const CLUB: usize = 2;
+pub const WHIP: usize = 3;
+pub const KNIVES: usize = 4;
+pub const G_GRENADES: usize = 5;
+pub const G_STARS: usize = 6;
+
+const fn melee(hit: (u32, u32), again: u32, reeval: u32) -> Reg {
+    punch(hit, again, reeval)
+}
+
+/// Garras (`0x47e994`): 106/107 cima e diagonal, 104/105 frente, 108/109 baixo; golpe 3..4,
+/// `+0x14/+0x18` 8/8. Linha `(2, 0, 0)`: 15 com empurrão (2, 0).
+pub const CLAWS_W: Weapon = Weapon {
+    ready: 100,
+    holster: 101,
+    step: 1,
+    shot: None,
+    casing: None,
+    states: [
+        [(106, melee((3, 4), 8, 8)), (107, melee((3, 4), 8, 8))],
+        [(106, melee((3, 4), 8, 8)), (107, melee((3, 4), 8, 8))],
+        [(104, melee((3, 4), 8, 8)), (105, melee((3, 4), 8, 8))],
+        [(108, melee((3, 4), 8, 8)), (109, melee((3, 4), 8, 8))],
+    ],
+    spread: false,
+    sound: None,
+    blow: Some([blow(15, false, (2, 0)); 4]),
+    half_line: false,
+};
+
+/// Clava (`0x47ea14`): 116 cima e diagonal, 114 frente, 118 baixo; golpe 5..7, 11/12.
+/// Variantes 1/2/3: 15 com derrubada (20, 30) / (20, 10) / (20, −10).
+pub const CLUB_W: Weapon = Weapon {
+    ready: 110,
+    holster: 111,
+    step: 1,
+    shot: None,
+    casing: None,
+    states: [
+        pair(116, melee((5, 7), 11, 12)),
+        pair(116, melee((5, 7), 11, 12)),
+        pair(114, melee((5, 7), 11, 12)),
+        pair(118, melee((5, 7), 11, 12)),
+    ],
+    spread: false,
+    sound: None,
+    blow: Some([
+        blow(15, true, (20, 30)),
+        blow(15, true, (20, 30)),
+        blow(15, true, (20, 10)),
+        blow(15, true, (20, -10)),
+    ]),
+    half_line: false,
+};
+
+const fn whip_reg(dx: (i32, i32), dy: i32, v: (i32, i32)) -> Reg {
+    Reg {
+        hit: (8, 10),
+        ..gun(reg((9, 9), 24, 24, 154), dx, dy, v)
+    }
+}
+
+/// Chicote (`0x47ea94`): 162 cima, 160 diagonal, 159 frente, 161 baixo; golpe 8..10, disparo
+/// do projétil 108 em 9, 24/24, recuperação 154. Variantes 4–7: 18 com derrubada.
+pub const WHIP_W: Weapon = Weapon {
+    ready: 152,
+    holster: 153,
+    step: 2,
+    shot: Some(ShotKind::Whip),
+    casing: None,
+    states: [
+        pair(162, whip_reg((13, 21), -75, (0, -20))),
+        pair(160, whip_reg((-60, 90), -55, (20, -20))),
+        pair(159, whip_reg((-75, 100), 20, (20, 0))),
+        pair(161, whip_reg((-65, 90), 90, (20, 20))),
+    ],
+    spread: false,
+    sound: None,
+    blow: Some([
+        blow(18, true, (20, 20)),
+        blow(18, true, (20, 20)),
+        blow(18, true, (20, 10)),
+        blow(18, true, (20, -20)),
+    ]),
+    half_line: true,
+};
+
+const fn throw(recover: u16) -> Reg {
+    reg((8, 8), 12, 20, recover)
+}
+
+/// Facas (`0x47eb14`): 98 cima, 96 diagonal, 95 frente, 97 baixo; disparo em 8, 12/20,
+/// recuperação 85; projétil 25.
+pub const KNIVES_W: Weapon = Weapon {
+    ready: 81,
+    holster: 82,
+    step: 2,
+    shot: Some(ShotKind::Knife),
+    casing: None,
+    states: [
+        pair(98, gun(throw(85), (13, 19), -35, (0, -20))),
+        pair(96, gun(throw(85), (-35, 55), -23, (20, -20))),
+        pair(95, gun(throw(85), (-35, 65), 17, (20, 0))),
+        pair(97, gun(throw(85), (-20, 50), 45, (20, 20))),
+    ],
+    spread: false,
+    sound: None,
+    blow: None,
+    half_line: false,
+};
+
+/// Granadas do Garathe (`0x47ec14`): 150, 148, 147, 149; recuperação 142; cima (3, −20).
+pub const G_GRENADES_W: Weapon = Weapon {
+    ready: 140,
+    holster: 141,
+    step: 2,
+    shot: Some(ShotKind::Grenade),
+    casing: None,
+    states: [
+        pair(150, gun(throw(142), (13, 19), -35, (3, -20))),
+        pair(148, gun(throw(142), (-35, 55), -23, (20, -20))),
+        pair(147, gun(throw(142), (-35, 65), 2, (20, 0))),
+        pair(149, gun(throw(142), (-20, 50), 45, (20, 20))),
+    ],
+    spread: false,
+    sound: None,
+    blow: None,
+    half_line: false,
+};
+
+/// Estrelas do Garathe (`0x47eb94`): 138, 136, 135, 137; recuperação 130; cima 20/24.
+pub const G_STARS_W: Weapon = Weapon {
+    ready: 128,
+    holster: 129,
+    step: 2,
+    shot: Some(ShotKind::Star),
+    casing: None,
+    states: [
+        pair(138, gun(reg((8, 8), 20, 24, 130), (13, 19), -35, (0, -20))),
+        pair(136, gun(throw(130), (-35, 55), -23, (20, -20))),
+        pair(135, gun(throw(130), (-35, 65), 2, (20, 0))),
+        pair(137, gun(throw(130), (-20, 50), 45, (20, 20))),
+    ],
+    spread: false,
+    sound: None,
+    blow: None,
+    half_line: false,
+};
+
+/// Descritor da arma `w` do personagem (`0x0043ab05`, ramo do Garathe em `0x43ab82`).
+pub fn weapon_of(ch: Character, w: usize) -> &'static Weapon {
+    match ch {
+        Character::Jake => weapon(w),
+        Character::Garathe => match w {
+            CLUB => &CLUB_W,
+            WHIP => &WHIP_W,
+            KNIVES => &KNIVES_W,
+            G_GRENADES => &G_GRENADES_W,
+            G_STARS => &G_STARS_W,
+            _ => &CLAWS_W,
+        },
+    }
+}
+
+/// Nome da arma do personagem para o HUD de texto.
+pub fn name_of(ch: Character, w: usize) -> &'static str {
+    match ch {
+        Character::Jake => name(w),
+        Character::Garathe => match w {
+            CLAWS => "GARRAS",
+            CLUB => "CLAVA",
+            WHIP => "CHICOTE",
+            KNIVES => "FACAS",
+            G_GRENADES => "GRANADAS",
+            G_STARS => "ESTRELAS",
+            _ => "-",
+        },
     }
 }
 
@@ -306,10 +531,16 @@ pub fn name(w: usize) -> &'static str {
     }
 }
 
-/// Todos os rótulos dos estados de arma (para conferir contra o `JAKE.ANM`).
+/// Todos os rótulos dos estados de arma do Jake (para conferir contra o `JAKE.ANM`).
 pub fn labels() -> Vec<u16> {
+    labels_of(Character::Jake)
+}
+
+/// Rótulos dos estados de arma do personagem.
+pub fn labels_of(ch: Character) -> Vec<u16> {
     let mut v = Vec::new();
-    for w in [FISTS_W, PISTOL_W, SHOTGUN_W, ROCKETS_W, STARS_W, GRENADES_W] {
+    for w in 1..=6 {
+        let w = weapon_of(ch, w);
         v.extend([w.ready, w.holster]);
         for p in w.states {
             for (l, r) in p {

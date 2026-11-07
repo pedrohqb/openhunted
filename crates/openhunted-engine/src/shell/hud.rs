@@ -10,11 +10,7 @@ pub const BAR_H: i32 = 75;
 pub const VIEW_H: i32 = 480 - BAR_H;
 
 /// Personagem (escolhe a tabela de armas).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Character {
-    Jake,
-    Garathe,
-}
+pub use crate::character::Character;
 
 /// O que a barra mostra.
 #[derive(Debug, Clone, PartialEq, Eq)]

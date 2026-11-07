@@ -4,6 +4,7 @@
 //! agachar, barra e o especial (`docs/re/jake-movimentos.md`, `jake-escalada.md`,
 //! `escada-camadas.md`, `furtividade.md`). Os estados novos estão em `jake/moves.rs`.
 
+pub mod garathe;
 mod moves;
 pub mod weapons;
 
@@ -11,21 +12,14 @@ use std::collections::HashMap;
 
 pub use moves::{BAR_BOX, CRAWL_BOX, Env, Skel, SpecialBlast, SpecialEffect, Zone, zone};
 
+pub use crate::character::Character;
+use crate::character::Profile;
 use crate::damage::{Health, Pending, apply};
 use crate::input::{DOWN, JUMP, LEFT, NEXT_WEAPON, PREV_WEAPON, PUNCH, RIGHT, SHOOT, UP};
 use crate::physics::{Body, Rect, SUB, World, step};
 pub use weapons::{FISTS, GRENADES, PISTOL, ROCKETS, SHOTGUN, STARS, ShotKind, weapon};
 
-/// Correr: 12 px/tique (`0x00478928`).
-const RUN: i32 = 12 * SUB;
-/// Velocidade de lançamento dos pulos (vx, vy) em px/tique (`0x0047890c`…).
-const MEDIUM: (i32, i32) = (10, -11);
-const LONG: (i32, i32) = (10, -15);
-const EXTENDED: (i32, i32) = (17, -15);
-/// Distâncias de pouso sondadas para escolher o pulo (`0x00425144`).
-const PROBE_MEDIUM: i32 = 110;
-const PROBE_LONG: i32 = 150;
-const PROBE_EXTENDED: i32 = 255;
+// Corrida, pulos e sondas: no perfil do personagem (`crate::character`).
 /// Queda: descendo a 5 px/tique ou mais sem chão (`0x0042416f`).
 const FALL_SPEED: i32 = 5 * SUB;
 
@@ -132,7 +126,14 @@ pub enum State {
     /// Levado por um teletransporte (`0x4136ef`): invisível, sem entrada nem dano; tiques
     /// desde a partida.
     Teleporting(u32),
+    /// Só o Garathe: levantar depois de derrubado para trás ou do tranco (35 `MNBLGTUP`).
+    Rise,
+    /// Só o Garathe: tranco (59, rótulo 63; desliza pelo esqueleto com k = 2).
+    Jolted,
 }
+
+/// O jogador (o Jake ou o Garathe, pelo perfil).
+pub type Player = Jake;
 
 /// Viagem do teletransporte: some, muda de lugar na metade e reaparece no fim.
 pub const TELEPORT_TICKS: u32 = 42;
@@ -186,6 +187,8 @@ impl Shot {
 pub struct Inventory {
     pub slots: [(i32, i32); 30],
     pub weapon: usize,
+    /// Dono: escolhe a lista das armas e a coleta.
+    pub character: Character,
 }
 /// Som "troca de arma / sem munição".
 pub const SOUND_NO_AMMO: u16 = 3090;
@@ -203,9 +206,23 @@ impl Inventory {
         let mut inv = Self {
             slots,
             weapon: FISTS,
+            character: Character::Jake,
         };
         inv.weapon = inv.best();
         inv
+    }
+
+    /// De `points` do objeto do personagem `ch` (o Garathe também força o par 1 a (1, 20),
+    /// `0x004279b3`).
+    pub fn for_character(p: &[(i32, i32)], ch: Character) -> Self {
+        let mut inv = Self::from_points(p);
+        inv.character = ch;
+        inv.weapon = inv.best();
+        inv
+    }
+
+    fn order(&self) -> &'static [usize; 6] {
+        &self.character.profile().order
     }
 
     pub fn pistol_ammo(&self) -> i32 {
@@ -227,7 +244,7 @@ impl Inventory {
 
     /// A melhor disponível (modo 1 de `0x43a8cc`); nada disponível → punhos.
     pub fn best(&self) -> usize {
-        weapons::ORDER
+        self.order()
             .iter()
             .rev()
             .copied()
@@ -237,15 +254,13 @@ impl Inventory {
 
     /// A disponível seguinte (`next`) ou anterior à corrente, dando a volta (modos 8 e 4).
     pub fn cycle(&self, next: bool) -> usize {
-        let n = weapons::ORDER.len();
-        let i = weapons::ORDER
-            .iter()
-            .position(|&w| w == self.weapon)
-            .unwrap_or(0);
+        let order = self.order();
+        let n = order.len();
+        let i = order.iter().position(|&w| w == self.weapon).unwrap_or(0);
         (1..=n)
             .map(|k| {
                 let j = if next { i + k } else { i + n * 2 - k };
-                weapons::ORDER[j % n]
+                order[j % n]
             })
             .find(|&w| self.available(w))
             .unwrap_or(self.weapon)
@@ -254,7 +269,7 @@ impl Inventory {
     /// Ganhou a arma `w` (`0x43af6c`): se ela fica depois da melhor disponível na lista,
     /// vira a corrente.
     pub fn gained(&mut self, w: usize) {
-        let pos = |x: usize| weapons::ORDER.iter().position(|&o| o == x);
+        let pos = |x: usize| self.order().iter().position(|&o| o == x);
         if pos(w) > pos(self.best()) {
             self.weapon = w;
         }
@@ -329,7 +344,7 @@ const EXIT_MIN_SCALE: i32 = 30;
 
 /// Rótulo do `JAKE.ANM` e campo c (avança um quadro a cada c+1 tiques) de cada estado
 /// (tabela `0x473300`, colunas `+0x10` e `+0x18`).
-fn anim_of(s: State) -> (u16, u32) {
+fn jake_anim(s: State) -> (u16, u32) {
     match s {
         State::Idle => (1, 1),
         State::Run => (10, 0),
@@ -382,11 +397,13 @@ fn anim_of(s: State) -> (u16, u32) {
         State::BarPull | State::BarDown => (105, 0),
         State::BarUp => (104, 0),
         State::Teleporting(_) => (1, 1),
+        State::Rise => (78, 0),
+        State::Jolted => (168, 0),
     }
 }
 
 /// Estados que tocam o rótulo de trás para a frente (`0x00423894`).
-fn reversed(s: State) -> bool {
+fn jake_reversed(s: State) -> bool {
     matches!(
         s,
         State::LetGo | State::StandUp | State::Unhide | State::BarDown
@@ -474,6 +491,8 @@ pub struct Jake {
     pub door_push: bool,
     /// Tiques desde a criação (o veneno age em `tique % 20 = 0`).
     clock: u32,
+    /// Quem é (perfil de movimentos, rótulos e armas).
+    character: Character,
 }
 
 impl Jake {
@@ -513,11 +532,64 @@ impl Jake {
             poison: 0,
             door_push: false,
             clock: 0,
+            character: Character::Jake,
         }
     }
 
+    /// Passa a ser o personagem `ch` (perfil, rótulos e armas; o inventário segue).
+    pub fn with_character(mut self, ch: Character) -> Self {
+        self.character = ch;
+        self.inventory.character = ch;
+        if let Some(sk) = self.skel.as_mut() {
+            sk.draw = ch.profile().draw;
+        }
+        self.inventory.weapon = self.inventory.best();
+        self
+    }
+
+    pub fn character(&self) -> Character {
+        self.character
+    }
+
+    pub(crate) fn profile(&self) -> &'static Profile {
+        self.character.profile()
+    }
+
+    /// Rótulo e atraso do estado `s` para este personagem.
+    fn anim_of(&self, s: State) -> (u16, u32) {
+        match (self.character, s) {
+            (Character::Jake, _) => jake_anim(s),
+            (Character::Garathe, State::KnockedDown(right)) => {
+                (garathe::knocked_label(right, self.facing_right), 1)
+            }
+            (Character::Garathe, _) => garathe::anim(s),
+        }
+    }
+
+    /// O estado `s` toca o rótulo de trás para a frente.
+    fn reversed_state(&self, s: State) -> bool {
+        match self.character {
+            Character::Jake => jake_reversed(s),
+            Character::Garathe => garathe::reversed(s),
+        }
+    }
+
+    /// Estado de arte espelhada.
+    fn mirrored(&self, s: State) -> bool {
+        match self.character {
+            Character::Jake => moves::mirrored_art(s),
+            Character::Garathe => garathe::mirrored(s),
+        }
+    }
+
+    /// Descritor da arma `w` deste personagem.
+    pub fn weapon(&self, w: usize) -> &'static weapons::Weapon {
+        weapons::weapon_of(self.character, w)
+    }
+
     /// Usa o esqueleto (deslocamento e velocidades dos estados que o seguem).
-    pub fn with_skeleton(mut self, skel: Skel) -> Self {
+    pub fn with_skeleton(mut self, mut skel: Skel) -> Self {
+        skel.draw = self.profile().draw;
         self.skel = Some(skel);
         self
     }
@@ -555,6 +627,7 @@ impl Jake {
 
     pub fn with_inventory(mut self, inv: Inventory) -> Self {
         self.inventory = inv;
+        self.inventory.character = self.character;
         self
     }
 
@@ -583,7 +656,7 @@ impl Jake {
         }
         let aim = Aim::from_input(input);
         if w != FISTS {
-            let r = weapon(w).states[weapons::aim_slot(aim)][0].1;
+            let r = self.weapon(w).states[weapons::aim_slot(aim)][0].1;
             let dx = if self.facing_right { r.dx.1 } else { r.dx.0 };
             if !self.muzzle_clear(world, (self.body.x + dx, self.body.y + r.dy)) {
                 w = FISTS;
@@ -652,7 +725,7 @@ impl Jake {
     /// Som do tiro: no primeiro tique de cada estado de tiro da arma que tem som.
     pub fn fire_sound(&self) -> Option<u16> {
         match self.state {
-            State::Fire { w, .. } if self.label_changed => weapon(w as usize).sound,
+            State::Fire { w, .. } if self.label_changed => self.weapon(w as usize).sound,
             _ => None,
         }
     }
@@ -677,7 +750,7 @@ impl Jake {
     fn tick_fire(&mut self, input: u32, world: &World, st: (Aim, u32, u8, bool)) {
         let (aim, t, w, alt) = st;
         let pressed = |bit: u32| input & bit != 0;
-        let wp = weapon(w as usize);
+        let wp = self.weapon(w as usize);
         let r = wp.states[weapons::aim_slot(aim)][usize::from(alt)].1;
         let t = t + wp.step;
         self.state = State::Fire { aim, t, w, alt };
@@ -860,8 +933,8 @@ impl Jake {
     pub fn label(&self) -> u16 {
         match self.state {
             State::Dead => self.death_label,
-            State::Idle if self.switch_pose > 0 => weapon(self.inventory.weapon).ready,
-            _ => anim_of(self.state).0,
+            State::Idle if self.switch_pose > 0 => self.weapon(self.inventory.weapon).ready,
+            _ => self.anim_of(self.state).0,
         }
     }
     pub fn facing_right(&self) -> bool {
@@ -881,8 +954,8 @@ impl Jake {
             self.state = s;
             self.ticks = 0;
             self.label_changed = true;
-            self.frame = if reversed(s) {
-                self.len_of(anim_of(s).0) - 1
+            self.frame = if self.reversed_state(s) {
+                self.len_of(self.anim_of(s).0) - 1
             } else {
                 0
             };
@@ -893,7 +966,7 @@ impl Jake {
     fn set_keep_frame(&mut self, s: State) {
         let f = self.frame;
         self.set(s);
-        self.frame = f.min(self.len_of(anim_of(s).0) - 1);
+        self.frame = f.min(self.len_of(self.anim_of(s).0) - 1);
     }
 
     /// Número de quadros de um rótulo (ao menos 1).
@@ -904,11 +977,11 @@ impl Jake {
     /// A animação do estado chegou ao fim e avançaria neste tique (o modo "parar no fim" de
     /// `0x00406c71` devolve 1).
     fn anim_done(&self) -> bool {
-        let (label, c) = anim_of(self.state);
+        let (label, c) = self.anim_of(self.state);
         if self.label_changed || self.ticks % (c + 1) != 0 {
             return false;
         }
-        if reversed(self.state) {
+        if self.reversed_state(self.state) {
             self.frame == 0
         } else {
             self.frame + 1 >= self.len_of(label)
@@ -918,7 +991,7 @@ impl Jake {
     /// Avança o quadro conforme o modo pedido neste tique (antes da física, como o original,
     /// que anima e depois pede a velocidade do quadro).
     fn animate(&mut self) {
-        let (label, c) = anim_of(self.state);
+        let (label, c) = self.anim_of(self.state);
         let n = self.len_of(label);
         self.advance = false;
         self.frame = self.frame.min(n - 1);
@@ -927,7 +1000,7 @@ impl Jake {
         }
         let before = self.frame;
         let mode = match self.anim_mode {
-            AnimMode::Auto if reversed(self.state) => AnimMode::Reverse,
+            AnimMode::Auto if self.reversed_state(self.state) => AnimMode::Reverse,
             m => m,
         };
         self.frame = match mode {
@@ -945,9 +1018,14 @@ impl Jake {
         let (Some(req), Some(sk)) = (self.ske_req, self.skel.as_ref()) else {
             return;
         };
-        let back = reversed(self.state) || self.anim_mode == AnimMode::Reverse;
-        let (mut dx, dy) = sk.delta(anim_of(self.state).0, self.frame, back, self.facing_right);
-        if moves::mirrored_art(self.state) {
+        let back = self.reversed_state(self.state) || self.anim_mode == AnimMode::Reverse;
+        let (mut dx, dy) = sk.delta(
+            self.anim_of(self.state).0,
+            self.frame,
+            back,
+            self.facing_right,
+        );
+        if self.mirrored(self.state) {
             dx = -dx;
         }
         if req.x {
@@ -972,7 +1050,7 @@ impl Jake {
             _ => (self.label(), self.frame),
         };
         let (mut ox, oy) = sk.offset(label, frame, self.facing_right);
-        if moves::mirrored_art(self.state) {
+        if self.mirrored(self.state) {
             ox = -ox;
         }
         (-ox, -oy)
@@ -981,7 +1059,7 @@ impl Jake {
     /// O sprite olha para a direita (a arte olha para a esquerda; os estados de arte
     /// espelhada, como o 149, olham para o outro lado: `0x00422fce`).
     pub fn sprite_mirrored(&self) -> bool {
-        self.facing_right != moves::mirrored_art(self.state)
+        self.facing_right != self.mirrored(self.state)
     }
 
     fn dir(&self) -> i32 {
@@ -1014,11 +1092,12 @@ impl Jake {
                 8,
             )
         };
-        if ahead(PROBE_MEDIUM) {
+        let p = self.profile();
+        if ahead(p.probe_medium) {
             JumpKind::Medium
-        } else if ahead(PROBE_LONG) {
+        } else if ahead(p.probe_long) {
             JumpKind::Long
-        } else if ahead(PROBE_EXTENDED) {
+        } else if p.probe_extended.is_some_and(ahead) {
             JumpKind::Extended
         } else {
             JumpKind::Medium
@@ -1027,9 +1106,9 @@ impl Jake {
 
     fn launch(&mut self, kind: JumpKind) {
         let (vx, vy) = match kind {
-            JumpKind::Medium => MEDIUM,
-            JumpKind::Long => LONG,
-            JumpKind::Extended => EXTENDED,
+            JumpKind::Medium => self.profile().medium,
+            JumpKind::Long => self.profile().long,
+            JumpKind::Extended => self.profile().extended.unwrap_or(self.profile().long),
         };
         self.body.vx = vx * SUB * self.dir();
         self.body.vy = vy * SUB;
@@ -1114,7 +1193,8 @@ impl Jake {
                 | State::Hide
                 | State::Hidden
                 | State::Unhide
-        ) || (self.state == State::Crawl && self.free_above(world, 30));
+        ) || (self.state == State::Crawl
+            && self.free_above(world, self.profile().headroom));
         let fired = !matches!(self.state, State::Fire { .. })
             && can_fire
             && shooting

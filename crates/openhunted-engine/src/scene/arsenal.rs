@@ -103,7 +103,7 @@ impl Scene {
                     clinked: false,
                 }),
             ),
-            ShotKind::Bullet | ShotKind::Casing => return None,
+            ShotKind::Bullet | ShotKind::Casing | ShotKind::Knife | ShotKind::Whip => return None,
         };
         self.projectile_entity(
             super::Projectile {
