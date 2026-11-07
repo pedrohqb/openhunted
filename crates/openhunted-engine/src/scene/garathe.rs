@@ -6,7 +6,6 @@ use super::Scene;
 use crate::behaviour::{self, Event};
 use crate::character::Character;
 use crate::damage::Pending;
-use crate::entity::Behaviour;
 use crate::jake::{JumpKind, State, garathe};
 use crate::sound::{Cue, PRIORITY_FRAME};
 
@@ -47,12 +46,9 @@ impl Scene {
                 continue;
             }
             self.body_checked.push(i);
-            let mine_alive = matches!(e.behaviour, Behaviour::Mine(_)) && e.health > 0;
-            if (behaviour::enemy::hurt(e, &p, true) || behaviour::interact::hurt(e, &p))
-                && mine_alive
-                && e.health <= 0
-            {
-                self.kills += 1;
+            // as mortes contam pela cena (`enemy::kills`)
+            if !behaviour::enemy::hurt(e, &p, true) {
+                behaviour::interact::hurt(e, &p);
             }
         }
     }
