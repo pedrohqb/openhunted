@@ -34,8 +34,8 @@ Nos dados: variantes 0/1/2/3/4 em 11/20/20/13/1 objetos; vida 35 em 50 deles.
 
 ## Atualização (`0x0041de45`, por tique) [confirmado]
 
-1. Morto (`+0x26c`) → nada. **Dano** (`0x41dfaf`): dificuldade (fácil ×2, difícil ÷2,
-   mínimo 1), vezes `+0x34`/100, subtrai da vida. Vida ≤ 0 → `0x43d629(gerador, nulo, 0)` e
+1. Morto (`+0x26c`) → nada. **Dano** (`0x41dfaf`, só com dano ≠ 0): dificuldade (fácil ×2,
+   difícil ÷2, só o negativo vira 1), vezes `+0x34`/100, subtrai da vida. Vida ≤ 0 → `0x43d629(gerador, nulo, 0)` e
    destrói (não liga `0x40`; o objetivo "destruir" olha a vida).
 2. Zera velocidades; procura/valida alvo (`0x41e073`); esquece vagas cujas minas morreram
    (`0x41e62d`).

@@ -407,10 +407,14 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         }
     }
     st.fire_wait -= 1;
-    // 3. dano (`0x417ae0`): imune a fogo; dificuldade, depois metade
+    // 3. dano (`0x417ae0`): 0 não faz nada (nem o tranco); imune a fogo; dificuldade (só o
+    // negativo vira 1), depois metade
     let w = st.wound.take();
-    if !w.is_empty() && !w.pending.fire && st.state != DIE {
-        e.health -= ctx.difficulty.damage(w.pending.amount) * 50 / 100;
+    if let Some(d) = ctx.difficulty.hit(w.pending.amount)
+        && !w.pending.fire
+        && st.state != DIE
+    {
+        e.health -= d * 50 / 100;
         if e.health <= 0 {
             st.set(DIE);
         } else if !matches!(st.state, STAGGER | TURN | GROUND_FIRE) {

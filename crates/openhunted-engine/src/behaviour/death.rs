@@ -282,10 +282,12 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     if st.state == RISE {
         st.vy = st.vy.max(-10);
     }
-    // dano (`0x416979`): dificuldade, mínimo 1
+    // dano (`0x416979`): 0 não faz nada; dificuldade, só o negativo vira 1
     let w = st.wound.take();
-    if !w.is_empty() && st.state != DIE {
-        e.health -= ctx.difficulty.damage(w.pending.amount).max(1);
+    if let Some(d) = ctx.difficulty.hit(w.pending.amount)
+        && st.state != DIE
+    {
+        e.health -= d;
         if e.health <= 0 {
             st.set(DIE);
             e.on = true;
@@ -482,6 +484,39 @@ mod tests {
     }
 
     #[test]
+    fn zero_damage_does_nothing_and_hard_halves_one_to_zero() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(3000, 0);
+        let mut c = ctx(&j, &w, &on);
+        c.difficulty = crate::Difficulty::Hard;
+        let mut d = death(100, 7);
+        let Behaviour::Death(s) = &mut d.behaviour else {
+            panic!()
+        };
+        s.active = true;
+        s.set(RISE);
+        d.flags &= !0x2;
+        d.health = 1;
+        // borda de explosão (`explosion::area_effect`): dano 0, natureza explosão
+        let rim = Pending {
+            amount: 0,
+            explosion: true,
+            ..Default::default()
+        };
+        enemy::hurt(&mut d, &rim, false);
+        tick(&mut d, &mut c, &mut Out::default());
+        assert_eq!(d.health, 1, "dano 0 não fere (`0x416979`)");
+        let one = Pending {
+            amount: 1,
+            ..Default::default()
+        };
+        enemy::hurt(&mut d, &one, true);
+        tick(&mut d, &mut c, &mut Out::default());
+        assert_eq!(d.health, 1, "difícil: 1 / 2 = 0, sem mínimo");
+        assert_ne!(st(&d).state, DIE);
+    }
+
+    #[test]
     fn hidden_death_has_no_collision_and_stays_present() {
         let on = |_: i32| None;
         let (j, w) = ctx_with_jake(3000, 0);
@@ -493,5 +528,21 @@ mod tests {
         }
         assert!(d.alive && st(&d).hidden() && d.flags & 0x2 != 0);
         assert!(!d.visible());
+        // oculta (`0x2`), não recolhe dano de explosão
+        let hp = d.health;
+        let b = crate::behaviour::Blast {
+            center: d.center(),
+            layer: d.layer,
+            radius: 60,
+            push: 10,
+            damage: 30,
+        };
+        crate::behaviour::interact::blast(&b, &mut d);
+        assert!(
+            st(&d).wound.is_empty(),
+            "oculta, não guarda o dano para quando aparecer"
+        );
+        tick(&mut d, &mut c, &mut Out::default());
+        assert_eq!(d.health, hp);
     }
 }

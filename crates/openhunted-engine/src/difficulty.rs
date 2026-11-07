@@ -30,16 +30,26 @@ impl Difficulty {
         }
     }
 
-    /// Dano recebido por um inimigo que usa a dificuldade (Morte `0x416979`, Camaleão
-    /// `0x419fac`, Bruiser `0x417ae0`, robô `0x41c712`, gerador `0x41dfaf`, Anticorpo/Manta
-    /// `0x42231b`): fácil ×2, difícil ÷2. O mínimo (1 na Morte, no Camaleão, nos voadores e
-    /// no gerador; só o negativo no robô) fica com quem chama.
+    /// Escala do dano recebido pelos inimigos que usam a dificuldade: fácil ×2, difícil ÷2
+    /// (sem mínimo; ver [`Difficulty::hit`]).
     pub fn damage(self, d: i32) -> i32 {
         match self {
             Difficulty::Easy => d.saturating_mul(2),
             Difficulty::Normal => d,
             Difficulty::Hard => d / 2,
         }
+    }
+
+    /// Dano que um inimigo leva nos seis pontos que leem a dificuldade (Morte `0x416979`,
+    /// Camaleão `0x41a002`, gerador `0x41dfaf`, Manta `0x42231b`, Bruiser `0x417b31`, robô
+    /// `0x41ca37`): dano 0 não faz nada (`None`); escalado, **só um negativo vira 1**
+    /// (`test ecx,ecx; jge`), logo no difícil um dano de 1 vira 0. O Anticorpo (`0x412189`)
+    /// não lê a dificuldade.
+    pub fn hit(self, d: i32) -> Option<i32> {
+        (d != 0).then(|| {
+            let v = self.damage(d);
+            if v < 0 { 1 } else { v }
+        })
     }
 
     /// Munição apanhada (`0x40a36d`): ×1,5 / ×1 / ×0,75 (no mínimo 1 se havia alguma).
@@ -82,6 +92,21 @@ mod tests {
         assert_eq!(Difficulty::from_index(7), Difficulty::Normal);
         assert_eq!(Difficulty::from_index(0), Difficulty::Easy);
         assert_eq!(Difficulty::default().index(), 1);
+    }
+
+    #[test]
+    fn hit_skips_zero_and_only_a_negative_becomes_one() {
+        for d in [Difficulty::Easy, Difficulty::Normal, Difficulty::Hard] {
+            assert_eq!(d.hit(0), None, "dano 0 não faz nada");
+            assert_eq!(d.hit(-3), Some(1), "negativo → 1");
+        }
+        assert_eq!(
+            Difficulty::Hard.hit(1),
+            Some(0),
+            "difícil: 1 / 2 = 0, sem mínimo"
+        );
+        assert_eq!(Difficulty::Easy.hit(1), Some(2));
+        assert_eq!(Difficulty::Normal.hit(5), Some(5));
     }
 
     #[test]

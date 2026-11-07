@@ -99,7 +99,7 @@ impl World {
 
     /// Algum sólido que `start` ainda não intersecta intersecta `r`? (Um corpo que nasceu ou
     /// ficou sobreposto a um sólido pode sair dele em vez de ficar preso.)
-    fn blocked_from(&self, start: &Rect, r: &Rect) -> bool {
+    pub fn blocked_from(&self, start: &Rect, r: &Rect) -> bool {
         self.solids
             .iter()
             .any(|s| s.overlaps(r) && !s.overlaps(start))

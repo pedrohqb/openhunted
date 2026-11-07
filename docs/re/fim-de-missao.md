@@ -60,7 +60,9 @@ mortos (`0x488e7c`, `0x488e80`…). Para os tipos **3, 4, 7, 8, 10, 11, 89, 102,
 (`0x497300 = 1`), `+0x1b0 = 1`; com crédito e vida `+0x258 ≤ 0`, mortos do jogador `+= 1`.
 No solo, portanto, **toda morte conta**, explosões, contato e cadeia incluídos. Objetos com
 `0x10` são liberados ao serem destruídos (`0x435b63` → `0x433e2c`) e saem das listas: as
-minas dos geradores (que ligam `0x10`) mortas não entram nem nos mortos nem no total. Tipos
+minas dos geradores, os clones do Camaleão e as formigas dos formigueiros (que ligam `0x10`)
+destruídos não entram nem nos mortos nem no total; **vivos no fim, entram no total** (e o
+percentual de mortos cai). Tipos
 1–2 (jogadores) vão a `0x43d140`; 9 e 80–85 alimentam outros contadores (`0x49733c`).
 
 | Controle | Retângulo | Valor |

@@ -215,10 +215,11 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let Behaviour::MineGenerator(st) = &mut e.behaviour else {
         return;
     };
-    // dano (`0x41dfaf`): dificuldade, mínimo 1, vezes o % da variante
+    // dano (`0x41dfaf`): 0 não faz nada; dificuldade, só o negativo vira 1; vezes o % da
+    // variante
     let w = st.wound.take();
-    if !w.is_empty() {
-        e.health -= ctx.difficulty.damage(w.pending.amount).max(1) * st.variant().applied / 100;
+    if let Some(d) = ctx.difficulty.hit(w.pending.amount) {
+        e.health -= d * st.variant().applied / 100;
         if e.health <= 0 {
             out.blasts.push(Blast {
                 center,
@@ -361,6 +362,29 @@ mod tests {
         assert!(enemy::killed(&g));
         assert_eq!(out.blasts.len(), 1);
         assert_eq!(out.blasts[0].radius, BLAST_RADIUS);
+    }
+
+    #[test]
+    fn generator_ignores_zero_damage_and_hard_rounds_to_zero() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let mut c = ctx(&j, &w, &on);
+        c.difficulty = crate::Difficulty::Hard;
+        let mut g = generator(100, 0, 0);
+        g.health = 1;
+        for amount in [0, 1] {
+            let p = crate::damage::Pending {
+                amount,
+                explosion: amount == 0,
+                ..Default::default()
+            };
+            enemy::hurt(&mut g, &p, false);
+            tick(&mut g, &mut c, &mut Out::default());
+        }
+        assert!(
+            g.alive && g.health == 1,
+            "0 → nada; difícil 1 → 0 (`0x41dfaf`)"
+        );
     }
 
     #[test]

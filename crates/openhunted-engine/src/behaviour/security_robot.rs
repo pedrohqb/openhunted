@@ -525,8 +525,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             vel = (KNOCK * SUB * px / len, KNOCK * SUB * py / len);
         }
         // dificuldade (`0x41c712`); dano negativo → 1 (`robo-seguranca.md`, passo 6)
-        let amount = ctx.difficulty.damage(w.pending.amount);
-        let amount = if amount < 0 { 1 } else { amount };
+        let amount = ctx.difficulty.hit(w.pending.amount).unwrap_or(0);
         e.health = e.health.min(HEALTH_CAP) - amount;
         if e.health < 0 {
             st.orient = DYING;

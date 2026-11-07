@@ -25,8 +25,15 @@ pub const SOUND_REST_TICKS: u32 = 5;
 pub const LUNGE_RANGE: i32 = 40;
 /// Limite de `vx` (1/8 px).
 pub const VX_RANGE: (i32, i32) = (-32, 37);
-/// Varredura da Manta: além da borda, 75 px à direita, 60 à esquerda.
-pub const SWEEP: (i32, i32) = (75, 60);
+/// Perseguição (`+0x273`, etapas 1–6): deslocamento em x sobre o ponto-base. Alvo à direita
+/// (posição dele ≥ a do voador): 1 → 2 → 3; à esquerda: 4 → 5 → 6. Anticorpo (`0x411e95`):
+/// −75, 0, +75 / +75, 0, −75, mordendo ao chegar ao centro (2 e 5). Manta (`0x422031`): −60,
+/// 0, +75 / +75, 0, −60.
+pub const ANTIBODY_STAGES: [i32; 6] = [-75, 0, 75, 75, 0, -75];
+pub const MANTA_STAGES: [i32; 6] = [-60, 0, 75, 75, 0, -60];
+
+/// % do dano recebido pelo Anticorpo (`0x472104 + 0x48·v`: 100 nas quatro variantes).
+pub const ANTIBODY_APPLIED: i32 = 100;
 
 /// Variante (registros de 0x48: `0x4720c0` / `0x473180`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,8 +126,8 @@ pub struct FlyerState {
     pub ticks: i32,
     pub rest: i32,
     pub clip: Clip,
-    /// Pontos da varredura da Manta ainda por visitar.
-    pub sweep: Vec<(i32, i32)>,
+    /// Etapa da perseguição (`+0x273`; 0 = nenhuma).
+    pub stage: u8,
     pub vx: i32,
     pub vy: i32,
     pub seed: u32,
@@ -138,7 +145,8 @@ impl FlyerState {
         Self {
             manta,
             variant,
-            dormant: !manta && v(6) & 0xff == 0,
+            // `+0x278` é um byte com sinal: ≤ 0 dorme (`0x41129d`)
+            dormant: !manta && (v(6) as u8 as i8) <= 0,
             mode: REST,
             home: at,
             angle: (s.wrapping_mul(2_654_435_761) >> 16) as i32 & 0xffff,
@@ -146,7 +154,7 @@ impl FlyerState {
             ticks: 0,
             rest: (s % r.max(1) as u32) as i32 + r,
             clip: Clip::new(if manta { 3 } else { 1 }, false),
-            sweep: vec![],
+            stage: 0,
             vx: 0,
             vy: 0,
             seed: s,
@@ -191,17 +199,105 @@ impl FlyerState {
     }
 }
 
-/// Velocidade para um ponto (`0x421e9b`): metade da diferença (1/8 px), limitada só por cima
-/// ao mergulho; componentes pequenas dobram. `None` = chegou (distância < largura + 15).
-fn steer(c: (i32, i32), p: (i32, i32), w: i32, cap: i32) -> Option<(i32, i32)> {
-    if super::mine::distance(c, p) < w + 15 {
-        return None;
-    }
+/// Velocidade para um ponto (`0x421e9b` / `0x411cff`): metade da diferença (1/8 px),
+/// limitada só por cima ao mergulho; cada componente **< 10 dobra** — o original chama
+/// `abs()` (`0x40d1fd`) sobre o booleano `v < 10`, logo toda componente negativa também dobra.
+/// A velocidade sai sempre; o segundo valor diz se chegou (distância < largura + 15).
+fn steer(c: (i32, i32), p: (i32, i32), w: i32, cap: i32) -> ((i32, i32), bool) {
     let f = |d: i32| {
         let v = (d / 2).min(cap);
-        if v.abs() < 10 { v * 2 } else { v }
+        if v < 10 { v * 2 } else { v }
     };
-    Some((f(p.0 - c.0), f(p.1 - c.1)))
+    (
+        (f(p.0 - c.0), f(p.1 - c.1)),
+        super::mine::distance(c, p) < w + 15,
+    )
+}
+
+/// Etapa inicial da perseguição (`0x411600` / `0x421866`): alvo à esquerda (posição x dele <
+/// a do voador) → 4, senão 1.
+fn first_stage(target_x: i32, own_x: i32) -> u8 {
+    if target_x < own_x { 4 } else { 1 }
+}
+
+/// Uma etapa da perseguição: o ponto da etapa (base + deslocamento), a velocidade para ele
+/// e o que aconteceu ao chegar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pass {
+    Going,
+    /// Chegou ao centro (etapas 2 e 5): o Anticorpo morde (`0x412249`).
+    Center,
+    /// Chegou ao fim (etapas 3 e 6): casa espelhada e volta (modo 5).
+    Done,
+}
+
+/// `0x411e95` (Anticorpo: base = centro do alvo) / `0x422031` (Manta: base = centro x do
+/// alvo e topo − `rand % 10`, sorteado a cada tique).
+fn chase(
+    st: &mut FlyerState,
+    j: &Rect,
+    c: (i32, i32),
+    w: i32,
+    cap: i32,
+    ctx: &mut Ctx,
+) -> ((i32, i32), Pass) {
+    let (base, stages) = if st.manta {
+        let top = j.y - ctx.rng.below(10) as i32;
+        ((j.x + j.w / 2, top), &MANTA_STAGES)
+    } else {
+        (enemy::center(j), &ANTIBODY_STAGES)
+    };
+    let k = st.stage;
+    let dx = match k {
+        1..=6 => stages[usize::from(k - 1)],
+        _ => 0,
+    };
+    let (vel, arrived) = steer(c, (base.0 + dx, base.1), w, cap);
+    let pass = match k {
+        1..=6 if arrived => {
+            if k == 3 || k == 6 {
+                Pass::Done
+            } else {
+                st.stage = k + 1;
+                if k == 2 || k == 5 {
+                    Pass::Center
+                } else {
+                    Pass::Going
+                }
+            }
+        }
+        _ => Pass::Going,
+    };
+    (vel, pass)
+}
+
+/// Mordida (`0x412249` / `0x422416`): `0x43d629(voador, alvo, variante)` → linha
+/// `(105|89, 0, v)` do `DAMAGE.TBL` (15/20/25/30; a da Manta empurra pela velocidade dela);
+/// o Anticorpo toca 3071 na posição dele.
+fn bite(st: &FlyerState, v: &Variant, j: &Rect, c: (i32, i32), layer: i32, out: &mut Out) {
+    let kind = if st.manta {
+        crate::entity::MANTA
+    } else {
+        ANTIBODY
+    };
+    let jc = enemy::center(j);
+    let p = crate::damage::row(kind, Some(1), st.variant as u32)
+        .map(|r| {
+            r.pending(crate::damage::Geometry {
+                vel: (st.vx / 8, st.vy / 8),
+                toward: (jc.0 - c.0, jc.1 - c.1),
+            })
+        })
+        .unwrap_or(Pending {
+            amount: v.bite,
+            shove: st.manta,
+            ..Default::default()
+        });
+    out.jake_damage.add(&p);
+    if !st.manta {
+        out.events
+            .push(Event::Sound(Cue::at(SOUND_BITE, PRIORITY_FRAME, c, layer)));
+    }
 }
 
 /// Percepção: jogador vivo na camada, a ≤ alcance, à vista.
@@ -230,10 +326,21 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     if c.0 < 0 || c.1 < 0 || c.0 >= ctx.level.0 || c.1 >= ctx.level.1 {
         e.health = 0;
     }
+    // dano: 0 não faz nada; a Manta (`0x42231b`) passa pela dificuldade (só o negativo vira
+    // 1) e pelo % da variante; o Anticorpo (`0x412189`) só pelo % (100 nas quatro)
     let w = st.wound.take();
-    if !w.is_empty() {
-        let applied = if st.manta { v.manta_applied } else { 100 };
-        e.health -= ctx.difficulty.damage(w.pending.amount).max(1) * applied / 100;
+    let hit = if st.manta {
+        ctx.difficulty.hit(w.pending.amount)
+    } else {
+        Some(w.pending.amount).filter(|&d| d != 0)
+    };
+    if let Some(d) = hit {
+        let applied = if st.manta {
+            v.manta_applied
+        } else {
+            ANTIBODY_APPLIED
+        };
+        e.health -= d * applied / 100;
     }
     if e.health <= 0 {
         out.effects.push((
@@ -259,6 +366,8 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let (mut vx, mut vy) = (0, 0);
     let (_, _, len) = enemy::label(st.labels(), st.clip.label);
     let ended = st.clip.advance(len);
+    // rótulo cujo fim se viu neste tique (o modo pode trocar o rótulo abaixo)
+    let ended_label = st.clip.label;
     match st.mode {
         REST => {
             if ended {
@@ -281,7 +390,12 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 if ctx.rng.below(100) < v.attack {
                     let mode = if ctx.rng.below(2) == 0 { DIVE } else { CHASE };
                     st.set_mode(mode);
-                    st.sweep.clear();
+                    let jx = ctx.jake.map_or(e.x, |j| j.body.x);
+                    st.stage = if mode == CHASE {
+                        first_stage(jx, e.x)
+                    } else {
+                        0
+                    };
                 }
             } else {
                 st.wander(c, ctx);
@@ -305,61 +419,59 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 return;
             };
             let jc = enemy::center(&j);
-            let point = if st.mode == DIVE {
-                jc
-            } else if st.manta {
-                if st.sweep.is_empty() {
-                    let top = j.y - ctx.rng.below(10) as i32;
-                    st.sweep = if c.0 > jc.0 {
-                        vec![(j.x + j.w, top), (j.x + j.w - SWEEP.1 - j.w, top)]
-                    } else {
-                        vec![(j.x, top), (j.x + SWEEP.0, top)]
-                    };
+            if st.mode == DIVE {
+                let (d, arrived) = steer(c, jc, me.w, v.dive);
+                (vx, vy) = d;
+                if arrived {
+                    st.set_mode(LUNGE);
+                } else if st.ticks >= 2 * v.max_ticks {
+                    st.set_mode(RETURN);
                 }
-                st.sweep[0]
-            } else {
-                // pelo lado do alvo em que ele está
-                let side = if c.0 > jc.0 { 1 } else { -1 };
-                (jc.0 + side * (j.w / 2 + 20), jc.1)
-            };
-            let close = super::mine::distance(c, jc) < LUNGE_RANGE;
-            match steer(c, point, me.w, v.dive) {
-                None if st.mode == DIVE => st.set_mode(LUNGE),
-                None if st.manta && st.sweep.len() > 1 => {
-                    st.sweep.remove(0);
-                }
-                _ if st.mode == CHASE && close => st.set_mode(LUNGE),
-                None => st.set_mode(RETURN),
-                Some(d) => (vx, vy) = d,
-            }
-            if st.mode == CHASE && st.ticks >= v.max_ticks
-                || st.mode == DIVE && st.ticks >= 2 * v.max_ticks
-            {
+            } else if st.ticks >= v.max_ticks {
                 st.set_mode(RETURN);
+            } else {
+                // Manta a menos de 40 px (`0x4225ab`): rótulo do bote, sem sair da perseguição
+                if st.manta
+                    && !matches!(st.clip.label, 4 | 5)
+                    && super::mine::distance(c, jc) < LUNGE_RANGE
+                {
+                    st.clip = Clip::new(4, false);
+                }
+                let (d, pass) = chase(&mut st, &j, c, me.w, v.dive, ctx);
+                (vx, vy) = d;
+                match pass {
+                    Pass::Center if !st.manta => {
+                        bite(&st, &v, &j, c, e.layer, out);
+                    }
+                    Pass::Done => {
+                        // casa espelhada em x pela posição (`0x41222b` / `0x4223e2`, este
+                        // também sobe `rand % 10`) e volta
+                        st.home.0 = 2 * c.0 - st.home.0;
+                        if st.manta {
+                            st.home.1 -= ctx.rng.below(10) as i32;
+                        }
+                        st.stage = 0;
+                        st.set_mode(RETURN);
+                    }
+                    _ => {}
+                }
             }
         }
         LUNGE => {
-            if ended {
-                // `0x412249` / `0x422416`: o bote fere o alvo, sem novo teste de distância
+            if st.manta {
+                // Manta, modo 4 (`0x4219b6`): rótulo do bote e volta já; a mordida sai no fim
+                // do rótulo 4 (`0x421bb6`), em qualquer modo
+                let clip = st.clip;
+                st.set_mode(RETURN);
+                st.clip = if clip.label == 4 {
+                    clip
+                } else {
+                    Clip::new(4, false)
+                };
+            } else if ended {
+                // `0x412249`: o bote fere o alvo, sem novo teste de distância
                 if let Some(j) = enemy::jake_target(ctx, e.layer) {
-                    out.jake_damage.add(&Pending {
-                        amount: v.bite,
-                        shove: st.manta,
-                        ..Default::default()
-                    });
-                    if !st.manta {
-                        out.events.push(Event::Sound(Cue::at(
-                            SOUND_BITE,
-                            PRIORITY_FRAME,
-                            enemy::center(&j),
-                            e.layer,
-                        )));
-                    }
-                }
-                if st.manta {
-                    // `0x4223e2`: a casa espelhada em x pela posição atual
-                    st.home = (2 * c.0 - st.home.0, c.1 - ctx.rng.below(10) as i32);
-                    st.clip = Clip::new(5, false);
+                    bite(&st, &v, &j, c, e.layer, out);
                 }
                 st.mode = RETURN;
                 st.ticks = 0;
@@ -371,12 +483,17 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 st.clip = Clip::new(2, false);
             }
             match steer(c, st.home, me.w, v.dive) {
-                Some(d) if st.ticks < 4 * v.max_ticks => (vx, vy) = d,
+                (d, false) if st.ticks < 4 * v.max_ticks => (vx, vy) = d,
                 _ => st.wander(c, ctx),
             }
         }
     }
-    if st.clip.label != 5 && !matches!(st.mode, LUNGE) && ended {
+    if st.manta && st.clip.label == 4 && ended && ended_label == 4 {
+        if let Some(j) = enemy::jake_target(ctx, e.layer) {
+            bite(&st, &v, &j, c, e.layer, out);
+        }
+        st.clip = Clip::new(5, false);
+    } else if st.clip.label != 5 && !matches!(st.mode, LUNGE) && ended {
         st.clip = Clip::new(st.clip.label, false);
     }
     vx = vx.clamp(VX_RANGE.0, VX_RANGE.1);
@@ -498,6 +615,143 @@ mod tests {
         }
         assert_eq!(out.jake_damage.amount, 15);
         assert!(out.jake_damage.shove);
+    }
+
+    #[test]
+    fn blast_rim_spares_the_antibody_and_only_the_manta_reads_difficulty() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let mut a = flyer(ANTIBODY, 250, 200, 0, 1);
+        let rim = Pending {
+            amount: 0,
+            explosion: true,
+            ..Default::default()
+        };
+        enemy::hurt(&mut a, &rim, false);
+        tick(&mut a, &mut c, &mut Out::default());
+        assert!(
+            a.alive && a.health == HEALTH,
+            "dano 0 não mata (`0x412189`)"
+        );
+        // Anticorpo: sem dificuldade (`0x412189` não lê `0x487854`)
+        c.difficulty = crate::Difficulty::Easy;
+        a.health = 5;
+        let one = Pending {
+            amount: 1,
+            ..Default::default()
+        };
+        enemy::hurt(&mut a, &one, true);
+        tick(&mut a, &mut c, &mut Out::default());
+        assert_eq!(a.health, 4, "fácil não dobra o dano do Anticorpo");
+        // Manta: dificuldade (`0x42231b`), sem mínimo 1
+        c.difficulty = crate::Difficulty::Hard;
+        let mut m = flyer(MANTA, 250, 200, 0, 0);
+        m.health = 5;
+        enemy::hurt(&mut m, &one, true);
+        tick(&mut m, &mut c, &mut Out::default());
+        assert_eq!(m.health, 5, "difícil: 1 / 2 = 0");
+        c.difficulty = crate::Difficulty::Easy;
+        enemy::hurt(&mut m, &one, true);
+        tick(&mut m, &mut c, &mut Out::default());
+        assert_eq!(m.health, 3, "fácil: ×2, Alpha 100 %");
+    }
+
+    #[test]
+    fn steer_doubles_every_component_below_10_including_negatives() {
+        // `abs(v < 10)`: −15 e −50 também dobram; só por cima o limite do mergulho
+        assert_eq!(steer((0, 0), (-30, 4), 10, 60), ((-30, 4), false));
+        assert_eq!(steer((0, 0), (-100, 300), 10, 60), ((-100, 60), false));
+        assert_eq!(steer((0, 0), (40, 0), 10, 60), ((20, 0), false));
+        assert!(steer((0, 0), (20, 0), 10, 60).1, "chegou: < largura + 15");
+    }
+
+    #[test]
+    fn dormant_byte_is_signed() {
+        let d = |v6: i32| FlyerState::new(ANTIBODY, &[0, 0, 0, 0, 0, 0, v6], (0, 0), 1).dormant;
+        assert!(
+            d(0) && d(0x100) && d(0x80) && d(0xff),
+            "byte ≤ 0 dorme (`0x41129d`)"
+        );
+        assert!(!d(1) && !d(0x17f));
+    }
+
+    #[test]
+    fn chase_stage_depends_on_the_target_side() {
+        assert_eq!(first_stage(300, 200), 1, "alvo à direita");
+        assert_eq!(first_stage(100, 200), 4, "alvo à esquerda");
+    }
+
+    /// Persegue a partir da etapa `stage` até voltar (modo 5); devolve os x dos centros, o dano
+    /// e quantas mordidas.
+    fn run_chase(kind: u32, x: i32, y: i32, stage: u8) -> (Vec<(i32, i32)>, FlyerState, i32) {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(300, 600);
+        let mut c = ctx(&j, &w, &on);
+        let mut f = flyer(kind, x, y, 0, 1);
+        if let Behaviour::Flyer(s) = &mut f.behaviour {
+            s.set_mode(CHASE);
+            s.stage = stage;
+            s.home = (x, y);
+        }
+        let mut path = vec![];
+        let mut out = Out::default();
+        for _ in 0..200 {
+            tick(&mut f, &mut c, &mut out);
+            path.push(f.center());
+            if st(&f).mode != CHASE {
+                break;
+            }
+        }
+        (path, st(&f).clone(), out.jake_damage.amount)
+    }
+
+    #[test]
+    fn antibody_chase_passes_through_and_bites_at_the_centre() {
+        // Jake: caixa x 302..320, y 603..647, centro (311, 625)
+        let (path, s, dmg) = run_chase(ANTIBODY, 200, 610, 1);
+        assert_eq!(s.mode, RETURN, "acabou a passagem: {:?}", s.stage);
+        let xs: Vec<i32> = path.iter().map(|p| p.0).collect();
+        let start = xs[0];
+        let leftmost = xs
+            .iter()
+            .position(|&x| x == *xs.iter().min().unwrap())
+            .unwrap();
+        assert!(xs[leftmost] <= start, "vai primeiro a centro − 75");
+        assert!(
+            *xs.iter().max().unwrap() > 311 + 20,
+            "passa do centro: {xs:?}"
+        );
+        assert_eq!(dmg, 15, "uma mordida (Alpha), ao chegar ao centro");
+        assert_eq!(
+            s.home.0,
+            2 * path[path.len() - 2].0 - 200,
+            "casa espelhada em x"
+        );
+        // do outro lado: etapas 4 → 5 → 6
+        let (path, s, dmg) = run_chase(ANTIBODY, 420, 610, 4);
+        assert_eq!((s.mode, dmg), (RETURN, 15));
+        assert!(path.iter().map(|p| p.0).min().unwrap() < 311 - 20);
+    }
+
+    #[test]
+    fn manta_chase_aims_above_the_target_centre() {
+        let (path, s, _) = run_chase(MANTA, 200, 560, 1);
+        assert_eq!(s.mode, RETURN);
+        assert!(
+            *path
+                .iter()
+                .map(|p| p.0)
+                .collect::<Vec<_>>()
+                .iter()
+                .max()
+                .unwrap()
+                > 311 + 20,
+            "passa pelo centro x até centro + 75"
+        );
+        // base: topo − rand % 10 (y 594..603), não o centro do Jake (625)
+        let low = path.iter().map(|p| p.1).max().unwrap();
+        assert!(low < 625, "fica acima do centro: {low}");
     }
 
     #[test]

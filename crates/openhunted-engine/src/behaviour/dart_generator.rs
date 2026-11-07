@@ -145,10 +145,10 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         st.armed = true;
         e.on = true;
     }
-    // dano × % (sem dificuldade)
+    // dano × % (`0x420dc5`: 0 não faz nada; sem dificuldade nem mínimo)
     let w = st.wound.take();
-    if !w.is_empty() {
-        e.health -= w.pending.amount.max(1) * st.variant().applied / 100;
+    if w.pending.amount != 0 {
+        e.health -= w.pending.amount * st.variant().applied / 100;
         if e.health <= 0 {
             e.alive = false;
             e.behaviour = Behaviour::DartGenerator(st);
@@ -253,5 +253,18 @@ mod tests {
         enemy::hurt(&mut g, &p, true);
         tick(&mut g, &mut c, &mut Out::default());
         assert!(!g.alive);
+        // dano 0 (borda de explosão) não fere (`0x420dc5`); sem mínimo 1: 1 × 40 % = 0
+        let mut g = generator(100, 20, &[3]);
+        g.health = 1;
+        for amount in [0, 1] {
+            let p = crate::damage::Pending {
+                amount,
+                explosion: amount == 0,
+                ..Default::default()
+            };
+            enemy::hurt(&mut g, &p, false);
+            tick(&mut g, &mut c, &mut Out::default());
+        }
+        assert!(g.alive && g.health == 1);
     }
 }

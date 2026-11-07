@@ -79,9 +79,10 @@ projéteis inimigos de `projeteis.md` e o dano de `dano-vida.md`.
   contato com outros objetos não é testado.
 - Ruling (revista na revisão): no solo, toda morte de um tipo contado (3, 4, 7, 8, 10, 11,
   89, 102–105, 109; `fim-de-missao.md`) conta para o jogador, qualquer que seja a causa; as
-  minas de gerador nunca contam; o total é o número de objetos desses tipos na montagem (o
-  original recontaria no fim as minas de gerador ainda vivas; aqui não entram). A cena
-  recalcula os mortos a cada tique (`enemy::kills`); só os tipos portados podem morrer.
+  minas de gerador destruídas nunca contam. A cena recalcula mortos e total a cada tique
+  (`enemy::kills`, `enemy::kills_total`, `Scene::kills_total`): total = os da montagem mais
+  os criados em jogo (`0x10`: minas de gerador, clones, formigas de formigueiro) ainda vivos,
+  como o `0x43cfcf` (revisão da M10); só os tipos portados podem morrer.
 - Ruling: a explosão de morte do OHG e do OSE não deixa o objeto como destroço sólido; o OSR,
   o OSE e o OBR deixam o destroço desenhado e sem colisão.
 - Ruling: o especial BAIXO+ATIRAR fere esses inimigos pela linha `(1, 0, 9)` (M6b) e, se

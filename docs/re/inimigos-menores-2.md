@@ -13,7 +13,7 @@ Continua [`inimigos-menores.md`](inimigos-menores.md) e [`anticorpo-manta.md`](a
    3760–3763 tocando, com `rand%300 < 2` e `+0x264 > 30`, fala (40 % a 3763; senão uma sequência
    de 2–3 entre 3760/3761/3762, `0x43c868`). `+0x264 > 0` → −1 e sai. Zerado: **aparece**
    (`0x416251`); se não conseguir, rearma `+0x264` (`0x416753`).
-3. Fora do −1: no estado 1 limita `vy ≥ −10`; dano (`0x416979`: fácil ×2, difícil ÷2, mínimo 1);
+3. Fora do −1: no estado 1 limita `vy ≥ −10`; dano (`0x416979`: 0 não faz nada; fácil ×2, difícil ÷2, só o negativo vira 1);
    vida ≤ 0 → estado 11 (`ode10`), liga `0x40`, fala 3764. Queda rápida (`+0x160 > 150` ou
    `+0x168 ≥ 150`) fora do 11 → estado −2 e som 3051. Depois a **radiação** (`0x416a48`) e a
    animação do estado (1–11: rótulo = estado, uma vez; −2: rótulo 1 ao contrário).
@@ -107,7 +107,15 @@ bit 1 (`0x42334f`/`0x42851a` só o fazem com natureza 0).
 "Alpha…Delta Ant" (`0x472fb8`, registros 0x1c: alcance 60, vida 1). Nenhuma posta nas fases solo
 (só em `C_*`, `M_M_027`); o formigueiro 88 (`0x4149a0`, em `D_M_030` ×2, `T_M_008`) cria
 tipos 109 (`0x41fe70`). Vida 1: qualquer dano → `0x43d629(f, nulo, 4)` (fumaça raio 15) e some.
-Anda e vira na parede [inferido: estados 2/3]; alvo = jogador a ≤ 60 px, mesma camada, linha livre → morde:
+Estados (tique `0x41ffe4`, fins de rótulo `0x420313`): 2 anda (`0x4207c3` refaz vx = ±0x40
+a cada tique, vy = −8); andando, **3 tiques no mesmo x** (`+0x274`/`+0x27a`) → 3 (vira,
+parada); no fim de cada passo, `0x42081d` desloca a caixa 0x40 à frente e vira se não há chão
+(`0x420979`: sonda vy 0x78) ou se toca um objeto que não é formigueiro nem jogador (outra
+formiga: 50 %); o fim do 3 troca o lado (`+0x194 ^= 1`). Ao tocar um tipo 88 (fora de 1, −1
+e 6) → 6; o fim do 6 desloca x ±0x14 e passa a −1 (oculta, `0x2`) por `0x55 + rand%50 − 25`
+tiques; daí 1, com o lado trocado. 4/5 alternam na mordida (o fim do 4 morde). Criada pelo
+formigueiro (`0x414bd4`) na posição dele, olha para o lado contrário ao bit 0 do `+0x194`
+dele. Alvo = jogador a ≤ 60 px, mesma camada, linha livre → morde:
 `0x43d629(f, alvo, 0)` → linha `(109, 0)`: **5**; sons 3151 (10 % ao andar) e 3153 (mordida).
 Ao tocar um tipo 88 → estado 6. Derrubada: vx = ⅔ do empurrão. Contra ela: soco/garras 8.
 
@@ -128,19 +136,31 @@ no lugar desse byte — nos dados solo todos os Anticorpos têm 1 e todas as Man
 
 `0x41299d`: `0x436635(alvo)` acha na lista `0x493b70` (por `+0x58`) o registro de vista com
 `+0x50 = alvo`; o retângulo `+0x30` passa por `0x43695c` (camada `+0x08`) e se testa contra a
-caixa da Entidade (`0x405698`). Logo a confusão só vale **com a Entidade dentro da vista
-(tela) do jogador-alvo** [inferido: registro = câmera do jogador].
+caixa da Entidade (`0x405698`). Logo a confusão só vale **com a caixa da Entidade dentro da vista
+(tela) do jogador-alvo** [inferido: registro = câmera do jogador, presa à fase].
 
 ## Anticorpo e Manta: trajetórias [confirmado]
 
 - Passeio `0x42221b`: `v = (cos, sen)(+0x274)·(+0x2c) >> 11`, limitado só por cima a `+0x34`;
   a cada tique o ângulo gira **±0x1000 (22,5°)** (sentido `+0x27a`). O "ricochete" contado
   contra `+0x28` é uma **volta completa** (16 tiques): o passeio são laços.
-- `0x421e9b(obj, ponto)`: `v = (ponto − centro)/2`, limitado só por cima a `+0x34`; componentes
-  < 10 dobram; chegou quando a distância < largura + 15.
-- Manta, perseguição `0x422031`: alvo à esquerda → etapas 4→5→6; senão 1→2→3. Pontos: borda
-  direita da caixa do alvo e topo − `rand%10`; 3: +75 px; 6: −60 px. No fim, `0x4223e2`
-  espelha a casa em x pela posição atual (y −`rand%10`) e modo 5 (volta).
+- `0x421e9b(obj, ponto)` (Anticorpo: `0x411cff`): `v = (ponto − centro)/2`, limitado só por
+  cima a `+0x34`; depois cada componente **< 10 dobra**: o código chama `abs()` (`0x40d1fd`)
+  sobre o booleano `v < 10`, logo toda componente negativa também dobra (o limite −32…37 é
+  só do vx, depois). A velocidade sai sempre; devolve "chegou" quando a distância < largura + 15.
+- Etapa inicial (`+0x273`, `0x411600`/`0x421866`): posição x do alvo < a do voador → 4,
+  senão 1.
+- Manta, perseguição `0x422031`: ponto-base = **centro x** da caixa do alvo e topo −
+  `rand%10` (sorteado a cada tique). Etapas: 1 base − 60 → 2 base → 3 base + 75 (alvo à
+  direita); 4 base + 75 → 5 base → 6 base − 60 (alvo à esquerda). Ao chegar ao fim (3 ou 6),
+  `0x4223e2` espelha a casa em x pela posição atual (y −`rand%10`) e modo 5 (volta); a
+  velocidade do tique ainda é a do ponto. Com o alvo a < 40 px (`0x4225ab`) e fora dos
+  estados 4/5 → estado 4 (bote), sem sair da perseguição; a mordida sai no fim do 4.
+- Anticorpo, perseguição `0x411e95`: ponto-base = **centro** da caixa do alvo; etapas 1 −75 →
+  2 centro → 3 +75 / 4 +75 → 5 centro → 6 −75; ao chegar ao centro (2 e 5) **morde**
+  (`0x412249`) e segue; no fim, `0x41222b` espelha a casa só em x e modo 5.
+- Tempo da perseguição (`+0x276`): só sobe com `rand & 1` (metade dos tiques) [não portado:
+  a porta conta todo tique].
 
 ## Bits de célula `0x2/0x8/0x10/0x40` [confirmado pela busca de caminho]
 

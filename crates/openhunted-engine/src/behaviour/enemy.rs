@@ -227,17 +227,22 @@ pub fn hurt(e: &mut Entity, p: &Pending, by_player: bool) -> bool {
 /// 3, 4, 7, 8, 10, 11, 89, 102–105 e 109.
 pub const COUNTED: [u32; 12] = [3, 4, 7, 8, 10, 11, 89, 102, 103, 104, 105, 109];
 
-/// Entra no total: tipo contado e não é criado em jogo — mina de gerador, clone do Camaleão
-/// ou formiga de formigueiro (ligam `0x10` e são liberados ao morrer, `0x435b63` →
-/// `0x433e2c`: não ficam nas listas que o placar percorre).
+/// Criado em jogo com `0x10`: mina de gerador, clone do Camaleão ou formiga de formigueiro.
+pub fn spawned(e: &Entity) -> bool {
+    match &e.behaviour {
+        Behaviour::Mine(m) => m.owner != 0,
+        Behaviour::Chameleon(c) => c.clone_of != 0,
+        Behaviour::Ant(a) => a.spawned,
+        _ => false,
+    }
+}
+
+/// Entra no total (`0x43cfcf` percorre as listas de objetos ativos e mortos): tipo contado
+/// e ainda nas listas. Os criados em jogo (`0x10`) são liberados ao ser destruídos
+/// (`0x435b63` → `0x433e2c`): contam enquanto existem e somem do total (e dos mortos) quando
+/// destruídos.
 pub fn counted(e: &Entity) -> bool {
-    COUNTED.contains(&e.kind)
-        && !match &e.behaviour {
-            Behaviour::Mine(m) => m.owner != 0,
-            Behaviour::Chameleon(c) => c.clone_of != 0,
-            Behaviour::Ant(a) => a.spawned,
-            _ => false,
-        }
+    COUNTED.contains(&e.kind) && (e.alive || !spawned(e))
 }
 
 /// Morte que conta para o jogador: no solo (`0x497300 = 1`) quem não tem dono do golpe
@@ -407,8 +412,8 @@ mod tests {
         let mut all = vec![level_mine, freed, hop, unported, barrel];
         assert_eq!(
             kills_total(&all),
-            3,
-            "mina da fase, saltadora e o 102 sem comportamento"
+            4,
+            "mina da fase, a de gerador ainda viva, saltadora e o 102 sem comportamento"
         );
         assert_eq!(kills(&all), 0);
         for e in all.iter_mut() {
@@ -419,6 +424,11 @@ mod tests {
             kills(&all),
             2,
             "a mina de gerador e o tipo não portado não contam"
+        );
+        assert_eq!(
+            kills_total(&all),
+            3,
+            "a mina de gerador destruída sai do total"
         );
         assert!(kills(&all) <= kills_total(&all));
     }
