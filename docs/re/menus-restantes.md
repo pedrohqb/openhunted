@@ -35,7 +35,7 @@ mesmo de `SMULT` (não colidem: uma tela por vez).
 SMAIN ─ New Game ──────────────────────────────→ briefing (6) → jogo (7)
       ├ Restore → diálogo .hhg ─────────────────→ briefing (6)
       ├ Choose Level → SLEVL ─ solo ────────────→ briefing (6)
-      │                       └ 2 jogadores ────→ SEGOC (15) → briefing / SHVLD
+      │                       └ disputa → SEGOC (15) → SHVLD; coop → briefing
       ├ Multi Player → SMULT → SLEVL (5)
       ├ Options → SOPTI → SMAIN
       ├ Input Devices → SINPU ─ Customize → SKEYB / SJOYS → SINPU
@@ -84,18 +84,18 @@ buttons." quando o joystick tem poucos botões.
 
 ## `SEGOC` (`0x4430a0`) [inferido em parte]
 
-Para cada jogador, um de cada vez: personagem (15016 `ECM_JAKE_PICK` / 15017
-`ECM_GARTHE_PICK`, com os retratos 15010/15011) e cor (15012 marrom, 15013 vermelho, 15014
-preto, 15015 branco) → `0x497318`/`0x49731c` (personagem; padrão 1 e 2) e
+Só na **disputa** (o cooperativo vai direto ao briefing; `multijogador.md`). Para cada jogador, um de cada vez: personagem (15016 `ECM_JAKE_PICK` / 15017
+`ECM_GARTHE_PICK`, com os retratos 15010/15011) e cor (15012 marrom = 36, 15013 vermelho = 38,
+15014 preto = 35, 15015 branco = 37) → `0x497318`/`0x49731c` (personagem; padrão 1 e 2) e
 `0x497320`/`0x497324` (tabela de cor, padrão 35 e 36). 15009 `ECM_PLAYER_INPUT` leva aos
 dispositivos. 15003 OK → próximo jogador; depois do 2º, briefing (`SLEVD`) ou `SHVLD` na
 disputa; 15004 CANCEL volta.
 
 ## `SHVLD` (`process_deathmatch_interface`, `0x445501`) [inferido em parte]
 
-Diálogo da disputa: nome da fase em 32011; contadores de **tempo** (32007, setas 32003/32004)
-e de **mortes** (32008, setas 32005/32006) em `0x480564` e `0x480560`; o tempo anda de 20
-em 20; ambos com teto 1 980; 32009 GO / 32010 CANCEL. Fora do escopo do solo.
+Diálogo da disputa: nome da fase em 32011; contadores de **tempo** (32007, setas 32003/32004,
+`0x480560`) e de **pontos** (32008, setas 32005/32006, `0x480564`), guardados ×20, passo 20,
+teto 1 980 (mostra 0–99); 32009 GO / 32010 CANCEL. Detalhes em `multijogador.md`.
 
 ## `SH2HS` (`0x443c30`) [inferido em parte]
 
@@ -141,4 +141,4 @@ Diálogo 320×256 aberto por um comando do menu da janela (`0x4017f9`, Help → 
 
 - Máquina exata de `SINPU`/`SKEYB`/`SJOYS`/`SEGOC` (estados 8–15) e o comando do "About".
 - Tabelas de rótulos do retrato (`0x47f714`, `0x47f754`).
-- Regras completas da disputa (`SHVLD`, `SH2HS`).
+- Regras da disputa e do cooperativo: ver `multijogador.md`.

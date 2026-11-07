@@ -65,8 +65,8 @@ executável [inferido: fontes das rampas].
   Antídoto: `+0x27c = +0x280` (`0x40b6e4`).
 - Truques (`0x40407f`…, globais `0x497394`…`0x4973a4`) põem 0x2b, 0x29, 0x2c, 0x2f ou 0x2d
   em `+0x27c` e `+0x280` de todos os jogadores.
-- A cor escolhida na `SEGOC` (`0x497320`/`0x497324`, padrão 35/36) só é lida pelas telas
-  (`0x4419ef`, `0x442672` → `0x4981cc`, `0x441bdd`); não se achou cópia dela para o objeto.
+- A cor escolhida na `SEGOC` (`0x497320`/`0x497324`, padrão 35/36) vai para `+0x280` do
+  jogador **só na disputa**, na atribuição das vagas (`0x43cd2f`; `multijogador.md`).
 
 ## Camaleão (`0x419391`) [confirmado]
 
@@ -110,5 +110,4 @@ Anticorpo (sem pulso): `(44, −45)`, `(37, −54)`, `(43, −17)`, `(42, 14)`.
 ## Em aberto
 
 - Luz por região (`+0x58` da região, sombra 18 + |x|) no desenho dos objetos e do cenário.
-- Se a cor da `SEGOC` chega aos jogadores na disputa (nenhuma escrita achada em `+0x27c`).
 - Quem chama os truques que gravam `0x497394`…`0x4973a4`.
