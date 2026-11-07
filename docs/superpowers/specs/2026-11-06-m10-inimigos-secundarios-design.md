@@ -33,14 +33,16 @@ e `anticorpo-manta.md`, e a dificuldade (`opcoes-salvamento.md`, `0x487854`).
 - Ruling: a confusão da Entidade é uma transformação da entrada na cena (`Scene::confusion`,
   `+0x264` do jogador): com ela > 0, CIMA↔BAIXO e ESQUERDA↔DIREITA trocam e ela cai 1 por
   tique; a Entidade a põe em 3 (se ≤ 1). `jake.rs` não muda.
-- Ruling: a "vista do alvo" (`0x41299d`) é o retângulo 640 × 405 centrado no Jake (a câmera do
-  visualizador segue o centro dele); a confusão exige a Entidade nele e a distância entre
-  centros menor que o alcance da confusão da variante.
+- Ruling (revisão): a "vista do alvo" (`0x41299d`) é a câmera da cena — 640 × 405 centrada no
+  centro do Jake e presa à fase por `clamp_camera`, a mesma conta do visualizador
+  (`the_entity::view`); a confusão exige a **caixa** da Entidade cruzando-a (`0x405698`) e a
+  distância entre centros menor que o alcance da confusão da variante.
 - Ruling: a Entidade com `values[2] = 0` vagueia na horizontal com gravidade contra as células
   da camada, na velocidade da variante, virando na parede, na beira do chão e, ao fim de cada
   laço do rótulo, com a chance de virar da variante; com `values[2] ≠ 0` fica parada. Um golpe
   só a empurra: 5–12 px/tique para longe do Jake (o original usa a velocidade de quem tocou).
-- Ruling: a Morte oculta (estado −1) fica viva e presente, sem desenho nem colisão; a
+- Ruling: a Morte oculta (estado −1) fica viva e presente, sem desenho nem colisão (nem
+  recolhe dano de explosão: `interact::blast` a salta com `0x2`); a
   aparição procura, nos dois lados da caixa do alvo, um lugar livre nas células da camada dele
   com chão até 15 px abaixo, recuando de 10 em 10 px (até 4 recuos); sem lugar, rearma a espera.
 - Ruling: a radiação da Morte atinge só o jogador (a linha `(3, 1)` só tem dano para ele).

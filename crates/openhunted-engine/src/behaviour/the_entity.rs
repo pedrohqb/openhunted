@@ -13,8 +13,19 @@ pub const LABELS: [Label; 3] = [(1, 0, 13), (2, 13, 13), (3, 26, 10)];
 pub const SOUNDS: [(usize, u16, u16); 3] = [(1, 3113, 0), (13, 3114, 7), (26, 3115, 7)];
 /// Tiques de confusão postos no jogador (`+0x264 = 3`).
 pub const CONFUSION_TICKS: u32 = 3;
-/// Meia vista do jogador (640 × 405, câmera centrada nele).
-pub const VIEW_HALF: (i32, i32) = (320, 202);
+/// Vista do jogador (`0x41299d`): a câmera da cena — 640 × 405 centrada no centro dele e
+/// presa à fase (`render::clamp_camera`, como o visualizador) —, testada contra a caixa da
+/// Entidade (`0x405698`).
+pub fn view(level: (i32, i32), center: (i32, i32)) -> Rect {
+    let size = (crate::SCREEN_W as i32, crate::shell::hud::VIEW_H);
+    let (x, y) = crate::clamp_camera(level, size, (center.0 - size.0 / 2, center.1 - size.1 / 2));
+    Rect {
+        x,
+        y,
+        w: size.0,
+        h: size.1,
+    }
+}
 
 /// Variante (`0x4721f0`, registros de 0x28).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,11 +134,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     });
     if let Some(j) = target {
         let jc = enemy::center(&j);
-        let (dx, dy) = (c.0 - jc.0, c.1 - jc.1);
-        if dx.abs() <= VIEW_HALF.0
-            && dy.abs() <= VIEW_HALF.1
-            && super::mine::distance(c, jc) < v.confusion
-        {
+        if view(ctx.level, jc).overlaps(&me) && super::mine::distance(c, jc) < v.confusion {
             out.confuse = true;
         }
     }
@@ -213,6 +220,34 @@ mod tests {
         let mut out = Out::default();
         tick(&mut other, &mut c, &mut out);
         assert!(!out.confuse, "outra camada");
+    }
+
+    #[test]
+    fn view_is_the_clamped_camera_and_tests_the_entity_box() {
+        let on = |_: i32| None;
+        let (j, _) = ctx_with_jake(300, 0);
+        let open = crate::World::new(vec![]);
+        let mut c = ctx(&j, &open, &on);
+        // Jake no alto da fase: a câmera (640 × 405) encosta em y 0 e vê até y 405; a Gamma
+        // (alcance 250, confusão 300) 210 px abaixo do centro dele, com a caixa na tela
+        let mut low = orb(298, 223, &[2, 3, 1]);
+        let mut out = Out::default();
+        tick(&mut low, &mut c, &mut out);
+        assert!(out.confuse, "na vista da câmera presa à fase");
+        // Jake no meio da fase (centro y 1025): vista y 823..1228; vale a caixa, não o centro
+        let (j, _) = ctx_with_jake(300, 1000);
+        let mut c = ctx(&j, &open, &on);
+        let mut edge = orb(298, 803, &[2, 3, 1]);
+        let mut out = Out::default();
+        tick(&mut edge, &mut c, &mut out);
+        assert!(
+            out.confuse,
+            "caixa 803..828 cruza a vista (centro fora dela)"
+        );
+        let mut above = orb(298, 797, &[2, 3, 1]);
+        let mut out = Out::default();
+        tick(&mut above, &mut c, &mut out);
+        assert!(!out.confuse, "caixa 797..822 fora da vista, ao alcance");
     }
 
     #[test]

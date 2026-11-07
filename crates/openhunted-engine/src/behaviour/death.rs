@@ -528,5 +528,21 @@ mod tests {
         }
         assert!(d.alive && st(&d).hidden() && d.flags & 0x2 != 0);
         assert!(!d.visible());
+        // oculta (`0x2`), não recolhe dano de explosão
+        let hp = d.health;
+        let b = crate::behaviour::Blast {
+            center: d.center(),
+            layer: d.layer,
+            radius: 60,
+            push: 10,
+            damage: 30,
+        };
+        crate::behaviour::interact::blast(&b, &mut d);
+        assert!(
+            st(&d).wound.is_empty(),
+            "oculta, não guarda o dano para quando aparecer"
+        );
+        tick(&mut d, &mut c, &mut Out::default());
+        assert_eq!(d.health, hp);
     }
 }

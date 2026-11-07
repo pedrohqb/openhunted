@@ -46,6 +46,10 @@ pub fn blast(b: &Blast, e: &mut Entity) {
     if !e.alive {
         return;
     }
+    // a Morte oculta (`0x2`, sem colisão) não está na área (spec M10, revisão)
+    if e.flags & 0x2 != 0 && matches!(e.behaviour, Behaviour::Death(_)) {
+        return;
+    }
     if let Some(p) = super::explosion::area_effect(b, e.center(), e.layer) {
         hurt(e, &p);
     }

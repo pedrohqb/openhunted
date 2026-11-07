@@ -136,8 +136,8 @@ no lugar desse byte — nos dados solo todos os Anticorpos têm 1 e todas as Man
 
 `0x41299d`: `0x436635(alvo)` acha na lista `0x493b70` (por `+0x58`) o registro de vista com
 `+0x50 = alvo`; o retângulo `+0x30` passa por `0x43695c` (camada `+0x08`) e se testa contra a
-caixa da Entidade (`0x405698`). Logo a confusão só vale **com a Entidade dentro da vista
-(tela) do jogador-alvo** [inferido: registro = câmera do jogador].
+caixa da Entidade (`0x405698`). Logo a confusão só vale **com a caixa da Entidade dentro da vista
+(tela) do jogador-alvo** [inferido: registro = câmera do jogador, presa à fase].
 
 ## Anticorpo e Manta: trajetórias [confirmado]
 
