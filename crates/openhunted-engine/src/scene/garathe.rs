@@ -5,7 +5,6 @@
 use super::Scene;
 use crate::behaviour::{self, Event};
 use crate::character::Character;
-use crate::damage::Pending;
 use crate::jake::{JumpKind, State, garathe};
 use crate::sound::{Cue, PRIORITY_FRAME};
 
@@ -24,28 +23,22 @@ impl Scene {
             self.body_checked.clear();
             return;
         }
-        // investida: quem ele toca (objeto sólido, não só de toque) leva 7, tranco e
-        // empurrão pelo lado; Ruling: uma vez por objeto por pulo
+        // investida: quem ele toca (objeto sólido, não só de toque) leva 7 e tranco, com o
+        // empurrão pelos centros; Ruling: uma vez por objeto por pulo
         let b = j.body.bounds();
-        let dir = if j.facing_right() { 1 } else { -1 };
-        let p = Pending {
-            amount: garathe::BODY_CHECK_DAMAGE,
-            jolt: true,
-            shove: true,
-            push: (dir * garathe::BODY_CHECK_PUSH, 0),
-            ..Default::default()
-        };
         for (i, e) in self.entities.iter_mut().enumerate() {
+            let Some(r) = e.bounds() else { continue };
             if !e.alive
                 || e.layer != layer
                 || e.flags & 0x80001 != 0x80001
                 || e.flags & 0x8020 != 0
                 || self.body_checked.contains(&i)
-                || !e.bounds().is_some_and(|r| r.overlaps(&b))
+                || !r.overlaps(&b)
             {
                 continue;
             }
             self.body_checked.push(i);
+            let p = garathe::body_check(b, r);
             // as mortes contam pela cena (`enemy::kills`)
             if !behaviour::enemy::hurt(e, &p, true) {
                 behaviour::interact::hurt(e, &p);

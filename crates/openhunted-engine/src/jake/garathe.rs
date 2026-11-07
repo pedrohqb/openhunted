@@ -26,9 +26,25 @@ pub const SPEECH_WALL_LONG: u16 = 3740;
 /// Empurrar (`0x42a9a4`): 44 `PUSHHAND` toca uma vez (atraso 0); no fim, som 5043 e o laço
 /// 46 (atraso 1), em cuja entrada a zona 0x20 pede a porta de célula (`0x42aa74`).
 pub const PUSH_START: u16 = 44;
-/// Investida do pulo longo (`0x429bda`): 7 de dano com tranco e empurrão.
+/// Investida do pulo longo (`0x429bda`): 7 de dano com tranco (`+0x250 = 1`).
 pub const BODY_CHECK_DAMAGE: i32 = 7;
-pub const BODY_CHECK_PUSH: i32 = 8;
+
+/// Dano da investida em quem o Garathe toca: 7 e tranco, sem a reação de empurrão; o
+/// empurrão (`+0x244/+0x248`, `0x435951`) é o centro da vítima menos o do Garathe (caixas
+/// de colisão, `0x4351b5`).
+pub fn body_check(
+    garathe: crate::physics::Rect,
+    victim: crate::physics::Rect,
+) -> crate::damage::Pending {
+    let c = |r: crate::physics::Rect| (r.x + r.w / 2, r.y + r.h / 2);
+    let (g, v) = (c(garathe), c(victim));
+    crate::damage::Pending {
+        amount: BODY_CHECK_DAMAGE,
+        jolt: true,
+        push: (v.0 - g.0, v.1 - g.1),
+        ..Default::default()
+    }
+}
 
 /// Rótulo e atraso do estado `s` no Garathe.
 pub(super) fn anim(s: State) -> (u16, u32) {
@@ -329,6 +345,20 @@ mod tests {
             assert!(!joltable(s), "{s:?}");
         }
         assert!(joltable(State::Climb(Climb::Vertical)));
+    }
+
+    /// Investida (`0x429bda`): tranco e 7, empurrão pelos centros (`0x435951`), sem empurrão
+    /// como reação.
+    #[test]
+    fn body_check_jolts_and_pushes_by_the_centres() {
+        let r = |x, y, w, h| Rect { x, y, w, h };
+        let p = body_check(r(0, 0, 20, 50), r(30, 10, 10, 10));
+        assert_eq!(
+            (p.amount, p.jolt, p.shove, p.knockdown),
+            (7, true, false, false)
+        );
+        assert_eq!(p.push, (25, -10));
+        assert_eq!(body_check(r(40, 0, 20, 50), r(0, 0, 20, 50)).push, (-40, 0));
     }
 
     #[test]

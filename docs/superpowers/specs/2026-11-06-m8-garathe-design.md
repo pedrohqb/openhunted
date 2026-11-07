@@ -55,7 +55,9 @@ esconder 54/56/55 · barra 47, agarrar 50 → mão ante mão 49 (k 6), soltar 51
   ar a animação toca uma vez e para no último quadro; chão, parede e contato só contam
   quando ela acaba (revisão: encostar na parede no meio do pulo não o encerra).
 - **Investida** no pulo longo (`0x429bda`): cada objeto sólido tocado leva 7, tranco e
-  empurrão pelo lado (uma vez por objeto por pulo).
+  empurrão (uma vez por objeto por pulo). Revisão: a reação é só o tranco (`+0x250 = 1`); o
+  empurrão `+0x244/+0x248` é o centro da vítima menos o do Garathe (`0x435951`), sem
+  empurrão como reação.
 - Agachado: tiro e pulo exigem 20 px livres acima.
 - Reações: empurrão só em 1, 54–56, 58; tranco (novo `Pending::jolt`) em parado, correr,
   empurrar, armas e pousos → 59 → 35; nos 52/53 → queda.
