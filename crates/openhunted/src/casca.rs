@@ -608,10 +608,16 @@ impl App {
         }
     }
 
-    /// Filme na tela: desenha direto em RGBA.
+    /// Filme na tela: desenha direto em RGBA. No primeiro quadro desenhado, o relógio do
+    /// filme e o áudio dele começam juntos (a abertura é criada antes da janela).
     pub(super) fn render_movie(&mut self, out: &mut [u8]) -> bool {
-        if let State::Show(s) = &self.state {
-            if let Some(Running::Film(m)) = &s.cur {
+        if let State::Show(s) = &mut self.state {
+            if let Some(Running::Film(m)) = &mut s.cur {
+                if m.start() {
+                    if let (Some(a), Some(mu)) = (&m.audio, self.m9.music.as_mut()) {
+                        mu.play_film(a.clone());
+                    }
+                }
                 m.render_rgba(out);
                 return true;
             }
@@ -885,11 +891,9 @@ impl App {
             Step::Film(f) => {
                 let name = self.m9.config.movie(f);
                 let movie = self.m9.movies.as_mut().and_then(|mk| mk(name))?;
+                // o áudio começa com o primeiro quadro na tela (`render_movie`)
                 if let Some(m) = self.m9.music.as_mut() {
-                    match &movie.audio {
-                        Some(a) => m.play_film(a.clone()),
-                        None => m.silence(),
-                    }
+                    m.silence();
                 }
                 Some(Running::Film(movie))
             }
@@ -1197,6 +1201,74 @@ mod tests {
         assert_eq!(*asked.borrow(), ["MIDDARK.AVI"]);
         assert_eq!(a.mode(), super::super::Mode::Results);
         // a mesma missão de novo não dá peça
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Saída de música que registra o que tocou.
+    struct Rec(Rc<RefCell<Vec<String>>>);
+
+    impl crate::audio::SoundOut for Rec {
+        fn play(&mut self, id: u16, _: Arc<Pcm>, _: u16, _: u8, _: i16) {
+            self.0.borrow_mut().push(format!("play {id}"));
+        }
+    }
+
+    fn movie_frames(a: &App) -> Option<u64> {
+        match &a.state {
+            State::Show(s) => match &s.cur {
+                Some(Running::Film(m)) => Some(m.frames_shown()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn film_audio_and_clock_start_with_the_first_frame_on_screen() {
+        let root = temp("app-film-clock");
+        let Some(mut a) = app(&root, None) else {
+            return;
+        };
+        let log = Rc::new(RefCell::new(Vec::new()));
+        a.set_music(Box::new(Rec(log.clone())), vec![]);
+        a.set_movies(Box::new(|_| {
+            let pcm = Pcm {
+                rate: 22_050,
+                channels: 2,
+                samples: vec![0; 4],
+            };
+            Some(Movie::new(Box::new(Fake { n: 30, i: 0 }), Some(pcm)))
+        }));
+        let film = format!("play {}", crate::music::FILM_ID);
+        // a abertura é criada antes da janela: nada toca nem anda até o primeiro quadro
+        a.play_intro();
+        a.advance(400);
+        assert!(
+            !log.borrow().contains(&film),
+            "sem quadro na tela, sem áudio"
+        );
+        assert_eq!(movie_frames(&a), Some(1));
+        let mut rgba = vec![0u8; 640 * 480 * 4];
+        a.render_rgba(&mut rgba);
+        assert!(
+            log.borrow().contains(&film),
+            "o áudio com o primeiro quadro"
+        );
+        // o avanço seguinte traz o tempo de abrir o filme (~0,4 s): descartado
+        a.advance(450);
+        assert_eq!(
+            movie_frames(&a),
+            Some(1),
+            "o vídeo não corre na frente do áudio"
+        );
+        a.advance(140);
+        assert_eq!(movie_frames(&a), Some(3));
+        a.render_rgba(&mut rgba);
+        assert_eq!(
+            log.borrow().iter().filter(|l| **l == film).count(),
+            1,
+            "o áudio começa uma vez"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
