@@ -36,12 +36,16 @@ pub struct StarState {
     pub stuck: Option<u32>,
     /// É a faca do Garathe (25, `0x40ba54`): reta, sem onda.
     pub knife: bool,
+    /// Caixa da faca cravada (`okn02.brd`, `0x40badc`); vazia, a caixa fica a do voo.
+    pub stuck_boxes: Vec<crate::physics::Rect>,
 }
 
-/// Faca (`OKN.ANM`): rótulo 2 girando no voo e 4 cravada; linha `(25, …)`: 12 com empurrão.
+/// Faca (`OKN.ANM`): rótulo 2 `okn01` girando no voo e 3 `okn02` cravada
+/// (`0x40ba82`: `0x406b6c(obj, 3, 3)`, com a caixa trocada para `okn02.brd`). O dano sai das
+/// linhas `(25, …)` do `DAMAGE.TBL` (12 com empurrão; o barril explode).
 pub const KNIFE_LABEL_FLY: u16 = 2;
-pub const KNIFE_LABEL_STUCK: u16 = 4;
-pub const KNIFE_DAMAGE: i32 = 12;
+pub const KNIFE_LABEL_STUCK: u16 = 3;
+pub const KNIFE_STUCK_BRD: &str = "OKN02.BRD";
 
 impl StarState {
     pub fn new(vx: i32, vy: i32) -> Self {
@@ -53,6 +57,7 @@ impl StarState {
             prev: None,
             stuck: None,
             knife: false,
+            stuck_boxes: vec![],
         }
     }
 
@@ -146,6 +151,9 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         } else {
             LABEL_STUCK
         };
+        if !st.stuck_boxes.is_empty() {
+            e.boxes = std::mem::take(&mut st.stuck_boxes);
+        }
         e.flags |= 0x28;
         super::restart(e, label);
         out.events.push(Event::Sound(crate::sound::Cue::at(

@@ -35,7 +35,8 @@ e põe o que difere num perfil por personagem.
 
 ### Mapa de estados do Garathe (semântico → estado/rótulo)
 
-Parado 1/1 (c1) · correr 10/10 · empurrar 46/46 (c1) · furtivo → **andar de luta 3/103**
+Parado 1/1 (c1) · correr 10/10 · empurrar 44 (uma vez) → 5043 → 46/46 (c1; a porta de
+célula é pedida na entrada do 46) · furtivo → **andar de luta 3/103**
 (arte espelhada, k 3) · pulo parado 21 · para cima 20 (k 2) · da corda 19 · preparo 24 →
 longo 25 · médio 22 · queda 27 · queda descontrolada 29 · pousos 28 (queda), 23 (médio,
 k 1), 26 (longo: 24 ao contrário, k 1, som 5053), 30 (duro) → 31 · empurrado 58 · derrubado
@@ -51,9 +52,12 @@ esconder 54/56/55 · barra 47, agarrar 50 → mão ante mão 49 (k 6), soltar 51
 - Correr: vx ±15 px/tique; FURTIVO + lado → andar 3 (pose de luta).
 - Escolha do pulo: chão a 156 px → médio (13, −12); senão a 350 → preparo 24 e longo
   (25, −14); senão médio. Correndo, PULAR+CIMA+lado → longo direto. **Não há estendido.** No
-  ar a animação toca uma vez e para no último quadro.
+  ar a animação toca uma vez e para no último quadro; chão, parede e contato só contam
+  quando ela acaba (revisão: encostar na parede no meio do pulo não o encerra).
 - **Investida** no pulo longo (`0x429bda`): cada objeto sólido tocado leva 7, tranco e
-  empurrão pelo lado (uma vez por objeto por pulo).
+  empurrão (uma vez por objeto por pulo). Revisão: a reação é só o tranco (`+0x250 = 1`); o
+  empurrão `+0x244/+0x248` é o centro da vítima menos o do Garathe (`0x435951`), sem
+  empurrão como reação.
 - Agachado: tiro e pulo exigem 20 px livres acima.
 - Reações: empurrão só em 1, 54–56, 58; tranco (novo `Pending::jolt`) em parado, correr,
   empurrar, armas e pousos → 59 → 35; nos 52/53 → queda.
@@ -78,9 +82,13 @@ esconder 54/56/55 · barra 47, agarrar 50 → mão ante mão 49 (k 6), soltar 51
   `garathe.md`. SOCO (ou boca na parede) usa a clava se tem o par 2, senão as garras.
 - Golpes (`DAMAGE.TBL`, atacante 2, vítima "qualquer"): garras 15 com empurrão; clava 15
   com derrubada (20, 30) / (20, 10) / (20, −10); chicote 18 com derrubada; som 5062.
+  (Revisão: a linha sai por vítima — `damage::row` sobre a tabela transcrita; barril 28
+  explode com 5 e derrubada em todas as variantes; tipos 4, 11, 89, 105, 109 levam 8 com
+  empurrão e 3038; o mesmo vale para a faca 25 e o chicote 108, e o soco do Jake.)
 - **Chicote**: a linha até a boca só é testada até a metade. Projétil 108 (`owb.anm`): reto,
-  20 de dano e derrubada; após 7 tiques (Ruling: o meio de 6–8) gera dois filhos a ±11,25°
-  com a mesma velocidade, até a 4ª geração; some na parede.
+  20 de dano e derrubada; o 1º tique arma, depois de 6–8 tiques (sorteio por objeto) gera
+  dois filhos a ±11,25° com a mesma velocidade e menores (10 → 6 → 5 → 4), até a 4ª geração;
+  some na parede. (Revisão: antes, 7 fixos e sem encolher.)
 - **Faca** 25 (`okn.anm`): reta; num objeto 12 com empurrão e some; na parede crava e vira
   item. **Ruling:** a cravada devolve 1 faca (o valor não foi lido) e dura 100 tiques, como
   a estrela.

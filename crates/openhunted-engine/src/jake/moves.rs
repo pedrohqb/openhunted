@@ -238,8 +238,8 @@ pub fn gravity(s: State) -> bool {
     )
 }
 
-/// Estados em que o Garathe sente o tranco (`0x42859e`): 1, 10, 28, 31, 35–37, 44–46, 58,
-/// os de arma e a corda (52/53, que viram queda).
+/// Estados em que o Garathe sente o tranco (`0x42859e`): 1, 10, 28, 31, 35–38, 44–46, 58, 76,
+/// os de arma e a escalada (52/53, que viram queda). A barra (47, 49–51) não reage.
 pub fn joltable(s: State) -> bool {
     matches!(
         s,
@@ -250,6 +250,7 @@ pub fn joltable(s: State) -> bool {
             | State::Rise
             | State::Crawl
             | State::Crouch
+            | State::StandUp
             | State::Push
             | State::Pushed
             | State::Fire { .. }
@@ -257,6 +258,7 @@ pub fn joltable(s: State) -> bool {
             | State::Holster(_)
             | State::Recover(_)
             | State::Climb(_)
+            | State::Taunt
     )
 }
 
@@ -641,21 +643,25 @@ impl Jake {
                     });
                 }
             }
-            State::Land(Landing::Hard) | State::GetUp | State::Rise if self.is_garathe() => {
-                // 30/35: com 20 px livres, decisão em pé; teto baixo ou BAIXO → 36; fim → 31
-                // (30) ou parado (31, 35)
+            State::Land(Landing::Hard) if self.is_garathe() => {
+                // 30 (`0x42951f`): com 20 px livres, decisão em pé; sem eles só anima; fim → 31
                 self.body.vx = 0;
                 let head = self.free_above(world, self.profile().headroom);
                 if head && self.decide(input, env, jump_edge, side) {
-                } else if !head || pressed(DOWN) {
-                    self.set(State::Crawl);
                 } else if self.anim_done() {
-                    let next = if self.state == State::Land(Landing::Hard) {
-                        State::GetUp
-                    } else {
-                        State::Idle
-                    };
-                    self.set(next);
+                    self.set(State::GetUp);
+                }
+            }
+            State::GetUp | State::Rise if self.is_garathe() => {
+                // 31/35 (`0x429555`, `0x42a248`): teto a menos de 20 px ou BAIXO → 36; senão
+                // decisão em pé; fim → parado
+                self.body.vx = 0;
+                let head = self.free_above(world, self.profile().headroom);
+                if !head || pressed(DOWN) {
+                    self.set(State::Crawl);
+                } else if self.decide(input, env, jump_edge, side) {
+                } else if self.anim_done() {
+                    self.set(State::Idle);
                 }
             }
             State::BarHang | State::BarMove | State::BarPull | State::BarDown | State::BarUp

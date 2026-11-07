@@ -1440,7 +1440,7 @@ impl Scene {
                     Behaviour::Exit(_) => behaviour::exit::tick(e),
                     Behaviour::Bullet(_) => behaviour::bullet::tick(e, &ctx, &mut out),
                     Behaviour::Casing(_) => behaviour::casing::tick(e, &mut ctx, &mut out),
-                    Behaviour::Pellet(_) => behaviour::pellet::tick(e, &ctx, &mut out),
+                    Behaviour::Pellet(_) => behaviour::pellet::tick(e, &mut ctx, &mut out),
                     Behaviour::Rocket(_) => behaviour::rocket::tick(e, &ctx, &mut out),
                     Behaviour::Star(_) => behaviour::star::tick(e, &ctx, &mut out),
                     Behaviour::Grenade(_) => behaviour::grenade::tick(e, &ctx, &mut out),

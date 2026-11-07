@@ -83,6 +83,10 @@ Chicote: a linha centro→boca só é testada até a **metade** (`0x43bbe3`, ram
 se algo bloqueia até **3/4** da linha (`0x43bcf2`), `t` e a animação avançam um passo a mais
 por tique [inferido: o golpe recolhe mais rápido]. O projétil 108 (`0x40cb6c`) se divide:
 depois de 6–8 tiques cria dois filhos a ±11,25° com a mesma velocidade, até a 4ª geração.
+O 1º tique só arma (`+0x27c = 1`, `+0x278 = rand % 6 / 2 + 6`, `+0x274 = 10`); cada filho
+sorteia a própria espera, tem geração `+0x27c` do pai + 1 (divide enquanto ≤ 3), tamanho
+`+0x1f0` = `+0x274` do pai / 2 + 1 e `+0x274` = 3/4 do pai + 1 (tamanhos 10 → 6 → 5 → 4).
+[confirmado em `0x40cc2c…0x40ce81`]
 A faca 25 (`0x40ba54`) que bate em parede fica cravada (estado 3) e vira item coletável
 (`0x40b3f5`); em objeto aplica `(25, …)` e some.
 
@@ -124,7 +128,7 @@ Por tique (`0x004283b7`, ignorado no estado 80): pisca com reação ou explosão
 | Reação | Estados em que vale | Vai para |
 |---|---|---|
 | empurrão (2) | 1, 54–56, 58 | 58 `MNDAMAGE` (gravidade ligada; volta ao 1) |
-| tranco (1) | 1, 10, 28, 31, 35–37, 44–46, 58, 76, 81, 82, 85, 95–98, 100, 101, 103–111, 113, 114, 116, 118, 128–130, 135–138, 140–142, 147–150, 152–154, 159–162 | 59 (rótulo 63, desliza k=2 em x), depois 35; nos 49, 50, 52, 53 → queda 27 |
+| tranco (1) | 1, 10, 28, 31, 35–38, 44–46, 58, 76, 81, 82, 85, 95–98, 100, 101, 103–111, 113, 114, 116, 118, 128–130, 135–138, 140–142, 147–150, 152–154, 159–162 | 59 (rótulo 63, desliza k=2 em x), depois 35; nos 52, 53 → queda 27 (a barra 47, 49–51 não reage: `0x428609…0x42861e`) |
 | derrubada (4) | fora de 11/12 | 32 `BLASTFWD` (marca 8) ou 33 `BLASTBK0` (0x10) pelo lado × sinal de `+0x244`; v = 8·empurrão |
 | elétrico | fora de 11/12, `+0x284 = 0` | 121 no quadro +17, 10 tiques parado, pisca 0x25; depois 1 |
 

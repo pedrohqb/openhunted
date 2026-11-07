@@ -13,7 +13,7 @@ compressão nem soma de verificação. Extensão padrão `hhg`, local escolhido 
 |---|---|---|---|
 | `0x000` | 32 | `0x47f79c` | assinatura ASCIIZ `"Hunter hunted saved game"` (conferida na carga) |
 | `0x020` | 128 | `0x47f7bc` | nome do jogador (o da lista de heróis) |
-| `0x0a0` | 4 | `0x47f83c` | número de entradas da lista de missões [efêmero] |
+| `0x0a0` | 4 | `0x47f83c` | número de entradas da lista de missões [efêmero; gravar 0] |
 | `0x0a4` | 4 | `0x47f840` | número de missões da campanha no modo solo |
 | `0x0a8` | 4 | `0x47f844` | ? (zerado no New Game) |
 | `0x0ac` | 4 | `0x47f848` | índice da missão corrente |
@@ -25,11 +25,16 @@ compressão nem soma de verificação. Extensão padrão `hhg`, local escolhido 
 | `0x1d8` | 280 | `0x47f974` | fase corrente, ex. `HUNTER.HLS|T_J_001.lev` |
 | `0x2f0` | 1 200 | `0x47fa8c` | `i32[300]`: recorde de cada missão (índice da lista solo; 0 = não vencida) |
 | `0x7a0` | 4 | `0x47ff3c` | ponteiro da lista de missões [lixo; não usar] |
-| `0x7a4` | 4 | `0x47ff40` | ? [efêmero] |
+| `0x7a4` | 4 | `0x47ff40` | capacidade da lista de missões [efêmero] |
 
 Strings ASCIIZ com o resto do campo indefinido (o New Game zera os campos). Um leitor
 compatível deve aceitar arquivos de 1 960 bytes que comecem pela assinatura e ignorar os
 campos marcados efêmeros.
+
+Um escritor compatível grava `0x0a0` **zero** junto com o ponteiro e a capacidade
+[confirmado]: depois da carga, o NEXT (`0x440e95`) só remonta a lista (`0x4406d3`) quando
+`0x47f83c = 0`; com a contagem e o ponteiro nulo, ele segue por `0x440f25`, que lê
+`[0x47ff3c]` (acesso a nulo), e `0x440388` percorre `contagem` entradas.
 
 ## Lista de heróis (`hunter.fam`) [confirmado]
 

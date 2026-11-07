@@ -133,3 +133,8 @@ máscara das chaves +0x94…+0xbc, 1)`: a porta da célula (`itens-campanha.md`)
 - `0x0043b0cb`, `0x00426f6a`, `0x004235c4` (pré-tratamentos) e o estado 4.
 - (resolvido: `0x0040f040` é a porta de célula, `itens-campanha.md`)
 - Se a pose 1 no ar (contato durante o pulo) é só visual até a queda.
+- Atrasos da tabela que o código do Jake ainda ignora (usa 0): `+0x18 = 1` nos estados 15
+  (choque), 49, 73, 109, 112, 128, 131, 146/147 (pronto/guardar dos punhos) e 187/188 —
+  entre eles as poses de arma (pronto/guardar/recuperação). O Garathe já segue a tabela
+  dele nessas poses (81, 82, 85, 111, 128–130, 140–142, 152–154); no Jake a mudança mexeria
+  nos tempos testados das armas (M3/M4) e fica para conferir estado a estado.
