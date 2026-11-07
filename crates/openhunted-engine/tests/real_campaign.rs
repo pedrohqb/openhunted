@@ -258,6 +258,7 @@ fn d_j_007_flags_turn_on_when_collected() {
 /// reposta a cada tique para o Jake seguir jogando. Invariantes: munição ≥ 0, arma em 1–6,
 /// nenhuma porta abrindo/fechando além da animação, o Jake não fica dentro de um sólido.
 #[test]
+#[ignore = "fuzz longo: rode com check.sh --full"]
 fn fuzz_random_input_on_all_solo_levels() {
     // estados `+0x54` da porta: 2 fechando, 3 abrindo
     const CLOSING: u8 = 2;

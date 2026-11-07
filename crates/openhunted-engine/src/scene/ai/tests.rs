@@ -163,6 +163,7 @@ fn human_pistol_kills_an_ai_jake_into_a_corpse() {
         "destruir"
     );
     assert_eq!(behaviour::enemy::kills(&s.entities), 0, "tipo 1 não conta");
+    assert_eq!(s.kills_total, 0, "nem no total");
     // o cadáver não para mais as balas
     let n = s.entities.len();
     for t in 0..40 {

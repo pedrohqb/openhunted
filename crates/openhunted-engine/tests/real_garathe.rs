@@ -277,6 +277,7 @@ fn t_m_002_can_be_won() {
 
 /// Entrada aleatória em todas as fases `p=2` solo: sem pânico e nunca dentro do cenário.
 #[test]
+#[ignore = "fuzz longo: rode com check.sh --full"]
 fn fuzz_random_input_on_all_garathe_levels() {
     let Some(gd) = data() else { return };
     let mut seed: u32 = 0x4d49_4e4f;

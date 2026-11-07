@@ -116,6 +116,7 @@ fn h_j_006_minotaurs_go_after_the_jake() {
 /// Entrada aleatória em todas as fases jogáveis com personagens da IA: sem pânico, a IA
 /// nunca dentro do cenário da camada dela nem fora da fase, entidades limitadas.
 #[test]
+#[ignore = "fuzz longo: rode com check.sh --full"]
 fn fuzz_random_input_on_all_levels_with_ai_characters() {
     let Some(gd) = data() else { return };
     let mut seed: u32 = 0x4149_4149;
