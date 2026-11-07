@@ -65,8 +65,11 @@ projéteis inimigos de `projeteis.md` e o dano de `dano-vida.md`.
 - Ruling: a tabela de passos do rótulo 3 do Bruiser só tem os 10 valores lidos; o resto é 0.
 - Ruling: o OHS morre ao tocar o Jake (caixas a 1 px) ou ao levar qualquer dano de bala; o
   contato com outros objetos não é testado.
-- Ruling: o crédito de morte vai ao jogador quando o golpe que mata vem de uma bala ou do
-  especial dele; explosões não creditam.
+- Ruling (revista na revisão): no solo, toda morte de um tipo contado (3, 4, 7, 8, 10, 11,
+  89, 102–105, 109; `fim-de-missao.md`) conta para o jogador, qualquer que seja a causa; as
+  minas de gerador nunca contam; o total é o número de objetos desses tipos na montagem (o
+  original recontaria no fim as minas de gerador ainda vivas; aqui não entram). A cena
+  recalcula os mortos a cada tique (`enemy::kills`); só os tipos portados podem morrer.
 - Ruling: a explosão de morte do OHG e do OSE não deixa o objeto como destroço sólido; o OSR,
   o OSE e o OBR deixam o destroço desenhado e sem colisão.
 - Ruling: o especial BAIXO+ATIRAR fere esses inimigos pela linha `(1, 0, 9)` (M6b) e, se

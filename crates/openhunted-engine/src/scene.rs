@@ -137,9 +137,10 @@ pub struct Scene {
     pub outcome: Option<Outcome>,
     pub tick_count: u32,
     pub rng: Rng,
-    /// Inimigos (por ora, minas) destruídos pelo jogador (`0x497348`).
+    /// Inimigos mortos (`0x497348`, `enemy::kills`): no solo, toda morte de um tipo contado
+    /// conta para o jogador, qualquer que seja a causa.
     pub kills: i32,
-    /// Inimigos presentes no início da partida (minas e olhos-laser, por ora).
+    /// Inimigos dos tipos contados presentes no início da partida (`enemy::kills_total`).
     pub mines_at_start: i32,
     /// Cronômetro em tiques (`0x4972fc` = campo 1004 × 20; decrementado a cada tique).
     pub timer: i32,
@@ -668,15 +669,7 @@ impl Scene {
                 s.projectile_borders.insert(name.to_string(), b);
             }
         }
-        s.mines_at_start = s
-            .entities
-            .iter()
-            .filter(|e| {
-                e.alive
-                    && (matches!(e.behaviour, Behaviour::Mine(_) | Behaviour::LaserEye(_))
-                        || crate::entity::ENEMIES.contains(&e.kind))
-            })
-            .count() as i32;
+        s.mines_at_start = behaviour::enemy::kills_total(&s.entities);
         Ok(s)
     }
 
@@ -824,6 +817,7 @@ impl Scene {
             }
         }
         self.prev_input = input;
+        self.kills = behaviour::enemy::kills(&self.entities);
         if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
             // deslocamento do desenho pelo esqueleto (`+0x16c/+0x170`)
             let (ox, oy) = j.draw_offset();
@@ -1081,10 +1075,6 @@ impl Scene {
                 })
             );
             if let Behaviour::Mine(_) = self.entities[vi].behaviour {
-                if self.entities[vi].health > 0 && by_player {
-                    self.kills += 1;
-                }
-                self.entities[vi].health -= behaviour::bullet::DAMAGE;
                 self.entities[vi].health = 0;
             } else if behaviour::enemy::hurt(
                 &mut self.entities[vi],
@@ -1105,16 +1095,12 @@ impl Scene {
                     )));
                 }
             } else {
-                let fresh = matches!(&self.entities[vi].behaviour,
-                    Behaviour::LaserEye(s) if s.hurt.is_empty());
                 let p = crate::damage::Pending {
                     amount: behaviour::bullet::DAMAGE,
                     explosion: true,
                     ..Default::default()
                 };
-                if behaviour::interact::hurt(&mut self.entities[vi], &p) && fresh && by_player {
-                    self.kills += 1;
-                }
+                behaviour::interact::hurt(&mut self.entities[vi], &p);
             }
             let c = self.entities[bi].center();
             self.entities[bi].alive = false;
@@ -1320,21 +1306,12 @@ impl Scene {
                 crate::jake::SpecialEffect::Destroy => e.alive = false,
                 crate::jake::SpecialEffect::Knockdown => {}
                 crate::jake::SpecialEffect::Damage => {
-                    // pelo mesmo caminho das balas: mina (vida), barril (natureza 0: nada) e
-                    // olho-laser (qualquer dano mata); a cerca não trata dano (como antes)
-                    let before = e.health;
-                    let fresh = matches!(&e.behaviour,
-                        Behaviour::LaserEye(s) if s.hurt.is_empty());
-                    let eye = matches!(e.behaviour, Behaviour::LaserEye(_));
+                    // pelo mesmo caminho das balas: mina (vida), barril (natureza 0: nada),
+                    // olho-laser (qualquer dano mata) e os inimigos da M7a; a cerca não trata
+                    // dano (como antes). As mortes contam pela cena (`enemy::kills`).
                     let dmg = b.damage(e.center());
-                    // os inimigos da M7a creditam o jogador na própria morte
-                    let hit =
+                    let _ =
                         behaviour::enemy::hurt(e, &dmg, true) || behaviour::interact::hurt(e, &dmg);
-                    let mine_died =
-                        matches!(e.behaviour, Behaviour::Mine(_)) && before > 0 && e.health <= 0;
-                    if mine_died || (hit && eye && fresh) {
-                        self.kills += 1;
-                    }
                 }
             }
         }
@@ -1464,7 +1441,6 @@ impl Scene {
                 j.hurt(out.jake_damage);
             }
         }
-        self.kills += out.kills;
         self.apply_quake(out.quake);
         self.spawn_enemy_objects(&mut out);
         self.entities.extend(out.spawn);
@@ -1858,7 +1834,8 @@ mod tests {
             vec![false, false],
             "as duas minas explodem (em cadeia)"
         );
-        assert_eq!(s.kills, 0, "explosão no contato não conta");
+        // no solo toda morte de um tipo contado conta (`0x43d0f2`), contato e cadeia incluídos
+        assert_eq!(s.kills, 2, "as duas minas contam");
         let j = s.jake.as_ref().unwrap();
         assert!(j.health.hp < 50 && j.health.hp > 0, "vida {}", j.health.hp);
     }
@@ -2163,7 +2140,7 @@ mod tests {
                 .any(|e| e.alive && e.kind == crate::entity::MINE)
         );
         assert_eq!(s.kills, 1, "mina morta pela bala conta para o jogador");
-        // bala que não é do jogador (inimigos atirando, no futuro): mata, mas não conta
+        // bala que não é do jogador: mata e, no solo, também conta
         s.entities.push(mine2);
         let not_mine = |s: &mut Scene| {
             for e in s.entities.iter_mut() {
@@ -2184,7 +2161,7 @@ mod tests {
                 .iter()
                 .any(|e| e.alive && e.kind == crate::entity::MINE)
         );
-        assert_eq!(s.kills, 1);
+        assert_eq!(s.kills, 2);
         // (a animação sintética só tem o rótulo 1: a faísca `oex15` fica para o teste real)
         assert!(
             s.events

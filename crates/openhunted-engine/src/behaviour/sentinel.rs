@@ -194,9 +194,6 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 push: BLAST_PUSH,
                 damage: BLAST_DAMAGE,
             });
-            if w.by_player {
-                out.kills += 1;
-            }
         }
     }
     let (_, _, len) = enemy::label(&LABELS, st.clip.label);
@@ -312,13 +309,13 @@ mod tests {
             tick(&mut s, &mut c, &mut out);
         }
         assert!(s.health <= 0);
-        assert_eq!(out.kills, 1);
+        assert!(enemy::killed(&s));
         assert_eq!(out.blasts.len(), 1);
         tick(&mut s, &mut c, &mut out);
         assert!(st(&s).dead && s.alive && !s.solid_shapes, "destroço");
         enemy::hurt(&mut s, &p, true);
         tick(&mut s, &mut c, &mut out);
-        assert_eq!((out.kills, out.blasts.len()), (1, 1));
+        assert_eq!(out.blasts.len(), 1, "o destroço não explode de novo");
     }
 
     #[test]

@@ -410,9 +410,6 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         e.health -= w.pending.amount * 50 / 100;
         if e.health <= 0 {
             st.set(DIE);
-            if w.by_player {
-                out.kills += 1;
-            }
         } else if !matches!(st.state, STAGGER | TURN | GROUND_FIRE) {
             st.set(STAGGER);
         }
@@ -564,7 +561,7 @@ mod tests {
         enemy::hurt(&mut b, &bullet, true);
         tick(&mut b, &mut c, &mut out);
         assert_eq!(st(&b).state, DIE);
-        assert_eq!(out.kills, 1);
+        assert!(enemy::killed(&b), "a morte conta");
         for _ in 0..10 {
             tick(&mut b, &mut c, &mut out);
         }

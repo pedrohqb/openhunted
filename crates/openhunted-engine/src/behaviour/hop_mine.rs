@@ -177,9 +177,6 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             push: BLAST_PUSH,
             damage: BLAST_DAMAGE,
         });
-        if w.by_player {
-            out.kills += 1;
-        }
         e.alive = false;
         e.on = true;
         return;
@@ -285,7 +282,7 @@ mod tests {
         assert_eq!(out.jake_damage.amount, DIRECT);
         assert_eq!(out.blasts.len(), 1);
         assert_eq!(out.blasts[0].damage, BLAST_DAMAGE);
-        assert_eq!(out.kills, 0, "encostar não é morte do jogador");
+        assert!(enemy::killed(&m), "no solo, encostar também conta");
         // a bala da pistola detona e conta
         let mut m = hopper(600, 420);
         let p = Pending {
@@ -295,7 +292,7 @@ mod tests {
         assert!(enemy::hurt(&mut m, &p, true));
         tick(&mut m, &mut c, &mut out);
         assert!(!m.alive);
-        assert_eq!(out.kills, 1);
+        assert!(enemy::killed(&m));
     }
 
     #[test]

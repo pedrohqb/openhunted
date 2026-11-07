@@ -189,6 +189,44 @@ pub fn hurt(e: &mut Entity, p: &Pending, by_player: bool) -> bool {
     true
 }
 
+/// Tipos que entram nas estatísticas de fim de fase (`0x43cfcf`, `0x43d0f2`…`0x43d1e8`):
+/// 3, 4, 7, 8, 10, 11, 89, 102–105 e 109.
+pub const COUNTED: [u32; 12] = [3, 4, 7, 8, 10, 11, 89, 102, 103, 104, 105, 109];
+
+/// Entra no total: tipo contado e não é mina de gerador (as minas soltas ligam `0x10` e são
+/// liberadas ao morrer, `0x435b63` → `0x433e2c`: não ficam nas listas que o placar percorre).
+pub fn counted(e: &Entity) -> bool {
+    COUNTED.contains(&e.kind) && !matches!(&e.behaviour, Behaviour::Mine(m) if m.owner != 0)
+}
+
+/// Morte que conta para o jogador: no solo (`0x497300 = 1`) quem não tem dono do golpe
+/// (`+0x1b0 = 0`) é creditado ao jogador 1, então todo objeto contado com vida ≤ 0 conta,
+/// explosões e contato incluídos. Só os tipos com comportamento portado (os demais nunca
+/// morrem aqui); o olho-laser, cuja vida não é lida, conta quando morre (some com vida 0).
+pub fn killed(e: &Entity) -> bool {
+    counted(e)
+        && match &e.behaviour {
+            Behaviour::LaserEye(_) => !e.alive && e.health <= 0,
+            Behaviour::Mine(_)
+            | Behaviour::Sentinel(_)
+            | Behaviour::HopMine(_)
+            | Behaviour::MineGenerator(_)
+            | Behaviour::SecurityRobot(_)
+            | Behaviour::Bruiser(_) => e.health <= 0,
+            _ => false,
+        }
+}
+
+/// Mortos da fase (`0x497348`).
+pub fn kills(entities: &[Entity]) -> i32 {
+    entities.iter().filter(|e| killed(e)).count() as i32
+}
+
+/// Total da fase (`0x497330`), contado na montagem.
+pub fn kills_total(entities: &[Entity]) -> i32 {
+    entities.iter().filter(|e| counted(e)).count() as i32
+}
+
 /// O Jake como alvo possível: vivo, em jogo e na camada `layer` (caixa).
 pub fn jake_target(ctx: &Ctx, layer: i32) -> Option<Rect> {
     ctx.jake_bounds().filter(|_| ctx.jake_layer == layer)
@@ -309,6 +347,31 @@ mod tests {
             !line_of_sight(&cw, (100, 20), (300, 20), &[own]),
             "parede em x 200"
         );
+    }
+
+    #[test]
+    fn every_counted_death_counts_but_generator_mines_never() {
+        use crate::behaviour::test_support::logic;
+        let level_mine = super::super::mine_generator::mine((0, 0), 0, 0, 0);
+        let freed = super::super::mine_generator::mine((0, 0), 0, 0, 7);
+        let mut hop = logic(crate::entity::HOP_MINE, 0, 0, &[]);
+        hop.behaviour = Behaviour::HopMine(Default::default());
+        hop.health = 10;
+        let unported = logic(89, 0, 0, &[]);
+        let barrel = logic(crate::entity::BARREL, 0, 0, &[]);
+        let mut all = vec![level_mine, freed, hop, unported, barrel];
+        assert_eq!(kills_total(&all), 3, "mina da fase, saltadora e o tipo 89");
+        assert_eq!(kills(&all), 0);
+        for e in all.iter_mut() {
+            e.health = 0;
+            e.alive = false;
+        }
+        assert_eq!(
+            kills(&all),
+            2,
+            "a mina de gerador e o tipo não portado não contam"
+        );
+        assert!(kills(&all) <= kills_total(&all));
     }
 
     #[test]

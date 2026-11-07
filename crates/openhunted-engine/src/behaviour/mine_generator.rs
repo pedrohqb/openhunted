@@ -224,9 +224,6 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 push: BLAST_PUSH,
                 damage: BLAST_DAMAGE,
             });
-            if w.by_player {
-                out.kills += 1;
-            }
             e.alive = false;
             e.on = true;
             return;
@@ -358,7 +355,8 @@ mod tests {
         enemy::hurt(&mut g, &p, true);
         tick(&mut g, &mut c, &mut out);
         assert!(!g.alive);
-        assert_eq!((out.kills, out.blasts.len()), (1, 1));
+        assert!(enemy::killed(&g));
+        assert_eq!(out.blasts.len(), 1);
         assert_eq!(out.blasts[0].radius, BLAST_RADIUS);
     }
 

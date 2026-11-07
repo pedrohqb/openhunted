@@ -139,8 +139,6 @@ pub struct Out {
     pub teleport: Option<teleporter::Request>,
     /// Inventário do Jake depois de apanhar armas e munição neste tique.
     pub inventory: Option<crate::jake::Inventory>,
-    /// Inimigos mortos por balas do jogador neste tique (`0x497348`).
-    pub kills: i32,
     /// Objetos que os inimigos pedem (tiros, minas, fogo): a cena os cria com os recursos.
     pub enemy_spawns: Vec<enemy::Spawn>,
     /// Terremoto do Bruiser (`0x418229`): tiques de cambaleio para o Jake, se perto.

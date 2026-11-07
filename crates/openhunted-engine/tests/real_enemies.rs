@@ -351,6 +351,12 @@ fn enemies_fuzz_without_panics() {
                 continue;
             }
             let ctx = format!("{} tique {t}", m.file);
+            assert!(
+                (0..=s.mines_at_start).contains(&s.kills),
+                "{ctx}: {} mortos de {}",
+                s.kills,
+                s.mines_at_start
+            );
             for &(i, inside) in &start {
                 let e = &s.entities[i];
                 if e.alive {

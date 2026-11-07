@@ -529,9 +529,6 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             st.orient = DYING;
             st.fall = (0, 0);
             st.forget();
-            if w.by_player {
-                out.kills += 1;
-            }
         }
     }
     if st.orient == DYING {
@@ -736,7 +733,7 @@ mod tests {
         }
         assert_eq!(r.health, -1, "23 tiros: vida abaixo de 0");
         assert_eq!(st(&r).orient, DYING);
-        assert_eq!(out.kills, 1);
+        assert!(enemy::killed(&r));
         // cai até o chão (y + 47 do Jake → chão em y 47) e explode dez vezes
         let mut n = 0;
         while !st(&r).dead && n < 200 {
