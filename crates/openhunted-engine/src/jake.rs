@@ -130,7 +130,13 @@ pub enum State {
     Rise,
     /// Só o Garathe: tranco (59, rótulo 63; desliza pelo esqueleto com k = 2).
     Jolted,
+    /// Pose de provocação com a entrada exatamente 0xf (Jake: estado 4, rótulo 18,
+    /// `0x426f05`; Garathe: 76, `0x42bcbc`); no fim do rótulo, parado.
+    Taunt,
 }
+
+/// Entrada da pose: as quatro direções e nada mais (`0x423940`, passo 1).
+pub const TAUNT_INPUT: u32 = UP | DOWN | LEFT | RIGHT;
 
 /// O jogador (o Jake ou o Garathe, pelo perfil).
 pub type Player = Jake;
@@ -399,6 +405,7 @@ fn jake_anim(s: State) -> (u16, u32) {
         State::Teleporting(_) => (1, 1),
         State::Rise => (78, 0),
         State::Jolted => (168, 0),
+        State::Taunt => (18, 0),
     }
 }
 
@@ -1280,6 +1287,7 @@ impl Jake {
                 | State::Hide
                 | State::Hidden
                 | State::Unhide
+                | State::Taunt
         ) || (self.state == State::Crawl
             && self.free_above(world, self.profile().headroom));
         let fired = !matches!(self.state, State::Fire { .. })
@@ -1305,6 +1313,14 @@ impl Jake {
             }
             State::Idle | State::Run | State::Push => {
                 self.decide_standing(input, env, jump_edge, side);
+            }
+            State::Taunt => {
+                // outra entrada passa pela decisão em pé; sem decisão, a pose toca até o fim
+                self.body.vx = 0;
+                if input != TAUNT_INPUT && self.decide(input, env, jump_edge, side) {
+                } else if self.anim_done() {
+                    self.set(State::Idle);
+                }
             }
             State::RunUp if self.is_garathe() => {
                 // preparo 24 (uma vez) → pulo longo 25 (`0x429a0b`)
@@ -2227,5 +2243,33 @@ mod tests {
         assert_eq!(r.y, b.y + b.h / 3, "terço do meio");
         // um acerto por golpe: tiques distintos e espaçados
         assert!(strikes.windows(2).all(|p| p[1].0 > p[0].0 + 1));
+    }
+
+    #[test]
+    fn four_directions_taunt_then_stand() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0);
+        j.tick(TAUNT_INPUT, &w);
+        assert_eq!(
+            (j.state(), j.label()),
+            (State::Taunt, 18),
+            "estado 4, rótulo 18"
+        );
+        assert_eq!(j.body.vx, 0);
+        // sem entrada a pose toca até o fim (3 quadros) e volta a parado
+        let mut n = 0;
+        while j.state() == State::Taunt && n < 10 {
+            j.tick(0, &w);
+            n += 1;
+        }
+        assert_eq!((j.state(), n), (State::Idle, 3));
+        // outra entrada passa pela decisão em pé
+        j.tick(TAUNT_INPUT, &w);
+        j.tick(RIGHT, &w);
+        assert_eq!(j.state(), State::Run);
+        j.tick(TAUNT_INPUT, &w);
+        assert_eq!(j.state(), State::Taunt, "da corrida também");
+        j.tick(SHOOT, &w);
+        assert!(j.is_firing(), "atira da pose");
     }
 }

@@ -47,6 +47,7 @@ pub(super) fn anim(s: State) -> (u16, u32) {
         State::GetUp => (31, 0),
         State::Rise => (35, 0),
         State::Jolted => (63, 0),
+        State::Taunt => (76, 0),
         State::Pushed => (58, 0),
         State::KnockedDown(_) => (32, 1),
         State::Shocked(_) => (121, 1),
@@ -106,8 +107,9 @@ pub(super) fn mirrored(s: State) -> bool {
 }
 
 /// Todos os rótulos usados (para conferir contra o `MINOTAUR.ANM` real).
-pub const ALL_LABELS: [u16; 47] = [
+pub const ALL_LABELS: [u16; 48] = [
     1,
+    76,
     10,
     46,
     21,
@@ -638,5 +640,15 @@ mod tests {
         // estrelas para cima: 138, `+0x14/+0x18` 20/24
         let r = weapons::G_STARS_W.states[weapons::aim_slot(Aim::Up)][0].1;
         assert_eq!((r.again, r.reeval), (20, 24));
+    }
+
+    #[test]
+    fn four_directions_taunt_with_label_76() {
+        let w = floor_world();
+        let mut j = garathe(&w, 0);
+        j.tick(crate::jake::TAUNT_INPUT, &w);
+        assert_eq!((j.state(), j.label()), (State::Taunt, 76));
+        run(&mut j, &w, 0, 6);
+        assert_eq!(j.state(), State::Idle, "76 com 6 quadros, depois parado");
     }
 }

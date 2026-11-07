@@ -281,6 +281,7 @@ pub fn can_fall(s: State) -> bool {
             | State::Rise
             | State::Shake
             | State::Special(_)
+            | State::Taunt
     )
 }
 
@@ -422,6 +423,11 @@ impl Jake {
     ) -> bool {
         let pressed = |bit: u32| input & bit != 0;
         let world = env.world;
+        if input == super::TAUNT_INPUT {
+            self.body.vx = 0;
+            self.set(State::Taunt);
+            return true;
+        }
         if jump_edge && self.body.on_ground {
             self.body.vx = 0;
             if side.is_some() {
