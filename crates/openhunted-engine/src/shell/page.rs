@@ -23,8 +23,8 @@ pub enum Reply {
     Name(String),
     /// Modo de dois jogadores: caixa "não disponível".
     Unavailable,
-    /// CUSTOMIZE do jogador 1 (`SINPU` → `SKEYB`).
-    Customize,
+    /// CUSTOMIZE do jogador 0 ou 1 (`SINPU` → `SKEYB` ou `SJOYS`).
+    Customize(usize),
 }
 
 /// Uma tela aberta.
@@ -42,4 +42,11 @@ pub trait Page {
     fn wants_text(&self) -> bool {
         false
     }
+    /// Espera uma tecla ou um botão (`SKEYB`/`SJOYS`): a aplicação passa as teclas cruas
+    /// (`raw_key`, código VK) e os botões do joystick (`joy_buttons`) em vez de navegar.
+    fn capturing(&self) -> bool {
+        false
+    }
+    fn raw_key(&mut self, _vk: u8) {}
+    fn joy_buttons(&mut self, _pressed: u32) {}
 }

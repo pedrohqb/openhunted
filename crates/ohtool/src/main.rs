@@ -202,6 +202,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             if let Some(json) = extract::structured_json(&name, data) {
                 writeln!(out, "{}", json?)?;
             }
+            if extract::extension(&name) == "VCR" {
+                // fita de comandos de desenho (`docs/formats/vcr.md`)
+                let v = openhunted_formats::Vcr::parse(data)?;
+                writeln!(out, "quadros: {}, marcas: {}", v.frames(), v.tags.len())?;
+                let mut count = std::collections::BTreeMap::new();
+                for o in &v.ops {
+                    *count.entry(o.code).or_insert(0usize) += 1;
+                }
+                for (code, n) in count {
+                    writeln!(out, "  0x{code:02X}: {n}")?;
+                }
+                for (id, t) in &v.tags {
+                    writeln!(out, "  marca {id}: {t}")?;
+                }
+            }
             if extract::extension(&name) == "BMP" {
                 let bmp = Bitmap::parse(data)?;
                 writeln!(out, "quadros: {}", bmp.frames.len())?;

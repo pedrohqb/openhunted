@@ -71,3 +71,4 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`opcoes-salvamento.md`](opcoes-salvamento.md): `HUNTER.INI`, tela de opções, menu da janela, dificuldade, jogo salvo `.hhg`, progresso e `hunter.fam`.
 - [`multijogador.md`](multijogador.md): dois jogadores (disputa e cooperativo, sem rede): máscaras de modo, atribuição das vagas, entrada dupla, tela dividida, crédito e pontos, renascimento, itens que renascem, limites e `SH2HS`.
 - [`cores-sprites.md`](cores-sprites.md): tabela de desenho `0x43becd` (`DLS.TBL`), arte "de sprite" dos 7 tipos com rotina `+0x1c4`, cor e piscar dos jogadores, Camaleão (cor, clones, esmaecer) e pulsos do robô, do gerador e das minas.
+- [`casca-acabamento.md`](casca-acabamento.md): logotipo, título, história e créditos da abertura, laço de demonstração (e o `PLAY.VCR`, que o jogo não lê), dispositivos, `InputKeys`/`Joystick` do `HUNTER.INI`, bits de entrada, `SINPU`/`SKEYB`/`SJOYS` e a luz por célula.

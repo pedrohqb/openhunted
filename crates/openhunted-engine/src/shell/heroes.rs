@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Telas pequenas da casca (`docs/re/menus-restantes.md`): lista de heróis (`SHERO`), nome
-//! (`SHIGH`), carro de fuga (`S_CAR`) e as informativas (`SABOUT`, `SMULT`, `SINPU`,
-//! `SKEYB`).
+//! (`SHIGH`), carro de fuga (`S_CAR`) e as informativas (`SABOUT`, `SMULT`).
 
 use std::rc::Rc;
 
@@ -265,14 +264,11 @@ impl Page for Car {
     }
 }
 
-/// Telas só de consulta: "Sobre" (`SABOUT`), dois jogadores (`SMULT`), dispositivos
-/// (`SINPU`) e teclas (`SKEYB`).
+/// Telas só de consulta: "Sobre" (`SABOUT`) e dois jogadores (`SMULT`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InfoKind {
     About,
     Multi,
-    Input,
-    Keys,
 }
 
 /// Ids das telas informativas.
@@ -283,24 +279,6 @@ pub mod info_ids {
     pub const MULTI_H2H: u16 = 13001;
     pub const MULTI_COOP: u16 = 13002;
     pub const MULTI_CANCEL: u16 = 13004;
-    pub const INPUT_P1_KEYBOARD: u16 = 29001;
-    pub const INPUT_P2_KEYBOARD: u16 = 29006;
-    pub const INPUT_P2_GAMEPAD2: u16 = 29010;
-    pub const INPUT_DONE: u16 = 29011;
-    pub const INPUT_P1_CUSTOMIZE: u16 = 29013;
-    pub const INPUT_P2_CUSTOMIZE: u16 = 29014;
-    /// Botões das ações (cima, baixo, esquerda, direita, atirar, pular, furtivo, arma
-    /// anterior, soco, próxima arma) e as áreas dos nomes das teclas.
-    pub const KEYS_FIRST: u16 = 17001;
-    pub const KEYS_LAST: u16 = 17010;
-    pub const KEYS_STR: u16 = 17011;
-    pub const KEYS_DONE: u16 = 17024;
-    pub const KEYS_RESET: u16 = 17025;
-    pub const KEYS_COLOR: u8 = 211;
-    pub const KEYS_CHARACTER: u16 = 17023;
-    pub const KEYS_NAMEPLATE: u16 = 17026;
-    /// Rótulo da placa "play 1, keyb" do `Skeyb.anm`.
-    pub const KEYS_PLATE_P1_KEYBOARD: u16 = 47;
 }
 
 #[derive(Debug, Clone)]
@@ -310,7 +288,7 @@ pub struct Info {
 }
 
 impl Info {
-    /// `texts`: "Sobre" → a versão; teclas → os dez nomes, na ordem dos botões 17001–17010.
+    /// `texts`: "Sobre" → a versão.
     pub fn new(
         mut screen: Screen,
         kind: InfoKind,
@@ -321,8 +299,6 @@ impl Info {
         let buttons: &[u16] = match kind {
             InfoKind::About => &[ABOUT_DONE],
             InfoKind::Multi => &[MULTI_H2H, MULTI_COOP, MULTI_CANCEL],
-            InfoKind::Input => &[INPUT_DONE, INPUT_P1_CUSTOMIZE, INPUT_P2_CUSTOMIZE],
-            InfoKind::Keys => &[KEYS_DONE, KEYS_RESET],
         };
         for &id in buttons {
             screen.set_flags(id, flags::UPDATE | flags::NAV);
@@ -331,23 +307,6 @@ impl Info {
             InfoKind::About => {
                 if let (Some(f), Some(t)) = (font, texts.first()) {
                     screen.set_text(ABOUT_VERSION, t, f, ABOUT_COLOR);
-                }
-            }
-            InfoKind::Input => {
-                // só o teclado (jogador 1 no `Keyboard1`, jogador 2 no `Keyboard2`)
-                for id in INPUT_P1_KEYBOARD..=INPUT_P2_GAMEPAD2 {
-                    screen.make_option(id);
-                    screen.clear_flags(id, flags::NAV);
-                }
-                screen.set_marked(INPUT_P1_KEYBOARD, true);
-                screen.set_marked(INPUT_P2_KEYBOARD, true);
-            }
-            InfoKind::Keys => {
-                screen.set_label(KEYS_NAMEPLATE, KEYS_PLATE_P1_KEYBOARD);
-                if let Some(f) = font {
-                    for (k, t) in texts.iter().take(10).enumerate() {
-                        screen.set_text(KEYS_STR + k as u16, t, f.clone(), KEYS_COLOR);
-                    }
                 }
             }
             InfoKind::Multi => {}
@@ -366,15 +325,10 @@ impl Page for Info {
         use info_ids::*;
         let id = self.screen.handle(input)?;
         match (self.kind, id) {
-            (_, CANCEL)
-            | (InfoKind::About, ABOUT_DONE)
-            | (InfoKind::Multi, MULTI_CANCEL)
-            | (InfoKind::Input, INPUT_DONE)
-            | (InfoKind::Keys, KEYS_DONE) => Some(Reply::Close),
-            (InfoKind::Multi, MULTI_H2H | MULTI_COOP) | (InfoKind::Input, INPUT_P2_CUSTOMIZE) => {
-                Some(Reply::Unavailable)
+            (_, CANCEL) | (InfoKind::About, ABOUT_DONE) | (InfoKind::Multi, MULTI_CANCEL) => {
+                Some(Reply::Close)
             }
-            (InfoKind::Input, INPUT_P1_CUSTOMIZE) => Some(Reply::Customize),
+            (InfoKind::Multi, MULTI_H2H | MULTI_COOP) => Some(Reply::Unavailable),
             _ => None,
         }
     }

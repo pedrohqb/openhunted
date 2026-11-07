@@ -11,16 +11,18 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M14: acabamento da casca e entrada.** A abertura do original (logotipo, filme, título,
+história, créditos) repete até uma tecla, também depois de 30 s de menu parado; as teclas e o
+joystick se configuram em "Input Devices" (`SINPU`, `SKEYB`, `SJOYS`) e ficam no `hunter.ini`;
+as salas apagadas por gatilho somem com os objetos e voltam clareando (luz por célula). Regras
+em `docs/superpowers/specs/2026-11-07-m14-acabamento-design.md`.
+
 **M13: auditoria da campanha.** `ohtool audit --god --reach`: das 65 missões solo, 64
 vencem (a D_M_010 não: antídoto sem veneno, como no original). Corrigidos os teletransportes
 entre camadas e a placa da saída. Tabela em [`docs/campanha.md`](docs/campanha.md).
 
-**M12: as cores dos sprites.** O Jake, o Garathe, o Camaleão, o Anticorpo, o robô de
-segurança, o gerador de minas e as minas flutuantes são desenhados pela tabela de cor do
-`DLS.TBL` que o original monta para cada um (antes saíam com ruído de arco-íris): o Jake e o
-Garathe piscam ao serem feridos, envenenados ou eletrocutados; o Camaleão tem a cor da
-variante, cicla de cor ao se clonar e, invisível, só deixa ver o brilho do corpo; robôs,
-geradores e minas pulsam. Regras em `docs/superpowers/specs/2026-11-07-m12-cores-design.md`.
+**M12: as cores dos sprites** pelas tabelas do `DLS.TBL` (piscar dos jogadores, Camaleão,
+pulsos de robôs, geradores e minas).
 
 **M11: personagens do computador.** Minotauros e Jakes sem jogador agem pela IA do original
 (veem a 400 px, caçam, recuam, vagam, golpeiam ou atiram, pulam buracos, fogem de perigos,
@@ -38,18 +40,11 @@ longo com investida, rastejar, barra, esconder, especial) e as armas dele (garra
 chicote, facas, granadas, estrelas). A `T_M_002` é vencida de ponta a ponta. Regras em
 `docs/superpowers/specs/2026-11-06-m8-garathe-design.md`.
 
-**M9: a casca completa.** Todos os botões do menu principal levam às telas originais:
-carregar (Restore), escolher missão (`SLEVL`, com a marca nas vencidas e o retrato do
-personagem), opções (`SOPTI`: dificuldade, brilho, volumes da música e dos efeitos, gravadas
-na hora), dispositivos e teclas (`SINPU`/`SKEYB`, só consulta), heróis (`SHERO`), "Sobre"
-(no botão Help) e dois jogadores (`SMULT`, com o aviso de que esses modos não existem). Depois
-de cada vitória que dá uma peça do carro aparece `S_CAR`; a 7ª peça traz o filme do meio
-(com as vozes) e a 15ª o final e os créditos. Na contagem do resultado, a soma dos recordes
-entra na lista de heróis (`hunter.fam`, pedindo o nome) e o jogo é gravado num `.hhg`
-compatível com o original (o nome do arquivo é pedido na primeira vez). A música dos menus
-(`SX_3000.WAV`) toca em laço; na partida, as faixas de uma pasta tomam o lugar das do CD. Os
-filmes AVI (Indeo 3.2) tocam pelo `ffmpeg`, se houver. Regras e simplificações em
-`docs/superpowers/specs/2026-11-06-m9-casca-design.md`.
+**M9: a casca completa.** Todas as telas do menu (carregar, escolher missão, opções gravadas
+na hora, heróis, "Sobre", dois jogadores com o aviso de que não existem); `S_CAR` a cada peça
+do carro, filmes do meio e do final; lista de heróis (`hunter.fam`) e jogo salvo `.hhg`
+compatíveis com o original; música dos menus em laço e faixas de uma pasta na partida; filmes
+AVI pelo `ffmpeg`. Regras em `docs/superpowers/specs/2026-11-06-m9-casca-design.md`.
 
 **M7b: o arsenal do Jake e os itens da campanha.** Além da pistola, o Jake soca (Z, ou
 ATIRAR com os punhos: 8 de dano na frente), atira com a espingarda (o chumbo se divide em
@@ -75,11 +70,11 @@ Etapas anteriores: M4 a `T_J_001` de ponta a ponta, com a pistola e o som posici
 formatos (`openhunted-formats` lê o CD, pasta ou `.iso`; [`docs/formats/`](docs/formats/README.md));
 M2 visualizador; M3a o Jake corre e pula; M3b objetos sólidos e presença por modo.
 
-Ainda não há: o equilíbrio na beirada (162/163), os passos e
-demais sons por quadro do Jake e do cenário, o zumbido das minas, o logotipo, o título e a
-história da abertura (só o filme toca) e o laço de demonstração, a troca de teclas e o joystick,
-os modos de dois jogadores (e a cor escolhida para cada um), tesouros e segredos, a luz por
-região sobre os objetos. Os obstáculos `OPO` (gotas, bloco que cai, portão) ainda não agem.
+Ainda não há: o equilíbrio na beirada (162/163), os passos e demais sons por quadro do Jake e
+do cenário, o zumbido das minas, os modos de dois jogadores (e a cor escolhida para cada um),
+tesouros e segredos, a pintura por camadas (o original só mostra a camada do jogador e, nos
+buracos, as de trás escurecidas; aqui todas aparecem) e a navegação das telas pelo joystick.
+Os obstáculos `OPO` (gotas, bloco que cai, portão) ainda não agem.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
 reversa, em [`docs/re/`](docs/re/).
@@ -97,14 +92,15 @@ cargo run --release -p openhunted --features bundled-sdl -- --data /caminho/Hunt
 ```
 
 Opções: `--level T_J_001.LEV` (pula a abertura e o menu e abre o briefing dessa fase),
-`--frames N` (fecha depois de N quadros), `--no-intro` (sem o filme de abertura). A variável
+`--frames N` (fecha depois de N quadros), `--no-intro` (sem a abertura). A variável
 `OPENHUNTED_DATA` substitui `--data`.
 
 Arquivos do jogador (criados na primeira gravação):
 
 - `~/.config/openhunted/hunter.ini` (ou `$XDG_CONFIG_HOME/openhunted/`): as opções, com as
-  chaves do `HUNTER.INI` original (`Difficulty`, `MusicVolume`, `SfxVolume`, `Brightness`)
-  e `MusicDir`, a pasta das faixas de música;
+  chaves do `HUNTER.INI` original (`Difficulty`, `MusicVolume`, `SfxVolume`, `Brightness`,
+  `Player1Input`/`Player2Input`, `InputKeys1/2` em códigos VK, `Joystick1/2`) e `MusicDir`,
+  a pasta das faixas de música;
 - `~/.local/share/openhunted/` (ou `$XDG_DATA_HOME/openhunted/`): `hunter.fam` (lista de
   heróis) e `saves/*.hhg` (jogos salvos, no formato do original).
 
@@ -125,7 +121,10 @@ Enter carrega. Nos campos de nome, digita-se pelo teclado, Backspace apaga, Ente
 Esc desiste (no nome do arquivo, desistir não grava). "Restore" já traz o nome do jogo salvo
 mais recente.
 
-No jogo: setas movem o personagem (o Jake ou, nas missões do Minotauro, o Garathe), espaço pula (correndo, o pulo escolhe a distância conforme o chão
+No jogo (teclas padrão do original, trocáveis em "Input Devices" → CUSTOMIZE, onde também
+se escolhe um joystick: eixos ou chapéu movem, meia inclinação anda, botões 1–6 atiram,
+pulam, andam furtivo, trocam de arma e socam): setas movem o personagem (o Jake ou, nas
+missões do Minotauro, o Garathe), **Shift** pula (correndo, o pulo escolhe a distância conforme o chão
 adiante; com CIMA, para cima), Ctrl atira (segurando, rajadas; com as setas mira para cima e
 nas diagonais; BAIXO+Ctrl é o especial), X anda furtivo (o Garathe, em pose de luta), Z é o soco (o Garathe usa a clava se a tem), PgUp/PgDn trocam de arma (1–6 escolhem direto), CIMA
 usa a saída ou o interruptor quando ele está parado diante deles, agarra cordas e escadas, passa pelas portas

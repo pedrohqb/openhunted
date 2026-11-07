@@ -110,7 +110,7 @@ pub(crate) fn physical(anim: &Animation, frame: usize) -> Option<usize> {
 
 /// Primeiro quadro lógico e número de quadros do rótulo: até o quadro que termina a
 /// animação (opcode 1) ou o início do rótulo seguinte (como `AnimPlayer`, pela tabela A).
-fn label_range(anim: &Animation, label: u16) -> Option<(usize, usize)> {
+pub(crate) fn label_range(anim: &Animation, label: u16) -> Option<(usize, usize)> {
     let start = usize::from(anim.labels.iter().find(|l| l.id == label)?.frame);
     let next = anim
         .labels

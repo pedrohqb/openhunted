@@ -53,6 +53,16 @@ pub enum Key {
     Other,
 }
 
+/// Estado de um joystick da SDL num quadro: eixos 0/1 já em −128…127 (`>> 8`, como o
+/// `joyGetPos` em `0x4483c4`), botões (bit 0 = botão 1) e quantos botões ele tem.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct JoyRaw {
+    pub x: i16,
+    pub y: i16,
+    pub buttons: u32,
+    pub count: u32,
+}
+
 /// Teclas seguradas neste quadro (o jogo lê o estado a cada tique).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Held {
@@ -500,6 +510,7 @@ impl App {
             _ => None,
         };
         let (paused_text, okay) = (self.sys_text(text::PAUSED), self.sys_text(text::OKAY));
+        self.m9.idle_ms = 0;
         if matches!(self.state, State::Page { .. } | State::Show(_)) {
             self.casca_key(key);
             return;
@@ -546,7 +557,6 @@ impl App {
                 let Some(v) = self.viewer.as_mut() else {
                     return;
                 };
-                use openhunted_engine::input::{JUMP, UP};
                 match key {
                     Key::Pause if v.modal().is_none() && v.outcome().is_none() => {
                         *pause = self.generic.as_ref().zip(self.font.as_ref()).map(|(b, f)| {
@@ -564,9 +574,7 @@ impl App {
                         }
                     }
                     Key::Tab => v.apply(Action::ToggleOverlay),
-                    // com a dica aberta, a tecla só a fecha (não vira pulo nem CIMA)
-                    Key::Space if v.modal().is_none() => v.tap(JUMP),
-                    Key::Up if v.modal().is_none() => v.tap(UP),
+                    // o pulo e o CIMA rápidos vêm pelas teclas atribuídas (`vk_down`)
                     // com o Jake, PageUp/PageDown trocam de arma (`set_held`): a câmera o segue
                     Key::PageUp if !v.has_jake() => v.apply(Action::PageLeft),
                     Key::PageDown if !v.has_jake() => v.apply(Action::PageRight),
@@ -590,41 +598,46 @@ impl App {
 
     /// Teclas seguradas (a cada quadro): controlam o Jake, ou rolam a tela sem ele.
     pub fn set_held(&mut self, h: Held) {
+        use openhunted_engine::input::{
+            DOWN, JUMP, LEFT, NEXT_WEAPON, PREV_WEAPON, PUNCH, RIGHT, SHOOT, STEALTH, UP,
+        };
+        let mut bits = 0;
+        for (on, bit) in [
+            (h.left, LEFT),
+            (h.right, RIGHT),
+            (h.up, UP),
+            (h.down, DOWN),
+            (h.jump, JUMP),
+            (h.shoot, SHOOT),
+            (h.stealth, STEALTH),
+            (h.punch, PUNCH),
+            (h.prev_weapon, PREV_WEAPON),
+            (h.next_weapon, NEXT_WEAPON),
+        ] {
+            if on {
+                bits |= bit;
+            }
+        }
+        self.set_input(bits, h.select);
+    }
+
+    /// Bits de entrada do quadro (`openhunted_engine::input`) e a arma escolhida (1–6, 0 =
+    /// nenhuma): controlam o Jake, ou rolam a tela sem ele.
+    pub fn set_input(&mut self, bits: u32, select: u8) {
+        use openhunted_engine::input::{DOWN, LEFT, RIGHT, SELECT_MASK, SELECT_SHIFT, UP};
         let (State::Play { pause: None, .. }, Some(v)) = (&self.state, self.viewer.as_mut()) else {
             return;
         };
         if v.has_jake() {
-            use openhunted_engine::input::{
-                DOWN, JUMP, LEFT, NEXT_WEAPON, PREV_WEAPON, PUNCH, RIGHT, SELECT_MASK,
-                SELECT_SHIFT, SHOOT, STEALTH, UP,
-            };
-            let mut bits = 0;
-            for (on, bit) in [
-                (h.left, LEFT),
-                (h.right, RIGHT),
-                (h.up, UP),
-                (h.down, DOWN),
-                (h.jump, JUMP),
-                (h.shoot, SHOOT),
-                (h.stealth, STEALTH),
-                (h.punch, PUNCH),
-                (h.prev_weapon, PREV_WEAPON),
-                (h.next_weapon, NEXT_WEAPON),
-            ] {
-                if on {
-                    bits |= bit;
-                }
-            }
-            bits |= (u32::from(h.select) << SELECT_SHIFT) & SELECT_MASK;
-            v.set_input(bits);
+            v.set_input(bits | ((u32::from(select) << SELECT_SHIFT) & SELECT_MASK));
         } else {
-            for (on, act) in [
-                (h.left, Action::ScrollLeft),
-                (h.right, Action::ScrollRight),
-                (h.up, Action::ScrollUp),
-                (h.down, Action::ScrollDown),
+            for (bit, act) in [
+                (LEFT, Action::ScrollLeft),
+                (RIGHT, Action::ScrollRight),
+                (UP, Action::ScrollUp),
+                (DOWN, Action::ScrollDown),
             ] {
-                if on {
+                if bits & bit != 0 {
                     v.apply(act);
                 }
             }
@@ -633,6 +646,9 @@ impl App {
 
     /// Ponteiro do mouse em coordenadas da tela 640×480.
     pub fn pointer_move(&mut self, x: i32, y: i32) {
+        if self.last_pointer != (x, y) {
+            self.m9.idle_ms = 0;
+        }
         self.last_pointer = (x, y);
         match &mut self.state {
             State::Menu(s) => {
@@ -845,6 +861,15 @@ impl App {
             }
             return;
         }
+        // menu ocioso por 30 s: a abertura em laço (estado 12345)
+        if matches!(self.state, State::Menu(_)) {
+            self.m9.idle_ms = self.m9.idle_ms.saturating_add(ms);
+            if self.m9.idle_ms >= casca::IDLE_MS {
+                self.m9.idle_ms = 0;
+                self.play_intro();
+                return;
+            }
+        }
         self.pending_ms = self.pending_ms.saturating_add(ms);
         while self.pending_ms >= TICK_MS {
             self.pending_ms -= TICK_MS;
@@ -911,10 +936,11 @@ impl App {
             return;
         }
         self.render();
-        // o brilho (`WORLD_G%d.PAL`) vale para o briefing e a partida
+        // o brilho (`WORLD_G%d.PAL`) vale para o briefing e a partida; o logotipo e o título
+        // têm a paleta deles
         let lut = match (&self.state, &self.m9.game_lut) {
             (State::Briefing { .. } | State::Play { .. }, Some(g)) => g,
-            _ => &self.lut,
+            _ => self.show_lut().unwrap_or(&self.lut),
         };
         for (o, &p) in out.chunks_exact_mut(4).zip(&self.fb.pixels) {
             o.copy_from_slice(&lut[p as usize]);

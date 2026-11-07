@@ -223,7 +223,7 @@ impl Entity {
     /// Centro da caixa (ou a posição, sem caixa).
     pub fn center(&self) -> (i32, i32) {
         match self.bounds() {
-            Some(b) => (b.x + b.w / 2, b.y + b.h / 2),
+            Some(b) => (b.x.saturating_add(b.w / 2), b.y.saturating_add(b.h / 2)),
             None => (self.x, self.y),
         }
     }

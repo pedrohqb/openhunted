@@ -281,6 +281,11 @@ impl Viewer {
         self.input = input;
     }
 
+    /// Bits de entrada em vigor e os toques pendentes.
+    pub fn input(&self) -> (u32, u32) {
+        (self.input, self.taps)
+    }
+
     /// Registra um toque de tecla (ex.: `JUMP`): entra no próximo tique mesmo que a tecla já
     /// tenha sido solta.
     pub fn tap(&mut self, bits: u32) {

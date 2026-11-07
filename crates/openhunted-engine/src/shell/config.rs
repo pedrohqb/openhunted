@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Configuração no formato do `HUNTER.INI` (`docs/re/opcoes-salvamento.md`): seção
 //! `[Hunter]`, chaves `Difficulty`, `MusicVolume`, `SfxVolume`, `Brightness`,
-//! `NoMusicStart` e a do port `MusicDir`. A leitura e a escrita são puras; o arquivo (na
-//! pasta de configuração do usuário) fica com a aplicação.
+//! `NoMusicStart`, os dispositivos (`Player1Input`, `Player2Input`, `InputKeys1/2`,
+//! `Joystick1/2`, `docs/re/casca-acabamento.md`) e a do port `MusicDir`. A leitura e a
+//! escrita são puras; o arquivo (na pasta de configuração do usuário) fica com a aplicação.
+
+use crate::devices::{BUTTONS, DEFAULT_BUTTONS, DEFAULT_KEYS, Device, KEYS};
 
 /// Seção (`0x44a51c`: o nome do executável sem extensão).
 pub const SECTION: &str = "Hunter";
@@ -41,6 +44,12 @@ pub struct Config {
     pub no_music_start: i32,
     /// Pasta das faixas de música (extensão do port: o CD de áudio não existe na cópia).
     pub music_dir: Option<String>,
+    /// Dispositivo de cada jogador (`PlayerNInput`; ausente → `devices::resolve`).
+    pub devices: [Option<Device>; 2],
+    /// Teclas (VK) de cada jogador (`InputKeys1/2`).
+    pub keys: [[u8; KEYS]; 2],
+    /// Mapa dos botões do joystick de cada jogador (`Joystick1/2`).
+    pub buttons: [[i32; BUTTONS]; 2],
 }
 
 impl Default for Config {
@@ -52,8 +61,27 @@ impl Default for Config {
             brightness: BRIGHTNESS,
             no_music_start: 0,
             music_dir: None,
+            devices: [None; 2],
+            keys: DEFAULT_KEYS,
+            buttons: [DEFAULT_BUTTONS; 2],
         }
     }
+}
+
+/// `n` inteiros separados por vírgula (`%d,%d,…`); qualquer outro texto → `None`.
+fn ints<const N: usize>(v: &str) -> Option<[i32; N]> {
+    let parts: Vec<i32> = v
+        .split(',')
+        .map(|p| p.trim().parse().ok())
+        .collect::<Option<_>>()?;
+    parts.try_into().ok()
+}
+
+fn join(v: impl IntoIterator<Item = impl ToString>) -> String {
+    v.into_iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Divide `chave=valor` (espaços em volta ignorados).
@@ -101,6 +129,20 @@ impl Config {
                 }
                 "nomusicstart" => c.no_music_start = n.unwrap_or(0),
                 "musicdir" => c.music_dir = Some(v.to_string()).filter(|s| !s.is_empty()),
+                "player1input" => c.devices[0] = Device::parse(v),
+                "player2input" => c.devices[1] = Device::parse(v),
+                "inputkeys1" | "inputkeys2" => {
+                    let p = usize::from(k.ends_with('2'));
+                    // teclas VK de 1 a 255; senão o padrão do jogador
+                    c.keys[p] = ints::<KEYS>(v)
+                        .filter(|a| a.iter().all(|&x| (1..=255).contains(&x)))
+                        .map(|a| a.map(|x| x as u8))
+                        .unwrap_or(DEFAULT_KEYS[p]);
+                }
+                "joystick1" | "joystick2" => {
+                    let p = usize::from(k.ends_with('2'));
+                    c.buttons[p] = ints::<BUTTONS>(v).unwrap_or(DEFAULT_BUTTONS);
+                }
                 _ => {}
             }
         }
@@ -115,6 +157,19 @@ impl Config {
             ("Brightness", self.brightness.to_string()),
             ("NoMusicStart", self.no_music_start.to_string()),
         ];
+        for (p, (keys, inp)) in ["InputKeys1", "InputKeys2"]
+            .into_iter()
+            .zip(["Player1Input", "Player2Input"])
+            .enumerate()
+        {
+            if let Some(d) = self.devices[p] {
+                v.push((inp, d.ini()));
+            }
+            v.push((keys, join(self.keys[p])));
+        }
+        for (p, k) in ["Joystick1", "Joystick2"].into_iter().enumerate() {
+            v.push((k, join(self.buttons[p])));
+        }
         if let Some(d) = &self.music_dir {
             v.push(("MusicDir", d.clone()));
         }
@@ -263,6 +318,28 @@ mod tests {
         assert!(w.starts_with("[Hunter]\nDifficulty=2\n"), "{w}");
         assert_eq!(Config::parse(&w), c);
         // regravar não duplica
+        assert_eq!(c.write(&w), w);
+    }
+
+    #[test]
+    fn devices_keys_and_buttons_round_trip() {
+        let c = Config::parse(
+            "[Hunter]\nPlayer1Input=Joystick2\nInputKeys1=1,2,3,4,5,6,7,8,9,10\nInputKeys2=1,2\nJoystick2=6,5,4,3,2,-1\nPlayer2Input=Mouse\n",
+        );
+        assert_eq!(c.devices, [Some(Device::Joystick(2)), None]);
+        assert_eq!(c.keys[0], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(c.keys[1], DEFAULT_KEYS[1], "lista curta: padrão");
+        assert_eq!(c.buttons, [DEFAULT_BUTTONS, [6, 5, 4, 3, 2, -1]]);
+        assert_eq!(
+            Config::parse("[Hunter]\nInputKeys1=38,40,37,39,17,16,88,33,90,999").keys[0],
+            DEFAULT_KEYS[0]
+        );
+        let w = c.write("");
+        assert!(w.contains("InputKeys1=1,2,3,4,5,6,7,8,9,10\n"), "{w}");
+        assert!(w.contains("Player1Input=Joystick2\n"));
+        assert!(!w.contains("Player2Input"), "ausente fica ausente");
+        assert!(w.contains("Joystick2=6,5,4,3,2,-1\n"));
+        assert_eq!(Config::parse(&w), c);
         assert_eq!(c.write(&w), w);
     }
 
