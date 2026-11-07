@@ -187,13 +187,23 @@ fn touches(a: &Rect, b: &Rect) -> bool {
     a.x <= b.x + b.w && a.x + a.w >= b.x && a.y <= b.y + b.h && a.y + a.h >= b.y
 }
 
+/// Chaves que o jogador já traz da fase (pares 13–18 do inventário; a D_J_015 começa com a
+/// 62, a da porta da sala inicial).
+pub fn held_keys(s: &Scene) -> i32 {
+    s.jake.as_ref().map_or(0, |j| {
+        (0..6)
+            .filter(|&i| j.inventory.slots[13 + i].1 != 0)
+            .fold(0, |m, i| m | 1 << i)
+    })
+}
+
 /// O relatório estático da cena.
 pub fn inspect(s: &Scene) -> Report {
     let keys = s
         .entities
         .iter()
         .filter(|e| e.alive && (62..=67).contains(&e.kind))
-        .fold(0, |m, e| m | 1 << (e.kind - 62));
+        .fold(held_keys(s), |m, e| m | 1 << (e.kind - 62));
     let exits = s
         .entities
         .iter()
@@ -705,24 +715,39 @@ pub fn god_mode(s: &mut Scene) -> Verdict {
 /// Alcance pela grade da IA: avisos para objetivos e saídas fora do alcance a partir do
 /// início do jogador. Movimentos: cair, andar, trocar de camada nas zonas PR 1/2, os
 /// teletransportes (46) até os ids da lista deles (em qualquer camada) e — otimista, no lugar dos pulos que a
-/// grade não tem — subir a qualquer célula sem teto (`CLOSED_ABOVE`). As portas de célula com
-/// a chave na fase (ou sem chave) contam como abertas. Aviso não é falha: a grade é grossa
-/// (uma célula de 128 px) e não vê caixas internas.
+/// grade não tem — subir a qualquer célula sem teto (`CLOSED_ABOVE`). As portas de célula sem
+/// chave contam como abertas; as com chave, só depois de alcançada uma das chaves dela. Aviso
+/// não é falha: a grade é grossa (uma célula de 128 px) e não vê caixas internas.
 pub fn reach(s: &Scene) -> Vec<String> {
+    reach_with(s, true)
+}
+
+/// `reach` sem a subida livre: só cair, andar, cordas e escadas (zona 4), portas de camada e
+/// teletransportes, como a IA. Mostra onde a rota depende de pulos para cima.
+pub fn reach_strict(s: &Scene) -> Vec<String> {
+    reach_with(s, false)
+}
+
+fn reach_with(s: &Scene, climb_free: bool) -> Vec<String> {
     let Some(j) = s.jake.as_ref() else {
         return vec!["sem personagem".into()];
     };
     let mut grid = s.ai_grid().clone();
-    let keys = inspect(s).keys;
+    // portas sem chave: abertas (empurrar); com chave e fechadas (estado 1/2; a grade só as
+    // sincroniza no tique da IA): fechadas até a chave ser alcançada
     for d in &s.cell_doors {
-        if d.keys == 0 || d.keys & keys != 0 {
-            let c = grid.cell_of(d.origin, d.layer);
-            if let Some(ci) = grid.get_mut(c) {
-                ci.door_closed = false;
-            }
+        let c = grid.cell_of(d.origin, d.layer);
+        if let Some(ci) = grid.get_mut(c) {
+            ci.door_closed = d.keys != 0 && matches!(d.state, 1 | 2);
         }
     }
-    // teletransporte: célula dele → células dos destinos (mesma camada)
+    let keys: Vec<(Cell, i32)> = s
+        .entities
+        .iter()
+        .filter(|e| e.alive && (62..=67).contains(&e.kind))
+        .map(|e| (grid.cell_of(e.center(), e.layer), 1 << (e.kind - 62)))
+        .collect();
+    // teletransporte: célula dele → células dos destinos
     let g = &grid;
     let jumps: Vec<(Cell, Cell)> = s
         .entities
@@ -743,26 +768,51 @@ pub fn reach(s: &Scene) -> Vec<String> {
     let (gx, gy, gz) = grid.size;
     let idx = |c: Cell| (c.0 + c.1 * gx + c.2 * gx * gy) as usize;
     let mut seen = vec![false; (gx * gy * gz) as usize];
-    let mut q = VecDeque::new();
-    if grid.get(start).is_some() {
-        seen[idx(start)] = true;
-        q.push_back(start);
-    }
-    while let Some(c) = q.pop_front() {
-        let climb = grid
-            .get(c)
-            .filter(|ci| ci.bits & crate::ai::path::bits::CLOSED_ABOVE == 0)
-            .map(|_| (c.0, c.1 - 1, c.2))
-            .filter(|&n| grid.get(n).is_some());
-        let next = (1..=6)
-            .filter_map(|d| grid.allowed(c, d))
-            .chain(climb)
-            .chain(jumps.iter().filter(|(f, _)| *f == c).map(|(_, t)| *t));
-        for n in next.collect::<Vec<_>>() {
-            if !seen[idx(n)] {
-                seen[idx(n)] = true;
-                q.push_back(n);
+    let mut held = 0;
+    let mut now = held_keys(s);
+    loop {
+        if now != held {
+            held = now;
+            for d in s.cell_doors.iter().filter(|d| d.keys & held != 0) {
+                let c = grid.cell_of(d.origin, d.layer);
+                if let Some(ci) = grid.get_mut(c) {
+                    ci.door_closed = false;
+                }
             }
+        }
+        let mut q = VecDeque::new();
+        if grid.get(start).is_some() && !seen[idx(start)] {
+            seen[idx(start)] = true;
+            q.push_back(start);
+        }
+        // recomeça dos já vistos: as portas recém-abertas deixam passar
+        q.extend((0..seen.len()).filter(|&i| seen[i]).map(|i| {
+            let i = i as i32;
+            (i % gx, i / gx % gy, i / (gx * gy))
+        }));
+        while let Some(c) = q.pop_front() {
+            let climb = grid
+                .get(c)
+                .filter(|ci| climb_free && ci.bits & crate::ai::path::bits::CLOSED_ABOVE == 0)
+                .map(|_| (c.0, c.1 - 1, c.2))
+                .filter(|&n| grid.get(n).is_some());
+            let next = (1..=6)
+                .filter_map(|d| grid.allowed(c, d))
+                .chain(climb)
+                .chain(jumps.iter().filter(|(f, _)| *f == c).map(|(_, t)| *t));
+            for n in next.collect::<Vec<_>>() {
+                if !seen[idx(n)] {
+                    seen[idx(n)] = true;
+                    q.push_back(n);
+                }
+            }
+        }
+        now = keys
+            .iter()
+            .filter(|(c, _)| seen[idx(*c)])
+            .fold(held, |m, (_, k)| m | k);
+        if now == held {
+            break;
         }
     }
     let ok = |p: (i32, i32), layer: i32| {

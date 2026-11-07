@@ -28,7 +28,7 @@ pub fn run(
     gd: &GameData,
     only: Option<&str>,
     god: bool,
-    reach: bool,
+    (reach, strict): (bool, bool),
     out: &mut dyn Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut names = solo_missions(gd)?;
@@ -109,6 +109,11 @@ pub fn run(
         if reach {
             for w in audit::reach(&s) {
                 writeln!(out, "  alcance: {w}")?;
+            }
+            if strict {
+                for w in audit::reach_strict(&s) {
+                    writeln!(out, "  alcance estrito: {w}")?;
+                }
             }
         }
         if god {

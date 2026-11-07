@@ -61,6 +61,9 @@ enum Cmd {
         god: bool,
         #[arg(long)]
         reach: bool,
+        /// Com --reach, também o alcance estrito (sem pulos para cima, como a IA).
+        #[arg(long)]
+        strict: bool,
     },
     /// Renderiza um quadro 640×480 de uma fase em PNG (sem janela).
     Render {
@@ -223,8 +226,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        Cmd::Audit { level, god, reach } => {
-            audit::run(&gd, level.as_deref(), god, reach, &mut out)?;
+        Cmd::Audit {
+            level,
+            god,
+            reach,
+            strict,
+        } => {
+            audit::run(&gd, level.as_deref(), god, (reach, strict), &mut out)?;
         }
         Cmd::Render {
             level,

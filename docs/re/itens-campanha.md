@@ -132,8 +132,9 @@ são lidas por nenhuma das rotinas vistas.
 
 - Nomes das falas 3714/3715/3719/3730/3732/3741 (fora do `SOUND.RES`).
 - O que lê as entradas 1–2 dos gatilhos das células.
-- Portas com chaves que a fase não tem (M13, `ohtool audit`): só I_M_106 (5, 4, 2) e
-  D_J_015 (1, 3, 2), ambas pedindo a 62 e fora do caminho dos objetivos e da saída.
+- Portas com chaves que a fase não tem (M13, `ohtool audit`): só I_M_106 (5, 4, 2), chave
+  62, fora do caminho. A porta da sala inicial da D_J_015 pede a 62 e o Jake a traz da fase
+  (par 13 dos `points`).
 - Antídoto como objetivo (D_M_010): recusado sem veneno (`0x40b7b6`) e a fase solo não tem
   veneno; a única soma em `+0x270` do jogador é a coleta (`0x40b6c3`). Ver
   `docs/campanha.md`.

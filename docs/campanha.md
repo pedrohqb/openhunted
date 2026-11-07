@@ -13,9 +13,14 @@ auditadas com `ohtool audit --god --reach` (`openhunted_engine::audit`; desenho 
   os barris "acionar"; por fim aperta CIMA diante da saída e espera o veredito. Confere a
   lógica de objetivos, gatilhos e veredito, **não** a rota.
 - **Alcance** (`reach`): busca na grade de células da IA a partir do início (cair, andar,
-  portas de camada, teletransportes, portas de célula com a chave na fase e, otimista, subir
-  a qualquer célula sem teto). Aviso, não prova: a grade não vê pulos nem caixas internas.
-  Hoje nenhuma missão tem objetivo ou saída fora do alcance.
+  portas de camada, teletransportes e, otimista, subir a qualquer célula sem teto); as
+  portas de célula com chave só abrem depois de alcançada a chave (ou se o jogador já a
+  traz). Aviso, não prova: a grade não vê pulos nem caixas internas. Hoje nenhuma missão tem
+  objetivo ou saída fora do alcance. `--strict` tira a subida livre (só cordas e escadas,
+  como a IA): 20 missões dependem de pulos para cima (T_M_006, I_M_003, I_J_004, I_M_109,
+  I_M_008, I_M_106, I_M_011, H_M_003, D_M_030, H_J_018, H_J_024, H_M_004, D_M_024, H_M_027,
+  D_M_004, D_M_003, H_J_039, D_M_027, D_J_012, D_M_018) — na T_M_006 basta o pulo até a
+  corda; as demais não foram percorridas.
 
 Resultado: **64 vencem, 1 falha** (D_M_010, abaixo).
 
@@ -39,8 +44,13 @@ Resultado: **64 vencem, 1 falha** (D_M_010, abaixo).
   (`0x40b6c3`); as gotas (70/71) só falam "Oh no it's poison" e ferem com natureza veneno,
   sem envenenar. Indício de que a missão também não se vence no original 1.00; **a conferir
   no Wine**. O porte segue o original; NEXT no resultado leva adiante mesmo na derrota.
-- Portas de célula que pedem chave ausente da fase: I_M_106 (5, 4, 2) e D_J_015 (1, 3, 2),
-  chave 62. Ficam fora do caminho dos objetivos e da saída.
+- **I_M_109** (suspeita): a porta (5, 3, 0) diante da saída pede a chave 62, que fica no
+  corredor de cima (981, 74, camada 0). Do início, a rota sobe 128 px duas vezes sem corda
+  (vão no teto da sala do início, x 416–480; poço x 288–352). No porte o pulo para cima do
+  Garathe sobe 84 px (o original: 88, `garathe-movimentos.md`) e a barra 47 não tem puxada:
+  sem rota conhecida. A conferir no Wine.
+- Porta de célula que pede chave ausente da fase: I_M_106 (5, 4, 2), chave 62, fora do
+  caminho. (A D_J_015 começa trancada na sala do início, mas o Jake traz a 62 da fase.)
 - Gatilhos para ids inexistentes (valem verdadeiro, `0x435bd8`): I_J_104 e D_J_012
   (pistão → id 3), D_J_001 e D_M_004 (robô), H_J_012 (barril), D_M_027 (teletransporte).
   Teletransportes sem destino na fase: I_M_003, H_J_036 (2), D_M_027.
@@ -70,7 +80,7 @@ Personagem J/G; tempo em segundos (campo 1004); objetivos além da saída.
 | I_J_104 | J | — | 2× bandeira | vence |  |
 | I_J_001 | J | 250 | 1× peça | vence |  |
 | I_J_004 | J | — | só a saída | vence |  |
-| I_M_109 | G | 300 | só a saída | vence |  |
+| I_M_109 | G | 300 | só a saída | vence | suspeita: chave da porta sem rota (acima) |
 | I_J_013 | J | 240 | 1× peça | vence |  |
 | I_J_010 | J | — | 1× peça, 1× chave | vence |  |
 | I_M_008 | G | — | só a saída | vence | 1 teletr. entre camadas |
@@ -117,4 +127,4 @@ Personagem J/G; tempo em segundos (campo 1004); objetivos além da saída.
 | D_M_027 | G | — | só a saída | vence | 2 teletr. entre camadas |
 | D_J_012 | J | 180 | 1× peça, 2× bandeira | vence |  |
 | D_M_018 | G | — | só a saída | vence | 1 teletr. entre camadas |
-| D_J_015 | J | — | só a saída | vence | 1 porta sem chave na fase (fora do caminho) |
+| D_J_015 | J | — | só a saída | vence | começa trancada; o Jake traz a chave |

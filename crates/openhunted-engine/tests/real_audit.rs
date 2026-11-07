@@ -133,3 +133,29 @@ fn i_j_005_teleporter_crosses_layers() {
         "{b:?} {dc:?}"
     );
 }
+
+/// Alcance estrito (sem a subida livre, como a IA): a saída da T_M_006 fica fora, porque o
+/// Garathe pula do chão até a corda; o alcance otimista a vê. A T_J_001 não depende de pulo.
+#[test]
+fn strict_reach_flags_upward_jumps() {
+    let Some(gd) = data() else { return };
+    let s = scene(&gd, "T_M_006.lev");
+    assert!(audit::reach(&s).is_empty());
+    let w = audit::reach_strict(&s);
+    assert!(w.iter().any(|w| w.starts_with("saída")), "{w:?}");
+    assert!(audit::reach_strict(&scene(&gd, "T_J_001.lev")).is_empty());
+}
+
+/// D_J_015: a porta (1, 3, 2) da sala do início pede a chave 62, que não está no chão da
+/// fase: o Jake a traz (par 13 dos `points`). O alcance parte com ela.
+#[test]
+fn d_j_015_starts_with_the_key_of_the_locked_room() {
+    let Some(gd) = data() else { return };
+    let s = scene(&gd, "D_J_015.LEV");
+    assert_eq!(audit::held_keys(&s) & 1, 1);
+    assert!(
+        !s.entities.iter().any(|e| e.alive && e.kind == 62),
+        "a 62 está na fase"
+    );
+    assert!(audit::reach(&s).is_empty(), "{:?}", audit::reach(&s));
+}
