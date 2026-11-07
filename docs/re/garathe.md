@@ -83,6 +83,10 @@ Chicote: a linha centro→boca só é testada até a **metade** (`0x43bbe3`, ram
 se algo bloqueia até **3/4** da linha (`0x43bcf2`), `t` e a animação avançam um passo a mais
 por tique [inferido: o golpe recolhe mais rápido]. O projétil 108 (`0x40cb6c`) se divide:
 depois de 6–8 tiques cria dois filhos a ±11,25° com a mesma velocidade, até a 4ª geração.
+O 1º tique só arma (`+0x27c = 1`, `+0x278 = rand % 6 / 2 + 6`, `+0x274 = 10`); cada filho
+sorteia a própria espera, tem geração `+0x27c` do pai + 1 (divide enquanto ≤ 3), tamanho
+`+0x1f0` = `+0x274` do pai / 2 + 1 e `+0x274` = 3/4 do pai + 1 (tamanhos 10 → 6 → 5 → 4).
+[confirmado em `0x40cc2c…0x40ce81`]
 A faca 25 (`0x40ba54`) que bate em parede fica cravada (estado 3) e vira item coletável
 (`0x40b3f5`); em objeto aplica `(25, …)` e some.
 

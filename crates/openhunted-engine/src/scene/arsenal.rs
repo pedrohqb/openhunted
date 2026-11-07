@@ -870,16 +870,36 @@ mod tests {
         s.tick(crate::input::LEFT);
         s.tick(crate::input::SHOOT);
         let mut most = (0, 0);
-        for _ in 0..80 {
+        // tique (de vida da 1ª geração) da 1ª divisão; tamanho por geração
+        let (mut born, mut first_split) = (None, None);
+        let mut sizes = std::collections::BTreeMap::new();
+        for t in 0..80 {
             s.tick(0);
             for e in s.entities.iter().filter(|e| e.alive) {
                 if let Behaviour::Pellet(p) = &e.behaviour {
                     assert!(p.whip && p.generation <= 4);
                     most.0 = most.0.max(p.generation);
+                    let size = e.sprite.as_ref().unwrap().scale.0;
+                    assert_eq!(*sizes.entry(p.generation).or_insert(size), size);
                 }
             }
-            most.1 = most.1.max(count(&s, crate::entity::WHIP_SHOT));
+            let n = count(&s, crate::entity::WHIP_SHOT);
+            if n > 0 && born.is_none() {
+                born = Some(t);
+            }
+            if n > 1 && first_split.is_none() {
+                first_split = born.map(|b| t - b + 1);
+            }
+            most.1 = most.1.max(n);
         }
+        // o 1º tique só arma: 6–8 de espera depois dele
+        let fs = first_split.expect("dividiu-se");
+        assert!((7..=9).contains(&fs), "1ª divisão no tique {fs}");
+        assert_eq!(
+            sizes.into_iter().collect::<Vec<_>>(),
+            vec![(1, 10), (2, 6), (3, 5), (4, 4)],
+            "os filhos encolhem"
+        );
         assert_eq!(most.0, 4, "até a 4ª geração");
         assert!(most.1 >= 4, "dividiu-se: {}", most.1);
         assert_eq!(

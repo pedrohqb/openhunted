@@ -82,8 +82,9 @@ esconder 54/56/55 · barra 47, agarrar 50 → mão ante mão 49 (k 6), soltar 51
   explode com 5 e derrubada em todas as variantes; tipos 4, 11, 89, 105, 109 levam 8 com
   empurrão e 3038; o mesmo vale para a faca 25 e o chicote 108, e o soco do Jake.)
 - **Chicote**: a linha até a boca só é testada até a metade. Projétil 108 (`owb.anm`): reto,
-  20 de dano e derrubada; após 7 tiques (Ruling: o meio de 6–8) gera dois filhos a ±11,25°
-  com a mesma velocidade, até a 4ª geração; some na parede.
+  20 de dano e derrubada; o 1º tique arma, depois de 6–8 tiques (sorteio por objeto) gera
+  dois filhos a ±11,25° com a mesma velocidade e menores (10 → 6 → 5 → 4), até a 4ª geração;
+  some na parede. (Revisão: antes, 7 fixos e sem encolher.)
 - **Faca** 25 (`okn.anm`): reta; num objeto 12 com empurrão e some; na parede crava e vira
   item. **Ruling:** a cravada devolve 1 faca (o valor não foi lido) e dura 100 tiques, como
   a estrela.

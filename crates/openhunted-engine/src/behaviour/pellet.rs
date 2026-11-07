@@ -15,12 +15,19 @@ pub const SPLIT_ANGLE: i32 = 0x400;
 pub const SPLIT_WAIT: u32 = 2;
 /// Última geração que ainda se divide.
 const LAST_SPLIT: u8 = 2;
-/// Golpe do chicote do Garathe (108, `0x40cb6c`): divide-se a ±11,25° (`0x800`) depois de
-/// 6–8 tiques até a 4ª geração; o dano sai das linhas `(108, …)` do `DAMAGE.TBL` (20,
-/// explosão e derrubada de módulo 20).
+/// Golpe do chicote do Garathe (108, `0x40cb6c`): divide-se a ±11,25° (`0x800`) até a 4ª
+/// geração; o dano sai das linhas `(108, …)` do `DAMAGE.TBL` (20, explosão e derrubada de
+/// módulo 20). O 1º tique só arma (`+0x27c = 1`, `+0x278` = 6–8 sorteado, `+0x274 = 10`):
+/// a 1ª geração se divide no tique 7–9; cada filho sorteia os seus 6–8 e encolhe (tamanho
+/// `+0x1f0` = `+0x274` do pai / 2 + 1; `+0x274` do filho = 3/4 do pai + 1: 10 → 6 → 5 → 4).
 pub const WHIP_SPLIT_ANGLE: i32 = 0x800;
-pub const WHIP_SPLIT_WAIT: u32 = 7;
 const WHIP_LAST_SPLIT: u8 = 3;
+const WHIP_SHRINK: i32 = 10;
+
+/// Espera de uma divisão do chicote: `rand % 6 / 2 + 6` (6–8).
+fn whip_wait(ctx: &mut Ctx) -> u32 {
+    6 + ctx.rng.below(6) / 2
+}
 
 #[derive(Debug, Clone)]
 pub struct PelletState {
@@ -34,6 +41,8 @@ pub struct PelletState {
     pub spent: bool,
     /// É o golpe do chicote (108), não o chumbo.
     pub whip: bool,
+    /// Chicote: medida de encolhimento dos filhos (`+0x274`).
+    pub shrink: i32,
 }
 
 impl PelletState {
@@ -46,23 +55,25 @@ impl PelletState {
             prev: None,
             spent: false,
             whip: false,
+            shrink: 0,
         }
     }
 
-    /// Golpe do chicote do Garathe.
+    /// Golpe do chicote do Garathe: geração 0 até o 1º tique o armar.
     pub fn whip(vx: i32, vy: i32) -> Self {
         Self {
-            wait: WHIP_SPLIT_WAIT,
+            generation: 0,
+            wait: 0,
             whip: true,
             ..Self::new(vx, vy)
         }
     }
 
-    fn split(&self) -> (u8, u32, i32) {
+    fn split(&self) -> (u8, i32) {
         if self.whip {
-            (WHIP_LAST_SPLIT, WHIP_SPLIT_WAIT, WHIP_SPLIT_ANGLE)
+            (WHIP_LAST_SPLIT, WHIP_SPLIT_ANGLE)
         } else {
-            (LAST_SPLIT, SPLIT_WAIT, SPLIT_ANGLE)
+            (LAST_SPLIT, SPLIT_ANGLE)
         }
     }
 }
@@ -74,16 +85,21 @@ pub fn rotated(vx: i32, vy: i32, da: i32) -> (i32, i32) {
     ((speed * c) >> 14, (speed * s) >> 14)
 }
 
-pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
+pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let pos = (e.x, e.y);
     let Behaviour::Pellet(st) = &mut e.behaviour else {
         return;
     };
     st.prev = Some(pos);
     let mut split = None;
-    let (last, wait, angle) = st.split();
-    let whip = st.whip;
-    if st.generation <= last {
+    let (last, angle) = st.split();
+    let (whip, shrink) = (st.whip, st.shrink);
+    if whip && st.generation == 0 {
+        // 1º tique do chicote: só arma
+        st.generation = 1;
+        st.wait = whip_wait(ctx);
+        st.shrink = WHIP_SHRINK;
+    } else if st.generation <= last {
         st.wait = st.wait.saturating_sub(1);
         if st.wait == 0 {
             split = Some((st.vx, st.vy, st.generation + 1));
@@ -91,10 +107,16 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     }
     let v = (st.vx, st.vy);
     if let Some((vx, vy, generation)) = split {
-        // dois novos no mesmo ponto, ±0x400, geração + 1; este some
+        // dois novos no mesmo ponto, ±ângulo, geração + 1; este some
         for da in [-angle, angle] {
             let (vx, vy) = rotated(vx, vy, da);
             let mut c = e.clone();
+            let wait = if whip { whip_wait(ctx) } else { SPLIT_WAIT };
+            if whip {
+                if let Some(sp) = c.sprite.as_mut() {
+                    sp.scale.0 = shrink / 2 + 1;
+                }
+            }
             c.behaviour = Behaviour::Pellet(PelletState {
                 vx,
                 vy,
@@ -103,6 +125,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
                 prev: None,
                 spent: false,
                 whip,
+                shrink: if whip { shrink * 3 / 4 + 1 } else { 0 },
             });
             out.spawn.push(c);
         }
