@@ -11,6 +11,10 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M13: auditoria da campanha.** `ohtool audit --god --reach`: das 65 missões solo, 64
+vencem (a D_M_010 não: antídoto sem veneno, como no original). Corrigidos os teletransportes
+entre camadas e a placa da saída. Tabela em [`docs/campanha.md`](docs/campanha.md).
+
 **M12: as cores dos sprites.** O Jake, o Garathe, o Camaleão, o Anticorpo, o robô de
 segurança, o gerador de minas e as minas flutuantes são desenhados pela tabela de cor do
 `DLS.TBL` que o original monta para cada um (antes saíam com ruído de arco-íris): o Jake e o
@@ -58,17 +62,10 @@ arma. Os itens da campanha funcionam: munição das armas, comida, veneno (perde
 gastas), bandeiras (objetivo "acionar"), o pistão (anda pelos gatilhos e esmaga) e o
 interruptor (CIMA diante dele).
 
-**M7a: os inimigos principais da campanha.** O robô de segurança voador (`OSR`) flutua,
-patrulha, persegue o Jake a 80–200 px e dispara raios laser alternando os dois canhões, em
-rajadas; não vê o Jake escondido contra a parede; atingido, a vida cai a 45 e, abaixo de 0,
-ele cai e explode dez vezes. A sentinela (`OSE`) abre o casulo diante do Jake e dispara
-rajadas de três balas (fechada, é invulnerável). A mina saltadora (`OHS`) dá cinco pulinhos e
-um pulo grande para o lado em que olha e explode ao tocar o Jake. O gerador (`OHG`) solta
-minas flutuantes em levas, até quatro vivas. O Bruiser acorda pelos gatilhos, anda, atira
-balas e foguetes, põe fogo no chão, faz o chão tremer (o Jake cambaleia) e esmaga quem está
-embaixo; leva metade do dano, é imune a fogo e morre em 30 explosões. As mortes por bala do
-jogador contam no resultado; os sons de cada um tocam pelos quadros (`SOUND.TBL`). Regras e
-simplificações em `docs/superpowers/specs/2026-11-06-m7a-inimigos-design.md`.
+**M7a: os inimigos principais da campanha.** Robô de segurança voador (`OSR`), sentinela
+(`OSE`), mina saltadora (`OHS`), gerador de minas (`OHG`) e Bruiser (acorda pelos gatilhos,
+atira balas e foguetes, fogo, terremoto, esmaga), com as mortes no resultado e os sons por
+quadro. Regras em `docs/superpowers/specs/2026-11-06-m7a-inimigos-design.md`.
 
 **M6b** os demais movimentos do Jake (furtivo, pulos, cordas, escadas, camadas, esconder,
 agachar, barra, especial); **M6a** os objetos dos tutoriais (`T_J_003/005/007` vencíveis);
@@ -156,6 +153,9 @@ cargo run -p ohtool -- --data /caminho/Hunter_Hunted.iso info SABOUT.ANM
 # extrair: bitmaps em PNG com a paleta escolhida, fontes como folha de glifos,
 # formatos estruturados em JSON, o resto como está
 cargo run -p ohtool -- --data /caminho/Hunter_Hunted.iso extract --out extraido --palette SMAIN.PAL
+
+# auditar as missões solo: objetivos, portas, chaves; --god vence cada uma no modo deus
+cargo run -p ohtool -- --data /caminho/Hunter_Hunted.iso audit --god --reach
 
 # listar as missões do hunter.hls (e gravar o cabeçalho de cada fase em JSON)
 cargo run -p ohtool -- --data /caminho/Hunter_Hunted.iso levels --out fases

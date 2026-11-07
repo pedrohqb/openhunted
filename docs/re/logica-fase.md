@@ -59,6 +59,10 @@ Rotina `0x40e14e` (por tique, via `0x4076ff`):
    timer = 77 777 777) quando a duração ≠ 0 e o timer chega a 0, ou, com duração 0, quando
    fica vazia. [confirmado]
 
+O teste do passo 2 não olha o estado do objeto: o jogador entrando na porta de saída
+(`0x200008`, fora da máscara `0x80003`) continua contando; a caixa é a do quadro
+(`0x43585c`). Ruling (M13): no porte, a caixa de colisão, sem o encolher da escala.
+
 **99999999** em `values[3]` é uma duração na prática infinita: a zona liga uma vez e fica
 ligada. 77 777 777 e 38 888 888 são sentinelas do próprio código.
 

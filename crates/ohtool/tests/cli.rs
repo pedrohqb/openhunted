@@ -376,3 +376,29 @@ fn render_writes_screen_sized_png() {
     .unwrap();
     assert_eq!((reader.info().width, reader.info().height), (640, 480));
 }
+
+/// `audit --level` sobre os dados reais: o cabeçalho da missão, os objetivos e a vitória no
+/// modo deus da T_J_007 (peça do carro), e a tabela final.
+#[test]
+fn real_audit_one_level() {
+    let Some(data) = std::env::var_os("OPENHUNTED_DATA") else {
+        eprintln!("pulado: OPENHUNTED_DATA não definido");
+        return;
+    };
+    let out = ohtool()
+        .arg("--data")
+        .arg(&data)
+        .args(["audit", "--level", "T_J_007.lev", "--god", "--reach"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("== T_J_007.lev: Jake"), "{text}");
+    assert!(
+        text.contains("objetivo coletar") && text.contains("CarPiece"),
+        "{text}"
+    );
+    assert!(text.contains("modo deus: WIN"), "{text}");
+    assert!(!text.contains("alcance:"), "{text}");
+    assert!(text.ends_with("WIN 1, FAIL 0\n"), "{text}");
+}

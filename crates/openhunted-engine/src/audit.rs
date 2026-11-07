@@ -97,6 +97,16 @@ pub struct Report {
     pub dangling: Vec<(u32, i32)>,
     /// Objetos sem comportamento (`Static`) que barram o jogador: tipo, centro, camada.
     pub static_blockers: Vec<(u32, (i32, i32), i32)>,
+    /// Teletransportes: centro, camada e os destinos (centro, camada) da lista.
+    pub teleporters: Vec<Teleporter>,
+}
+
+/// Um teletransporte e os destinos que existem na fase.
+#[derive(Debug, Clone)]
+pub struct Teleporter {
+    pub at: (i32, i32),
+    pub layer: i32,
+    pub targets: Vec<((i32, i32), i32)>,
 }
 
 /// Nome da variante do comportamento.
@@ -228,12 +238,30 @@ pub fn inspect(s: &Scene) -> Report {
         .entities
         .iter()
         .filter(|e| {
+            // a plataforma 56 é estática também no original (`objetos-tutorial.md`)
             e.alive
                 && e.solid_shapes
+                && e.kind != 56
                 && matches!(e.behaviour, Behaviour::Static)
                 && crate::objects::blocks_flags(0, e.flags)
         })
         .map(|e| (e.kind, e.center(), e.layer))
+        .collect();
+    let teleporters = s
+        .entities
+        .iter()
+        .filter(|e| matches!(e.behaviour, Behaviour::Teleporter(_)))
+        .map(|e| Teleporter {
+            at: e.center(),
+            layer: e.layer,
+            targets: e
+                .triggers
+                .iter()
+                .filter(|(id, _)| *id != 0)
+                .filter_map(|(id, _)| s.entities.iter().find(|d| d.id == *id))
+                .map(|d| (d.center(), d.layer))
+                .collect(),
+        })
         .collect();
     Report {
         character: character(s),
@@ -244,6 +272,7 @@ pub fn inspect(s: &Scene) -> Report {
         keys,
         dangling,
         static_blockers,
+        teleporters,
     }
 }
 

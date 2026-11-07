@@ -92,6 +92,17 @@ pub fn run(
                 "  sólido sem comportamento: tipo {kind} em {at:?} camada {layer}"
             )?;
         }
+        for t in &r.teleporters {
+            let cross = t.targets.iter().any(|(_, l)| *l != t.layer);
+            writeln!(
+                out,
+                "  teletransporte em {:?} camada {} → {:?}{}",
+                t.at,
+                t.layer,
+                t.targets,
+                if cross { " (outra camada)" } else { "" }
+            )?;
+        }
         for (kind, id) in &r.dangling {
             writeln!(out, "  gatilho do tipo {kind} para o id {id} inexistente")?;
         }

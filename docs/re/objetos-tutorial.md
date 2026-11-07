@@ -63,7 +63,9 @@ do caractere `1`, 11 px de largura); `T_J_007` 29 "FLAMMABLE" e 57 "CAR".
   clone volta ao rótulo 2/fase 0 e, por ter `0x10`, é destruído. Total ≈ 42 tiques.
 
 Porte [ruling]: o destino é sorteado na partida; sem destino válido não há viagem (nem
-feixe, nem os 42 tiques ocupados); dois pedidos no mesmo tique: vale o primeiro da lista. O
+feixe, nem os 42 tiques ocupados); dois pedidos no mesmo tique: vale o primeiro da lista.
+O destino vale em qualquer camada e o passageiro passa a ela na metade da viagem (M13; 20
+missões solo têm teletransportes entre camadas, `docs/campanha.md`). O
 destino tipo 46 conta os 40 tiques a partir da metade da viagem e, enquanto o passageiro
 viaja (invisível), não o esquece: o par id 1 ↔ 2 da `I_J_104` não o devolve em laço.
 
