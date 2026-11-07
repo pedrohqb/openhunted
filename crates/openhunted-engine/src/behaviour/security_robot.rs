@@ -524,7 +524,13 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             let len = super::mine::distance((0, 0), (px, py)).max(1);
             vel = (KNOCK * SUB * px / len, KNOCK * SUB * py / len);
         }
-        e.health = e.health.min(HEALTH_CAP) - w.pending.amount.max(0);
+        // dano negativo → 1 (`robo-seguranca.md`, passo 6)
+        let amount = if w.pending.amount < 0 {
+            1
+        } else {
+            w.pending.amount
+        };
+        e.health = e.health.min(HEALTH_CAP) - amount;
         if e.health < 0 {
             st.orient = DYING;
             st.fall = (0, 0);
@@ -551,7 +557,8 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         let target_y = v.hover_base + v.hover_amp * sin_frac(n, v.hover_period) / 16384;
         let local = e.y.rem_euclid(128);
         let mut vy = (target_y - local).clamp(-64, 64);
-        if local + vy < 0 {
+        // `local` em px, `vy` em 1/8 px
+        if local * SUB + vy < 0 {
             vy = 0;
         }
         vel.1 = vy;
@@ -727,6 +734,15 @@ mod tests {
         enemy::hurt(&mut r, &p, true);
         tick(&mut r, &mut c, &mut out);
         assert_eq!(r.health, 43);
+        // dano negativo vira 1 (`0x41c7fc` passo 6)
+        let neg = crate::damage::Pending {
+            amount: -3,
+            ..Default::default()
+        };
+        enemy::hurt(&mut r, &neg, false);
+        tick(&mut r, &mut c, &mut out);
+        assert_eq!(r.health, 42);
+        r.health = 43;
         for _ in 0..22 {
             enemy::hurt(&mut r, &p, true);
             tick(&mut r, &mut c, &mut out);

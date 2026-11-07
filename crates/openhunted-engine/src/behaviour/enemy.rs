@@ -30,11 +30,13 @@ pub const BORDERS: [&str; 6] = [
 ];
 
 /// Intervalo mínimo em tiques entre duas vezes o mesmo som, entre todos os objetos: 3061
-/// (sentinela em espera, 200 ms) e 3157 (robô de segurança, 250 ms).
+/// (sentinela em espera, 200 ms), 3157 (robô de segurança, 250 ms) e 3131 (terremoto do
+/// Bruiser, enquanto o som toca).
 pub fn throttle(id: u16) -> Option<u32> {
     match id {
         super::sentinel::SOUND_IDLE => Some(super::sentinel::SOUND_IDLE_TICKS),
         super::security_robot::SOUND_HOVER => Some(super::security_robot::SOUND_HOVER_TICKS),
+        super::bruiser::SOUND_QUAKE => Some(super::bruiser::SOUND_QUAKE_TICKS),
         _ => None,
     }
 }

@@ -60,6 +60,9 @@ projéteis inimigos de `projeteis.md` e o dano de `dano-vida.md`.
   atingem o Jake e o cenário; não ferem outros objetos.
 - Ruling: o terremoto do Bruiser vira o choque sem dano do Jake (estado 15, o mesmo do
   cambaleio), renovado enquanto o contador durar e ele estiver no chão.
+- Ruling (revisão): o terremoto só sai com alvo (`0x418229` testa `+0x280`), nos quadros de
+  QUAKE e de TURN sem olhar a capacidade 3; o 3131 é sem posição e, como a cena não sabe o
+  que o mixer toca, não se repete antes de 43 tiques (a duração do `SX_3131.WAV`).
 - Ruling: o fogo do Bruiser nasce com a altura sorteada 25–49 e míngua 1 a cada 2 tiques.
 - Ruling: o Bruiser fala uma frase por vez (sem as encadeadas), com 60 tiques de silêncio.
 - Ruling: a tabela de passos do rótulo 3 do Bruiser só tem os 10 valores lidos; o resto é 0.
