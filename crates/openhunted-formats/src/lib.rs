@@ -24,6 +24,7 @@ pub mod source;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub mod text;
+pub mod vcr;
 pub mod volume;
 
 pub use anim::{AnimFrame, AnimLabel, Animation, Instruction};
@@ -44,4 +45,5 @@ pub use ske::{Skeleton, SkeletonEntry};
 pub use sound::Sound;
 pub use source::{DataSource, DirSource, IsoSource, normalize_path};
 pub use text::parse_text_list;
+pub use vcr::Vcr;
 pub use volume::{Entry, ResourceArchive};
