@@ -88,7 +88,9 @@ Demais (passo, projétil, estados): espingarda 1, 20/23, 125,123,122,124,124; fo
 
 Pistola, demais: 56 (cima) dx 9/12, dy −35, v (0, −20); 54 (diag. cima) dx −16/24, dy −23,
 v (20, −20); 55 (diag. baixo **e** baixo) dx −23/27, dy 33, v (20, 20). A pistola não atira
-reto para baixo. Os dx/dy somam-se a `(+0x14c, +0x150)`.
+reto para baixo. Os dx/dy somam-se a `(+0x14c, +0x150)`. Cápsulas (registros `0x47d9b4`,
+`0x47d9fc`, `0x47da44`, `0x47da8c`): 56 dx 9/12, dy −10, v (−10, 0); 54 dx 40/−30, dy 0,
+v (−10, −10); 23 dx 22/−4, dy 0, v (−10, −10); 55 dx −7/25, dy 20, v (10, −10).
 
 ## Fluxo do tiro [confirmado]
 

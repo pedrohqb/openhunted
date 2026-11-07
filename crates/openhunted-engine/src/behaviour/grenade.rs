@@ -68,7 +68,6 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         return;
     }
     st.fuse -= 1;
-    let fast = st.vx.abs().max(st.vy.abs()) > 4 * crate::physics::SUB;
     let v = (st.vx, st.vy);
     let Some(f) = projectile::fly(e, v, ctx, true) else {
         e.alive = false;
@@ -79,11 +78,16 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         return;
     }
     if let Behaviour::Grenade(st) = &mut e.behaviour {
-        st.vx = f.v.0;
+        // parede (`0x40707c`: contato com a normal mais horizontal que vertical): inverte vx
+        // sem perder rapidez (a resposta comum da física daria meio rebote)
+        st.vx = if f.hit_wall { -v.0 } else { f.v.0 };
         st.vy = if f.on_ground && f.v.1 > 0 { 0 } else { f.v.1 };
     }
-    if f.blocked && fast {
-        // quique: som posicional na base da caixa
+    if f.hit_wall {
+        // `0x434815(granada, 1)`: inverte o espelho; som posicional na base da caixa
+        if let Some(sp) = e.sprite.as_mut() {
+            sp.mirror = !sp.mirror;
+        }
         let b = e.bounds().unwrap_or(crate::physics::Rect {
             x: e.x,
             y: e.y,

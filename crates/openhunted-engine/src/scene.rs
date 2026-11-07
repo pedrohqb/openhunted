@@ -758,6 +758,16 @@ impl Scene {
                     OVERLAY_BORDER,
                 );
             }
+            // portas de célula: fora de `borders`, desenhadas no estado atual
+            for r in self.cell_doors.iter().flat_map(|d| d.solids()) {
+                fb.rect(
+                    r.x.saturating_sub(camera.0),
+                    r.y.saturating_sub(camera.1),
+                    r.w,
+                    r.h,
+                    OVERLAY_BORDER,
+                );
+            }
             for r in &self.object_solids {
                 fb.rect(
                     r.x.saturating_sub(camera.0),

@@ -757,7 +757,10 @@ impl Jake {
             self.inventory.cycle(false)
         } else if edge(NEXT_WEAPON) {
             self.inventory.cycle(true)
-        } else if sel != 0 && sel != prev_sel && self.inventory.available(sel) {
+        } else if (1..=weapons::ORDER.len()).contains(&sel)
+            && sel != prev_sel
+            && self.inventory.available(sel)
+        {
             sel
         } else {
             return;
@@ -2138,6 +2141,10 @@ mod tests {
             j.tick(0, &w);
         }
         assert_eq!(j.label(), 1, "a pose da troca dura 7 tiques");
+        // SELECT = 7 cai na primeira bandeira (par 7) e não é arma: ignorado
+        j.inventory.slots[7] = (1, 1);
+        j.tick(7 << SELECT_SHIFT, &w);
+        assert_eq!(j.inventory.weapon, STARS, "o par 7 é bandeira, não arma");
     }
 
     /// Disparos de cada arma com ATIRAR seguro por 30 tiques: (tiques com tiro, tipos).

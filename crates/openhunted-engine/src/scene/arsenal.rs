@@ -55,6 +55,7 @@ impl Scene {
         use crate::jake::ShotKind;
         let (vx, vy) = (s.vx * SUB, s.vy * SUB);
         let (dir_label, mirror) = behaviour::bullet::label_and_mirror(s.vx, s.vy);
+        let (mut x, mut y) = (s.x, s.y);
         let (kind, anim, label, mirror, brd, target, b) = match s.kind {
             ShotKind::Pellet => (
                 crate::entity::PELLET,
@@ -78,15 +79,21 @@ impl Scene {
                 25,
                 Behaviour::Rocket(rocket::RocketState::new(vx, vy)),
             ),
-            ShotKind::Star => (
-                crate::entity::STAR,
-                "ONS.ANM",
-                star::LABEL_FLY,
-                0,
-                "ONS2.BRD",
-                10,
-                Behaviour::Star(star::StarState::new(vx, vy)),
-            ),
+            ShotKind::Star => {
+                // 1º tique: avança 0–39/8 px na direção do voo
+                let r = self.rng.below(star::FIRST_ADVANCE_RAND);
+                let (dx, dy) = star::first_advance((vx, vy), r);
+                (x, y) = (x + dx, y + dy);
+                (
+                    crate::entity::STAR,
+                    "ONS.ANM",
+                    star::LABEL_FLY,
+                    0,
+                    "ONS2.BRD",
+                    10,
+                    Behaviour::Star(star::StarState::new(vx, vy)),
+                )
+            }
             ShotKind::Grenade => {
                 let fuse = grenade::FUSE_MIN + self.rng.below(grenade::FUSE_RAND);
                 (
@@ -141,8 +148,8 @@ impl Scene {
                 mirror,
                 brd,
                 target,
-                x: s.x,
-                y: s.y,
+                x,
+                y,
                 layer,
             },
             b,
@@ -546,6 +553,137 @@ mod tests {
         );
     }
 
+    fn grenade_vx(s: &Scene) -> Option<i32> {
+        s.entities.iter().find_map(|e| match &e.behaviour {
+            Behaviour::Grenade(g) if e.alive => Some(g.vx),
+            _ => None,
+        })
+    }
+
+    /// Na parede a granada inverte vx (sem perder rapidez) e espelha; o som 3042 só toca
+    /// no choque de parede (`0x40707c`: normal mais horizontal que vertical).
+    #[test]
+    fn grenade_wall_bounce_inverts_vx_and_mirrors() {
+        let mut s = range(300, crate::jake::GRENADES);
+        s.tick(crate::input::SHOOT);
+        let mut last: Option<i32> = None;
+        let mut seen = false;
+        for _ in 0..40 {
+            s.tick(0);
+            let Some(vx) = grenade_vx(&s) else {
+                if last.is_some() {
+                    break;
+                }
+                continue;
+            };
+            let wall = s.events.iter().any(|e| e.sound_id() == Some(3042));
+            if let (Some(before), true) = (last, wall) {
+                if !seen {
+                    assert_eq!(vx, -before, "inverte vx sem perder rapidez");
+                    let g = s.entities.iter().find(|e| e.kind == crate::entity::GRENADE);
+                    assert_eq!(
+                        g.and_then(|e| e.sprite.as_ref()).map(|sp| sp.mirror),
+                        Some(before > 0),
+                        "espelha ao quicar"
+                    );
+                }
+                seen = true;
+            }
+            last = Some(vx);
+        }
+        assert!(seen, "quicou na parede");
+        // sem parede: só o chão, nenhum som de quique
+        let mut s = range(100, crate::jake::GRENADES);
+        let floor = vec![s.cell_solids[0]];
+        s.cell_solids = floor.clone();
+        s.cell_world = crate::World::new(floor);
+        s.rebuild_world();
+        s.tick(crate::input::SHOOT);
+        for _ in 0..30 {
+            s.tick(0);
+            assert!(
+                !s.events.iter().any(|e| e.sound_id() == Some(3042)),
+                "quique no chão não toca o som"
+            );
+        }
+    }
+
+    /// Explosão sobre a granada e a estrela cravada (`armas-2.md`): a granada com dano de
+    /// explosão pendente detona no tique seguinte (`0x40d819`); a estrela cravada some. Em
+    /// voo ou fora do raio, nada.
+    #[test]
+    fn blast_detonates_grenades_and_removes_stuck_stars() {
+        use crate::behaviour::{grenade::GrenadeState, star::StarState};
+        let b = Blast {
+            center: (100, 100),
+            layer: 0,
+            radius: 30,
+            push: 30,
+            damage: 20,
+        };
+        let mk = |kind, x, st: Behaviour| {
+            let mut e = logic(kind, x, 84, &[]);
+            e.behaviour = st;
+            e
+        };
+        let mut stuck = StarState::new(80, 0);
+        stuck.stuck = Some(50);
+        let mut es = [
+            mk(
+                crate::entity::GRENADE,
+                84,
+                Behaviour::Grenade(GrenadeState::new(0, 0, 30)),
+            ),
+            mk(
+                crate::entity::GRENADE,
+                400,
+                Behaviour::Grenade(GrenadeState::new(0, 0, 30)),
+            ),
+            mk(crate::entity::STAR, 84, Behaviour::Star(stuck.clone())),
+            mk(
+                crate::entity::STAR,
+                84,
+                Behaviour::Star(StarState::new(80, 0)),
+            ),
+            mk(crate::entity::STAR, 400, Behaviour::Star(stuck)),
+        ];
+        for e in es.iter_mut() {
+            behaviour::interact::blast(&b, e);
+        }
+        let fuse = |e: &Entity| match &e.behaviour {
+            Behaviour::Grenade(g) => g.fuse,
+            _ => u32::MAX,
+        };
+        assert_eq!((fuse(&es[0]), fuse(&es[1])), (0, 30), "a do raio detona");
+        let alive: Vec<bool> = es[2..].iter().map(|e| e.alive).collect();
+        assert_eq!(alive, vec![false, true, true], "só a cravada no raio some");
+    }
+
+    /// Na cena: o foguete que explode na parede detona a granada pousada ao lado.
+    #[test]
+    fn rocket_blast_sets_off_a_resting_grenade() {
+        use crate::behaviour::grenade::GrenadeState;
+        let mut s = range(100, crate::jake::ROCKETS);
+        let mut g = logic(crate::entity::GRENADE, 380, 92, &[]);
+        g.boxes = vec![Rect {
+            x: 0,
+            y: 0,
+            w: 8,
+            h: 8,
+        }];
+        g.behaviour = Behaviour::Grenade(GrenadeState::new(0, 0, 1000));
+        s.entities.push(g);
+        s.tick(crate::input::SHOOT);
+        for _ in 0..30 {
+            s.tick(0);
+        }
+        assert_eq!(
+            count(&s, crate::entity::GRENADE),
+            0,
+            "detonou pela explosão"
+        );
+    }
+
     /// Os projéteis das armas novas ferem os inimigos da M7a com crédito ao jogador: um
     /// foguete mata a mina saltadora (tipo 11) e conta.
     #[test]
@@ -573,6 +711,51 @@ mod tests {
             assert_eq!(count(&s, crate::entity::HOP_MINE), 0, "arma {w}");
             assert_eq!(s.kills, 1, "arma {w}");
         }
+    }
+
+    /// De ponta a ponta: SOCO (Z) com os punhos na cena fere a mina dentro da caixa do golpe
+    /// (frente do Jake, terço do meio) e poupa a de fora.
+    #[test]
+    fn punch_in_the_scene_hurts_the_mine_in_the_box_only() {
+        use crate::behaviour::mine::MineState;
+        let mut s = range(100, crate::jake::FISTS);
+        let mine = |x| {
+            let mut m = logic(crate::entity::MINE, x, 66, &[0]);
+            m.flags = 0x80801;
+            m.boxes = vec![Rect {
+                x: 0,
+                y: 0,
+                w: 16,
+                h: 16,
+            }];
+            m.health = 100;
+            m.behaviour = Behaviour::Mine(MineState::new(0));
+            m
+        };
+        for _ in 0..10 {
+            s.tick(0); // o Jake para de deslizar
+        }
+        // à frente do corpo: a mina vem ao Jake ~4 px por tique e entra na caixa do golpe
+        // (5 px além do corpo) no tique do acerto
+        let jb = s.jake.as_ref().unwrap().body.bounds();
+        s.entities.push(mine(jb.x + jb.w + 9));
+        s.entities.push(mine(600));
+        let n = s.entities.len();
+        // a vida da mina no tique do som do soco (depois ela pode chegar ao Jake e explodir)
+        let mut hit = None;
+        for _ in 0..12 {
+            s.tick(crate::input::PUNCH);
+            if hit.is_none() && s.events.iter().any(|e| e.sound_id() == Some(SOUND_PUNCH)) {
+                hit = Some(s.entities[n - 2].health);
+            }
+        }
+        assert_eq!(
+            hit,
+            Some(100 - PUNCH_DAMAGE),
+            "a mina na caixa levou o soco"
+        );
+        let outside = &s.entities[n - 1];
+        assert_eq!(outside.health, 100, "a de fora, não");
     }
 
     /// O soco fere quem cruza a caixa do golpe, com o som 5062; os de fora não.

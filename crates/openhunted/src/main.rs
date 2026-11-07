@@ -7,7 +7,8 @@
 //! [--no-intro]`
 //! Nas telas: mouse, setas (levam o ponteiro aos botões), Enter/espaço clicam, Esc cancela
 //! (no menu, sai). No jogo: setas movem o Jake, espaço pula, Ctrl atira (segurando,
-//! rajadas; com as setas, mira para cima e nas diagonais), CIMA usa a saída, P/Pause pausa;
+//! rajadas; com as setas, mira para cima e nas diagonais), Z dá soco, X anda furtivo,
+//! PageUp/PageDown trocam de arma e 1–6 a escolhem, CIMA usa a saída, P/Pause pausa;
 //! qualquer tecla solta fecha a dica do tutorial. Os efeitos sonoros tocam pelo dispositivo
 //! de áudio padrão (sem ele, o jogo segue mudo). Sem Jake na fase, as setas rolam a tela,
 //! PageUp/PageDown pulam uma tela e Home/End vão às pontas. Tab mostra a colisão e os

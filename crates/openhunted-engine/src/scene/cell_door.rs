@@ -16,8 +16,11 @@ pub const OPENING: u8 = 3;
 pub const OPEN: u8 = 4;
 /// `+0x4c = 0` → 55 tiques até fechar.
 pub const DEFAULT_CLOSE: i32 = 55;
-/// Falas do Jake: porta trancada (3715 com 3714 sem a chave, com 3719 com o gatilho falso).
+/// Falas do Jake: porta trancada (3715 com 3714 sem a chave, com 3719 com o gatilho falso),
+/// em sequência pela fila do locutor (`0x43c868`).
 pub const SPEECH_LOCKED: u16 = 3715;
+pub const SPEECH_NO_KEY: u16 = 3714;
+pub const SPEECH_TRIGGER: u16 = 3719;
 /// Pares do inventário das chaves 62–67 (13–18).
 const FIRST_KEY_SLOT: usize = 13;
 
@@ -95,8 +98,26 @@ impl CellDoor {
         }
     }
 
+    /// Faixa de ocupação (`0x0040ee3b`): na altura toda da célula (128 px), com o x e a
+    /// largura da primeira caixa da colisão atual que não é mais larga que alta (a coluna da
+    /// porta; os trilhos 128 × 12 ficam de fora); sem ela, x = 58 e largura 12.
+    pub fn strip(&self) -> Rect {
+        let (x, w) = self
+            .solids()
+            .iter()
+            .find(|b| b.w <= b.h)
+            .map_or((self.origin.0 + 58, 12), |b| (b.x, b.w));
+        Rect {
+            x,
+            y: self.origin.1,
+            w,
+            h: super::CELL,
+        }
+    }
+
     /// Um tique (`0x0040ed62`): anda um quadro abrindo ou fechando; aberta, conta e fecha se
-    /// nada cruza a colisão fechada (`occupied`). Devolve `true` se a colisão mudou.
+    /// nada cruza a faixa da coluna (`strip`, pela consulta `occupied`). Devolve `true` se
+    /// a colisão mudou.
     pub fn tick(&mut self, occupied: impl Fn(&[Rect]) -> bool) -> bool {
         match self.state {
             OPENING => {
@@ -118,7 +139,7 @@ impl CellDoor {
                 self.frame = self.last;
                 if self.timer > 0 {
                     self.timer -= 1;
-                } else if self.timer == 0 && !occupied(&self.closed) {
+                } else if self.timer == 0 && !occupied(&[self.strip()]) {
                     self.timer = self.close_after;
                     self.state = CLOSING;
                     return true;
@@ -131,15 +152,15 @@ impl CellDoor {
 
     /// O pedido de quem empurra (`0x0040f040`) com a máscara de chaves e os gatilhos 3–4:
     /// fechada → abrindo (sem chave pedida, ou com alguma) ou a fala; aberta → fechando.
-    /// Devolve a fala, se houver.
-    pub fn push(&mut self, keys: i32, triggers_ok: bool) -> Option<u16> {
+    /// Devolve as duas falas, se houver.
+    pub fn push(&mut self, keys: i32, triggers_ok: bool) -> Option<[u16; 2]> {
         match self.state {
             CLOSED => {
                 if self.keys != 0 && self.keys & keys == 0 {
-                    return Some(SPEECH_LOCKED);
+                    return Some([SPEECH_LOCKED, SPEECH_NO_KEY]);
                 }
                 if !triggers_ok {
-                    return Some(SPEECH_LOCKED);
+                    return Some([SPEECH_LOCKED, SPEECH_TRIGGER]);
                 }
                 self.state = OPENING;
             }
@@ -215,7 +236,8 @@ impl Scene {
             {
                 let ok = crate::triggers::satisfied(&d.door_triggers(), &on);
                 let before = d.state;
-                if let Some(id) = d.push(mask, ok) {
+                // as duas falas em ordem, no mesmo tique (sem a fila do locutor)
+                for id in d.push(mask, ok).into_iter().flatten() {
                     self.events
                         .push(Event::Sound(Cue::ui(ch.speech(id), PRIORITY_PICKUP)));
                 }
@@ -276,9 +298,14 @@ mod tests {
     #[test]
     fn a_key_opens_and_the_door_closes_by_itself() {
         let mut d = door(2);
-        assert_eq!(d.push(0, true), Some(SPEECH_LOCKED), "sem a chave");
-        assert_eq!(d.push(1, true), Some(SPEECH_LOCKED), "outra chave");
-        assert_eq!(d.push(3, false), Some(SPEECH_LOCKED), "gatilho falso");
+        let no_key = Some([SPEECH_LOCKED, SPEECH_NO_KEY]);
+        assert_eq!(d.push(0, true), no_key, "sem a chave");
+        assert_eq!(d.push(1, true), no_key, "outra chave");
+        assert_eq!(
+            d.push(3, false),
+            Some([3715, 3719]),
+            "gatilho falso: a segunda fala muda"
+        );
         assert_eq!(d.push(2, true), None);
         assert_eq!(d.state, OPENING);
         let mut frames = vec![];
@@ -311,6 +338,72 @@ mod tests {
         assert_eq!(d.state, OPEN);
         let mut d = door(0);
         assert_eq!(d.push(0, true), None);
+    }
+
+    fn r(x: i32, y: i32, w: i32, h: i32) -> Rect {
+        Rect { x, y, w, h }
+    }
+
+    /// Porta aberta como `C1A38A0.BRD` na célula (128, 0): trilhos 128 × 12 em cima e
+    /// embaixo e a coluna de 20 px encurtada.
+    fn open_door() -> CellDoor {
+        let mut d = CellDoor::new(&[1, 0, 3]);
+        d.origin = (128, 0);
+        d.timer = 0;
+        let rails = [r(128, 0, 128, 12), r(128, 116, 128, 12)];
+        d.closed = [&rails[..], &[r(178, 12, 20, 104)]].concat();
+        d.open = [&rails[..], &[r(178, 12, 20, 30)]].concat();
+        d
+    }
+
+    /// Ocupação (`0x40ee3b`): a faixa da coluna da porta (x e largura da primeira caixa
+    /// com largura ≤ altura) na altura toda da célula; sem ela, x = 58 e 12 de largura.
+    #[test]
+    fn occupancy_strip_is_the_door_column_over_the_whole_cell() {
+        let d = open_door();
+        assert_eq!(d.strip(), r(178, 0, 20, 128));
+        let mut bare = CellDoor::new(&[1]);
+        bare.origin = (0, 256);
+        assert_eq!(bare.strip(), r(58, 256, 12, 128));
+    }
+
+    /// Um barril pousado no trilho de baixo, fora da coluna, não segura a porta aberta;
+    /// dentro da coluna, segura.
+    #[test]
+    fn barrel_on_the_rail_does_not_keep_the_door_open() {
+        for (x, stays) in [(140, false), (180, true)] {
+            let mut s = Scene::empty(512, 256);
+            s.cell_doors = vec![open_door()];
+            let mut b = crate::behaviour::test_support::logic(crate::entity::BARREL, x, 90, &[]);
+            b.boxes = vec![r(0, 0, 16, 30)]; // cruza o trilho (y 116..128) por 4 px
+            b.solid_shapes = true;
+            b.flags = 0x80001;
+            s.entities.push(b);
+            s.tick_cell_doors();
+            let st = s.cell_doors[0].state;
+            assert_eq!(st == OPEN, stays, "barril em x = {x}: estado {st}");
+        }
+    }
+
+    /// O overlay (Tab) desenha as caixas das portas no estado atual.
+    #[test]
+    fn overlay_draws_the_door_boxes() {
+        let mut s = Scene::empty(512, 256);
+        let mut d = open_door();
+        d.state = CLOSED;
+        s.cell_doors = vec![d];
+        let mut fb = crate::Framebuffer::new(256, 128);
+        s.draw(&mut super::super::tests::assets(), &mut fb, (128, 0), true);
+        // canto da coluna fechada (178, 12) → (50, 12) na tela
+        assert_ne!(fb.pixels[12 * 256 + 50], 0, "coluna da porta no overlay");
+        let mut plain = crate::Framebuffer::new(256, 128);
+        s.draw(
+            &mut super::super::tests::assets(),
+            &mut plain,
+            (128, 0),
+            false,
+        );
+        assert_eq!(plain.pixels[12 * 256 + 50], 0);
     }
 
     #[test]
