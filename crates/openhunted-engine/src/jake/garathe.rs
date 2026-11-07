@@ -60,9 +60,9 @@ pub(super) fn anim(s: State) -> (u16, u32) {
             weapon_of(g, w as usize).states[weapons::aim_slot(aim)][usize::from(alt)].0,
             0,
         ),
-        State::Recover(w) => (weapon_of(g, w as usize).states[2][0].1.recover, 0),
-        State::Ready(_, w) => (weapon_of(g, w as usize).ready, 0),
-        State::Holster(w) => (weapon_of(g, w as usize).holster, 0),
+        State::Recover(w) => pose(weapon_of(g, w as usize).states[2][0].1.recover),
+        State::Ready(_, w) => pose(weapon_of(g, w as usize).ready),
+        State::Holster(w) => pose(weapon_of(g, w as usize).holster),
         State::Stealth => (103, 0),
         State::JumpUp(false) => (20, 0),
         State::JumpUp(true) => (19, 0),
@@ -80,6 +80,13 @@ pub(super) fn anim(s: State) -> (u16, u32) {
         State::BarMove => (49, 1),
         State::BarPull | State::BarDown | State::BarUp => (50, 0),
     }
+}
+
+/// Pronto/guardar/recuperação: o estado é o próprio rótulo; atraso 1 nos da tabela
+/// (81, 82, 85, 111, 128–130, 140–142, 152–154), 0 nos demais (100, 101, 110).
+fn pose(label: u16) -> (u16, u32) {
+    let slow = matches!(label, 81 | 82 | 85 | 111 | 128..=130 | 140..=142 | 152..=154);
+    (label, u32::from(slow))
 }
 
 /// Rótulo do derrubado: 32 `BLASTFWD` se jogado para o lado em que olha, senão 33
@@ -282,6 +289,29 @@ mod tests {
         );
         assert_eq!(seen[first + 3].3, Some(SOUND_PUSH));
         assert!(seen[first + 4..].iter().all(|s| s.3.is_none()));
+    }
+
+    /// Atraso (`+0x18`) dos pronto/guardar/recuperação: 1 em 81, 82, 85, 111, 128–130,
+    /// 140–142 e 152–154; 0 nas garras (100, 101) e no pronto da clava (110).
+    #[test]
+    fn weapon_pose_delays_follow_the_state_table() {
+        use weapons::{CLAWS, CLUB, G_GRENADES, G_STARS, KNIVES, WHIP};
+        let d = |s: State| anim(s);
+        assert_eq!(d(State::Ready(0, KNIVES as u8)), (81, 1));
+        assert_eq!(d(State::Holster(KNIVES as u8)), (82, 1));
+        assert_eq!(d(State::Recover(KNIVES as u8)), (85, 1));
+        assert_eq!(d(State::Ready(0, CLUB as u8)), (110, 0));
+        assert_eq!(d(State::Holster(CLUB as u8)), (111, 1));
+        assert_eq!(d(State::Ready(0, CLAWS as u8)), (100, 0));
+        assert_eq!(d(State::Holster(CLAWS as u8)), (101, 0));
+        for w in [G_STARS, G_GRENADES, WHIP] {
+            let (r, h, c) = (
+                d(State::Ready(0, w as u8)),
+                d(State::Holster(w as u8)),
+                d(State::Recover(w as u8)),
+            );
+            assert_eq!((r.1, h.1, c.1), (1, 1, 1), "arma {w}: {r:?} {h:?} {c:?}");
+        }
     }
 
     #[test]
