@@ -15,10 +15,16 @@ Engenharia reversa: [`docs/re/anm.md`](../re/anm.md). Inteiros little-endian.
 | 2 | `u16` `D`: tamanho do roteiro em bytes |
 | 2 + 2 | `u16` largura e `u16` altura de referência |
 | 6 | (versão ≥ 1002) três `s16` que o original descarta |
-| 2 × A | Tabela A (`u16`); vazia nos dados vistos |
+| 2 × A | Tabela A (`u16`): quadro lógico → quadro físico (ver abaixo) |
 | B × 12 | Quadros: `s16` x, `s16` y, `s16` largura, `s16` altura, `u16` início do roteiro (em palavras), `s16` extra (versão ≥ 1002) |
 | C × 4 | Rótulos: `u16` quadro inicial, `u16` id |
 | D | Roteiro: instruções `s16` opcode + argumentos `s16` |
+
+**Tabela A** [inferido pelos dados]: vazia na maioria; não vazia em `SEGOC`, `SHERO`,
+`SLEVL`, `S_CAR`, `SIERRA` e `OCH`, onde os rótulos passam do número de quadros (ex.:
+`S_CAR` tem 364 quadros, 976 entradas e rótulos até 847). Os rótulos contam quadros
+**lógicos**, e a entrada `i` dá o quadro físico do lógico `i` (repetições seguram um
+quadro). As telas (`Screen`) seguem isso desde a M9; os objetos de jogo (`OCH`) ainda não.
 
 Tamanho de cada instrução em palavras, opcode incluído:
 

@@ -7,6 +7,15 @@
 #[path = "../src/audio.rs"]
 mod audio;
 #[allow(dead_code)]
+#[path = "../src/music.rs"]
+mod music;
+#[allow(dead_code)]
+#[path = "../src/storage.rs"]
+mod storage;
+#[allow(dead_code)]
+#[path = "../src/video.rs"]
+mod video;
+#[allow(dead_code)]
 #[path = "../src/viewer.rs"]
 mod viewer;
 
@@ -110,4 +119,99 @@ fn main() {
     app.key_down(Key::Enter);
     run(&mut app, 300);
     save(&mut app, &out.join("briefing_next.png"));
+    m9(Path::new(&args[1]), out);
+}
+
+/// Telas da M9: opções, missões, heróis, nome, dispositivos, teclas, sobre, carro.
+fn m9(data: &Path, out: &Path) {
+    use openhunted_engine::shell::menu;
+    let root = std::env::temp_dir().join("openhunted-shots");
+    let _ = std::fs::remove_dir_all(&root);
+    let mut app = App::load(data, None).unwrap();
+    app.set_storage(storage::Storage::at(&root));
+    let press = |app: &mut App, id: u16, name: &str| {
+        let r = app.screen().unwrap().rect(id).unwrap();
+        app.pointer_move(r.x + r.w / 2, r.y + r.h / 2);
+        app.pointer_button(true);
+        run(app, 50);
+        app.pointer_button(false);
+        run(app, 600);
+        save(app, &out.join(format!("{name}.png")));
+    };
+    press(&mut app, menu::OPTIONS, "m9_options");
+    app.key_down(Key::Escape);
+    run(&mut app, 100);
+    press(&mut app, menu::CHOOSE_LEVEL, "m9_levels");
+    app.key_down(Key::Escape);
+    run(&mut app, 100);
+    press(&mut app, menu::HERO_LIST, "m9_heroes");
+    app.key_down(Key::Escape);
+    run(&mut app, 100);
+    press(&mut app, menu::INPUT_DEVICES, "m9_input");
+    press(&mut app, 29013, "m9_keys");
+    app.key_down(Key::Escape);
+    app.key_down(Key::Escape);
+    run(&mut app, 100);
+    press(&mut app, menu::HELP, "m9_about");
+    app.key_down(Key::Escape);
+    run(&mut app, 100);
+    press(&mut app, menu::MULTI_PLAYER, "m9_multi");
+    press(&mut app, 13001, "m9_unavailable");
+    app.key_down(Key::Escape);
+    app.key_down(Key::Escape);
+    run(&mut app, 100);
+    let mut b = App::load(data, None).unwrap();
+    b.set_storage(storage::Storage::at(&root));
+    press(&mut b, menu::RESTORE, "m9_load");
+    b.text_input("JAKE");
+    run(&mut b, 100);
+    save(&mut b, &out.join("m9_load_typed.png"));
+    let _ = std::fs::remove_dir_all(&root);
+    // carro com 7 peças e um quadro do filme (se houver `ffmpeg`)
+    {
+        use openhunted_engine::shell::heroes::Car;
+        use openhunted_engine::shell::{Input, Page, Placement, Screen};
+        let gd = openhunted_formats::open_data(data).unwrap();
+        let mut assets = openhunted_engine::Assets::new(gd.resources().unwrap());
+        let itf = openhunted_formats::Interface::parse(assets.archive().get("S_CAR.ITF").unwrap())
+            .unwrap();
+        let mut car = Car::new(Screen::new(&itf, &mut assets, Placement::Full).unwrap(), 7);
+        for _ in 0..40 {
+            car.handle(Input::Tick, &mut Vec::new());
+        }
+        let mut fb = openhunted_engine::Framebuffer::new(640, 480);
+        car.draw(&mut fb);
+        let pal = openhunted_engine::display_palette(
+            &openhunted_formats::Palette::parse(assets.archive().get("WORLD.PAL").unwrap())
+                .unwrap(),
+        );
+        let rgba: Vec<u8> = fb
+            .pixels
+            .iter()
+            .flat_map(|&p| {
+                let c = pal.0[p as usize];
+                [c[0], c[1], c[2], 255]
+            })
+            .collect();
+        write_png(&rgba, &out.join("m9_car.png"));
+        if let Some(mut m) = video::open_ffmpeg(gd.read_movie("HHNORMAL.AVI").unwrap()) {
+            m.advance(6000);
+            let mut rgba = vec![0u8; 640 * 480 * 4];
+            m.render_rgba(&mut rgba);
+            write_png(&rgba, &out.join("m9_movie.png"));
+            println!(
+                "áudio: {:?} amostras",
+                m.audio.as_ref().map(|a| a.samples.len())
+            );
+        }
+    }
+}
+
+fn write_png(rgba: &[u8], path: &Path) {
+    let file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+    let mut enc = png::Encoder::new(file, 640, 480);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header().unwrap().write_image_data(rgba).unwrap();
+    println!("{}", path.display());
 }

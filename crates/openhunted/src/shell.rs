@@ -24,6 +24,11 @@ use openhunted_formats::{
 
 use crate::viewer::{Action, Viewer};
 
+// telas, salvamento, música e filmes da M9 (`docs/superpowers/specs/2026-11-06-m9-casca-design.md`)
+#[path = "casca.rs"]
+mod casca;
+pub use casca::{PageKind, Show};
+
 /// Espera entre o veredito e a tela de resultado (no original, o anúncio do locutor).
 pub const END_DELAY_MS: u32 = 2000;
 
@@ -44,6 +49,7 @@ pub enum Key {
     PageDown,
     Home,
     End,
+    Backspace,
     Other,
 }
 
@@ -86,6 +92,14 @@ enum State {
         end_ms: Option<u32>,
     },
     Results(Box<Results>),
+    /// Telas da M9 (opções, missões, heróis, nome, carro…), com a caixa de aviso por cima.
+    Page {
+        page: Box<dyn openhunted_engine::shell::Page>,
+        kind: PageKind,
+        notice: Option<GenericBox>,
+    },
+    /// Filmes, vozes, tela preta e créditos.
+    Show(Box<Show>),
 }
 
 /// Nome curto da tela corrente (testes e título da janela).
@@ -96,6 +110,10 @@ pub enum Mode {
     Play,
     Paused,
     Results,
+    /// Uma das telas da M9 (ver `App::page_kind`).
+    Page,
+    /// Filme ou créditos.
+    Show,
 }
 
 /// O jogo inteiro: telas, missão corrente e a partida.
@@ -130,6 +148,8 @@ pub struct App {
     quit: bool,
     /// Botão do menu escolhido por último (o ponteiro volta a ele).
     last_menu_button: u16,
+    /// Estado da M9: configuração, campanha, arquivos, música e filmes.
+    m9: casca::Casca,
 }
 
 impl App {
@@ -206,6 +226,7 @@ impl App {
             sfx: None,
             quit: false,
             last_menu_button: menu::NEW_GAME,
+            m9: casca::Casca::default(),
         };
         app.open_menu()?;
         Ok(app)
@@ -235,6 +256,8 @@ impl App {
             State::Play { pause: Some(_), .. } => Mode::Paused,
             State::Play { .. } => Mode::Play,
             State::Results(_) => Mode::Results,
+            State::Page { .. } => Mode::Page,
+            State::Show(_) => Mode::Show,
         }
     }
 
@@ -283,7 +306,8 @@ impl App {
             State::Menu(s) => Some(s),
             State::Briefing { dlg, .. } => Some(&dlg.screen),
             State::Results(r) => Some(&r.screen),
-            State::Play { .. } => None,
+            State::Page { page, .. } => Some(page.screen()),
+            State::Play { .. } | State::Show(_) => None,
         }
     }
 
@@ -423,10 +447,14 @@ impl App {
         let score = results::score(&stats, results::bonus(outcome, remains));
         let mut improve = None;
         let mut cumulative = None;
+        let mut first_win = false;
+        self.m9.improved = false;
         if outcome == Outcome::Victory {
             // fase fora da lista (`--level`): sem recorde nem soma
             if let Some(rec) = self.index.and_then(|i| self.records.get_mut(i)) {
+                first_win = *rec == 0;
                 if score > *rec {
+                    self.m9.improved = true;
                     if *rec != 0 {
                         improve = Some(score - *rec);
                     }
@@ -448,8 +476,7 @@ impl App {
             cumulative,
             improve,
         );
-        self.state = State::Results(Box::new(r));
-        Ok(())
+        self.after_results(Box::new(r), first_win)
     }
 
     // ---- entrada ----
@@ -466,6 +493,10 @@ impl App {
             _ => None,
         };
         let (paused_text, okay) = (self.sys_text(text::PAUSED), self.sys_text(text::OKAY));
+        if matches!(self.state, State::Page { .. } | State::Show(_)) {
+            self.casca_key(key);
+            return;
+        }
         match &mut self.state {
             State::Menu(_) if key == Key::Escape => {
                 // o original ignora o Esc no menu; aqui ele sai do jogo
@@ -537,6 +568,8 @@ impl App {
                     _ => {}
                 }
             }
+            // tratados em `casca_key`, antes do `match`
+            State::Page { .. } | State::Show(_) => {}
         }
     }
 
@@ -604,7 +637,8 @@ impl App {
                 r.handle(Input::PointerMove(x, y), &mut self.sounds);
             }
             State::Play { pause: Some(b), .. } => b.pointer(x, y),
-            State::Play { .. } => {}
+            State::Page { .. } => self.casca_pointer(Some((x, y)), None),
+            State::Play { .. } | State::Show(_) => {}
         }
     }
 
@@ -641,6 +675,7 @@ impl App {
                     self.resume();
                 }
             }
+            State::Page { .. } | State::Show(_) => self.casca_pointer(None, Some(down)),
             State::Play { .. } => {}
         }
     }
@@ -659,14 +694,14 @@ impl App {
                 self.last_menu_button = menu::NEW_GAME;
                 // `0x440fe0`: zera a campanha e começa da primeira missão solo
                 self.records.iter_mut().for_each(|r| *r = 0);
+                self.new_campaign();
                 self.index = Some(0);
                 self.start_mission(Back::Menu);
             }
             // sem o diálogo de confirmação 10005
             Some(menu::EXIT) => self.quit = true,
-            // os demais (carregar, escolher missão, opções, dispositivos, heróis, ajuda,
-            // dois jogadores) ainda não existem
-            _ => {}
+            Some(id) => self.menu_button(id),
+            None => {}
         }
     }
 
@@ -768,7 +803,12 @@ impl App {
 
     /// Avança o relógio: as telas e o jogo andam em tiques de 50 ms.
     pub fn advance(&mut self, ms: u32) {
-        self.advance_inner(ms);
+        if matches!(self.state, State::Show(_)) {
+            self.advance_show(ms);
+        } else {
+            self.advance_inner(ms);
+        }
+        self.update_music();
         self.flush_sounds();
     }
 
@@ -807,9 +847,14 @@ impl App {
                 }
                 State::Results(r) => {
                     let c = r.handle(Input::Tick, &mut self.sounds);
+                    let done = r.progress() >= 100;
                     self.dispatch_results(c);
+                    if done {
+                        self.count_finished();
+                    }
                 }
-                State::Play { .. } => {
+                State::Page { .. } => self.casca_tick(),
+                State::Play { .. } | State::Show(_) => {
                     // a tela mudou para o jogo neste quadro: o resto é dele
                     self.pending_ms = 0;
                     return;
@@ -829,6 +874,7 @@ impl App {
                 self.fb.clear(0);
                 r.draw(&mut self.fb);
             }
+            State::Page { .. } | State::Show(_) => self.casca_render(),
             State::Briefing { dlg, .. } => {
                 if let Some(v) = self.viewer.as_mut() {
                     self.fb.pixels.copy_from_slice(&v.render().pixels);
@@ -849,20 +895,34 @@ impl App {
 
     /// Desenha e converte para RGBA (640 × 480 × 4 bytes) com a `WORLD.PAL`.
     pub fn render_rgba(&mut self, out: &mut [u8]) {
+        if self.render_movie(out) {
+            return;
+        }
         self.render();
+        // o brilho (`WORLD_G%d.PAL`) vale para o briefing e a partida
+        let lut = match (&self.state, &self.m9.game_lut) {
+            (State::Briefing { .. } | State::Play { .. }, Some(g)) => g,
+            _ => &self.lut,
+        };
         for (o, &p) in out.chunks_exact_mut(4).zip(&self.fb.pixels) {
-            o.copy_from_slice(&self.lut[p as usize]);
+            o.copy_from_slice(&lut[p as usize]);
         }
     }
 
     /// Texto curto para o título da janela.
     pub fn status(&self) -> String {
-        match self.mode() {
+        let s = match self.mode() {
             Mode::Menu => "menu".into(),
             Mode::Briefing => format!("briefing — {}", self.level.0),
             Mode::Play => self.level.0.clone(),
             Mode::Paused => format!("{} — pausa", self.level.0),
             Mode::Results => format!("resultado — {}", self.level.0),
+            Mode::Page => "menu".into(),
+            Mode::Show => "filme".into(),
+        };
+        match &self.m9.track_title {
+            Some(t) if matches!(self.mode(), Mode::Play | Mode::Paused) => format!("{s} — ♪ {t}"),
+            _ => s,
         }
     }
 }
