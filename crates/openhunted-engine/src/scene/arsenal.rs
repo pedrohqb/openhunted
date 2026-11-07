@@ -19,8 +19,9 @@ pub const ANIMS: [&str; 7] = [
     "OKN.ANM",
     "OWB.ANM",
 ];
-pub const BORDERS: [&str; 10] = [
+pub const BORDERS: [&str; 11] = [
     "OKN01.BRD",
+    crate::behaviour::star::KNIFE_STUCK_BRD,
     "OWB.BRD",
     "OBK00.BRD",
     "OBK01.BRD",
@@ -122,7 +123,13 @@ impl Scene {
                 u8::from(s.vx < 0),
                 "OKN01.BRD",
                 3,
-                Behaviour::Star(star::StarState::knife(vx, vy)),
+                Behaviour::Star(star::StarState {
+                    stuck_boxes: self
+                        .assets_border(star::KNIFE_STUCK_BRD)
+                        .map(|b| crate::entity::border_boxes(&b))
+                        .unwrap_or_default(),
+                    ..star::StarState::knife(vx, vy)
+                }),
             ),
             ShotKind::Whip => (
                 crate::entity::WHIP_SHOT,
@@ -808,6 +815,22 @@ mod tests {
         use crate::character::Character;
         use crate::jake::weapons::KNIVES;
         let mut s = range_as(250, KNIVES, Character::Garathe);
+        // a caixa da cravada (`okn02.brd`) troca a do voo
+        let stuck_box = openhunted_formats::BorderBox {
+            kind: crate::entity::BOX,
+            x: 1,
+            y: 2,
+            width: 7,
+            height: 5,
+        };
+        s.projectile_borders.insert(
+            crate::behaviour::star::KNIFE_STUCK_BRD.into(),
+            openhunted_formats::Border {
+                name: String::new(),
+                version: 0,
+                boxes: vec![stuck_box],
+            },
+        );
         s.tick(crate::input::SHOOT);
         for _ in 0..40 {
             s.tick(0);
@@ -818,6 +841,15 @@ mod tests {
             .find(|e| e.alive && e.kind == crate::entity::KNIFE)
             .expect("a faca cravada na parede");
         assert!(matches!(&knife.behaviour, Behaviour::Star(st) if st.knife && !st.in_flight()));
+        assert_eq!(
+            knife.boxes,
+            vec![Rect {
+                x: 1,
+                y: 2,
+                w: 7,
+                h: 5
+            }]
+        );
         let c = knife.center();
         let ammo = s.jake.as_ref().unwrap().inventory.ammo(KNIVES);
         assert_eq!(ammo, 9);
