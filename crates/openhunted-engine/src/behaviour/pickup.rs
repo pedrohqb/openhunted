@@ -5,7 +5,7 @@
 use super::{Ctx, Event, Out};
 use crate::damage::Health;
 use crate::entity::{ARMOR_ITEM, Entity, HEALTH_ITEM};
-use crate::jake::{Inventory, PISTOL};
+use crate::jake::{GRENADES, Inventory, PISTOL, ROCKETS, SHOTGUN, STARS};
 use crate::physics::{Body, step};
 
 /// Som "Pickup generic object".
@@ -26,26 +26,45 @@ fn effect(kind: u32) -> (i32, i32) {
     }
 }
 
-/// Tipos de arma e munição: pistola (12), lança-foguetes (14), munição da pistola (16),
-/// granadas (26).
+/// Tipos de arma e munição: pistola (12), espingarda (13), lança-foguetes (14), munição da
+/// pistola (16), cartuchos (17), foguetes (18), granadas (26), estrelas (27).
 pub const PISTOL_ITEM: u32 = 12;
+pub const SHOTGUN_ITEM: u32 = 13;
 pub const ROCKET_ITEM: u32 = 14;
 pub const AMMO_ITEM: u32 = 16;
+pub const SHELLS_ITEM: u32 = 17;
+pub const ROCKETS_ITEM: u32 = 18;
 pub const GRENADE_ITEM: u32 = 26;
+pub const STAR_ITEM: u32 = 27;
+/// Chaves (62–67) e bandeiras (80–85): pares `tipo − 49` e `tipo − 73`.
+pub const KEYS: std::ops::RangeInclusive<u32> = 62..=67;
+pub const FLAGS: std::ops::RangeInclusive<u32> = 80..=85;
+/// Som "Pickup flag or key".
+pub const SOUND_KEY: u16 = 5060;
 /// Teto da munição (`0x40a36d`).
 pub const AMMO_CAP: i32 = 99;
-const ROCKETS: usize = 4;
-const GRENADES: usize = 6;
 
 /// Arma e munição (`0x409fe8` + aceitação `0x40b6ed`) com o valor `v` (`values[0]`) do item:
-/// `None` se o item não é de arma; `Some(false)` se recusado (munição ≥ 99 numa arma que já
-/// tem). Quem dá a arma aceita sempre quando o "tem" é 0. A dificuldade fica em ×1.
+/// `None` se o item não é de arma, chave ou bandeira; `Some(false)` se recusado (munição ≥ 99
+/// numa arma que já tem). Quem dá a arma aceita sempre quando o "tem" é 0 e pode torná-la a
+/// corrente (`0x43af6c`, antes de a arma entrar). Chaves e bandeiras: "tem" = 1 e +1. A
+/// dificuldade fica em ×1.
 pub fn take_weapon(kind: u32, v: i32, inv: &mut Inventory) -> Option<bool> {
+    if KEYS.contains(&kind) || FLAGS.contains(&kind) {
+        let slot = (kind - if KEYS.contains(&kind) { 49 } else { 73 }) as usize;
+        inv.slots[slot].0 = 1;
+        inv.slots[slot].1 = (inv.slots[slot].1 + 1).min(AMMO_CAP);
+        return Some(true);
+    }
     let (slot, gives, amount) = match kind {
         PISTOL_ITEM => (PISTOL, true, 3 * v),
         AMMO_ITEM => (PISTOL, false, 3 * v),
+        SHOTGUN_ITEM => (SHOTGUN, true, v),
+        SHELLS_ITEM => (SHOTGUN, false, v),
         ROCKET_ITEM => (ROCKETS, true, v),
+        ROCKETS_ITEM => (ROCKETS, false, v),
         GRENADE_ITEM => (GRENADES, true, v),
+        STAR_ITEM => (STARS, true, v),
         _ => return None,
     };
     let (has, qty) = inv.slots[slot];
@@ -53,12 +72,61 @@ pub fn take_weapon(kind: u32, v: i32, inv: &mut Inventory) -> Option<bool> {
         return Some(false);
     }
     if gives {
+        inv.gained(slot);
         inv.slots[slot].0 = 1;
     }
     if amount != 0 {
         inv.slots[slot].1 = (qty + amount.max(1)).min(AMMO_CAP);
     }
     Some(true)
+}
+
+/// Som da coleta: 5060 para chaves, bandeiras e a peça do carro; senão 5057.
+pub fn pickup_sound(kind: u32) -> u16 {
+    if KEYS.contains(&kind) || FLAGS.contains(&kind) || kind == crate::entity::CAR_PIECE {
+        SOUND_KEY
+    } else {
+        SOUND_PICKUP
+    }
+}
+
+/// A estrela cravada (`0x40bcd7`): o Jake que a toca recolhe 1 estrela (coleta genérica).
+pub fn collect_star(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
+    let (Some(item), Some(j), Some(jake)) = (e.bounds(), ctx.jake_bounds(), ctx.jake) else {
+        return;
+    };
+    if e.layer != ctx.jake_layer || !item.overlaps(&j) {
+        return;
+    }
+    let mut inv = out
+        .inventory
+        .clone()
+        .unwrap_or_else(|| jake.inventory.clone());
+    if take_weapon(STAR_ITEM, 1, &mut inv) == Some(true) {
+        out.inventory = Some(inv);
+        out.events.push(Event::Sound(crate::sound::Cue::ui(
+            SOUND_PICKUP,
+            crate::sound::PRIORITY_PICKUP,
+        )));
+        e.alive = false;
+    }
+}
+
+/// Veneno (33, 35: +1 em `+0x270`) e antídoto (37: zera; recusado sem veneno), da tabela
+/// `0x00471d10`. `None` se o item não é desses.
+pub fn take_poison(kind: u32, poison: &mut i32) -> Option<bool> {
+    match kind {
+        33 | 35 => {
+            *poison += 1;
+            Some(true)
+        }
+        37 if *poison == 0 => Some(false),
+        37 => {
+            *poison = 0;
+            Some(true)
+        }
+        _ => None,
+    }
 }
 
 /// Aceita e aplica o item à vida `h` (`0x0040b6ed` + `0x0040b57b`); `false` = recusado.
@@ -137,10 +205,23 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         if ok {
             out.inventory = Some(inv);
             out.events.push(Event::Sound(crate::sound::Cue::ui(
-                SOUND_PICKUP,
+                pickup_sound(e.kind),
                 crate::sound::PRIORITY_PICKUP,
             )));
             // apanhado fica ligado (`+0x178 = 0x40`, `itens.md` passo 11)
+            e.on = true;
+            e.alive = false;
+        }
+        return;
+    }
+    let mut poison = out.poison.unwrap_or(jake.poison);
+    if let Some(ok) = take_poison(e.kind, &mut poison) {
+        if ok {
+            out.poison = Some(poison);
+            out.events.push(Event::Sound(crate::sound::Cue::ui(
+                SOUND_PICKUP,
+                crate::sound::PRIORITY_PICKUP,
+            )));
             e.on = true;
             e.alive = false;
         }
@@ -270,5 +351,63 @@ mod tests {
             tick(&mut item, &ctx(&j, &w, &on), &mut Out::default());
             assert!(!item.alive && item.on, "tipo {kind}");
         }
+    }
+
+    #[test]
+    fn campaign_ammo_keys_and_flags() {
+        use crate::jake::{FISTS, ROCKETS, SHOTGUN, STARS};
+        let mut inv = Inventory::from_points(&[(0, 0), (1, 20)]);
+        assert_eq!(inv.weapon, FISTS);
+        assert_eq!(take_weapon(SHELLS_ITEM, 10, &mut inv), Some(true));
+        assert_eq!(
+            inv.slots[SHOTGUN],
+            (0, 10),
+            "cartuchos sem a arma não ligam o \"tem\""
+        );
+        assert_eq!(take_weapon(SHOTGUN_ITEM, 20, &mut inv), Some(true));
+        assert_eq!(inv.slots[SHOTGUN], (1, 30));
+        assert_eq!(inv.weapon, SHOTGUN, "a espingarda é melhor que os punhos");
+        assert_eq!(take_weapon(ROCKETS_ITEM, 3, &mut inv), Some(true));
+        assert_eq!(take_weapon(ROCKET_ITEM, 5, &mut inv), Some(true));
+        assert_eq!((inv.slots[ROCKETS], inv.weapon), ((1, 8), ROCKETS));
+        assert_eq!(take_weapon(STAR_ITEM, 10, &mut inv), Some(true));
+        assert_eq!(inv.slots[STARS], (1, 10));
+        assert_eq!(inv.weapon, ROCKETS, "as estrelas são piores");
+        // chave 63 → par 14; bandeira 85 → par 12
+        assert_eq!(take_weapon(63, 0, &mut inv), Some(true));
+        assert_eq!(take_weapon(85, 0, &mut inv), Some(true));
+        assert_eq!((inv.slots[14], inv.slots[12]), ((1, 1), (1, 1)));
+        assert_eq!(pickup_sound(63), SOUND_KEY);
+        assert_eq!(pickup_sound(SHELLS_ITEM), SOUND_PICKUP);
+    }
+
+    #[test]
+    fn poison_and_antidote() {
+        let mut p = 0;
+        assert_eq!(take_poison(37, &mut p), Some(false), "sem veneno, recusa");
+        assert_eq!(take_poison(33, &mut p), Some(true));
+        assert_eq!(take_poison(35, &mut p), Some(true));
+        assert_eq!(p, 2);
+        assert_eq!(take_poison(37, &mut p), Some(true));
+        assert_eq!(p, 0);
+        assert_eq!(take_poison(HEALTH_ITEM, &mut p), None);
+        // no Jake: perde `veneno` a cada 20 tiques, sem a armadura absorver
+        let (mut j, w) = ctx_with_jake(100, 0);
+        j.health.armor = 50;
+        j.poison = 2;
+        let hp = j.health.hp;
+        for _ in 0..40 {
+            j.tick(0, &w);
+        }
+        assert_eq!((j.health.hp, j.health.armor), (hp - 4, 50));
+        // apanhar o veneno no contato
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(100, 0);
+        let mut item = logic(33, 100, 0, &[]);
+        item.flags = 0x803a9;
+        let mut out = Out::default();
+        tick(&mut item, &ctx(&j, &w, &on), &mut out);
+        assert_eq!(out.poison, Some(1));
+        assert!(!item.alive);
     }
 }

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Cena de uma fase: blocos de cenário, decorações e objetos, com as animações em curso.
 
+mod arsenal;
+mod cell_door;
+mod switches;
+
 use std::rc::Rc;
 
 use std::collections::HashMap;
@@ -141,6 +145,8 @@ pub struct Scene {
     pub timer: i32,
     /// Limite de tempo da fase em segundos (campo 1004; 0 = sem limite).
     pub time_limit: i32,
+    /// Portas de célula (células de índice `…38…`).
+    pub cell_doors: Vec<cell_door::CellDoor>,
     /// Tiques de terremoto que ainda fazem o Jake cambalear (`+0x274`, `0x418229`).
     pub quake: u32,
     /// Último tique de cada som com limite global de repetição (sentinelas, robôs).
@@ -320,6 +326,7 @@ impl Scene {
             mines_at_start: 0,
             timer: 0,
             time_limit: 0,
+            cell_doors: Vec::new(),
             quake: 0,
             sound_clock: HashMap::new(),
         }
@@ -366,9 +373,11 @@ impl Scene {
             mines_at_start: 0,
             timer: 0,
             time_limit: 0,
+            cell_doors: Vec::new(),
             quake: 0,
             sound_clock: HashMap::new(),
         };
+        let mut scenery = 0usize;
         let mut jake_layer = 0;
         let mut jake_flags = 0;
         let mut objects: Vec<&LevelObject> = level.objects.iter().collect();
@@ -383,16 +392,49 @@ impl Scene {
                         .ok()
                         .and_then(|id| AnimPlayer::at_label(&a, id))
                     {
-                        Some(player) => s.sprites.push(Sprite {
-                            layer: Layer::Scenery,
-                            anim: a,
-                            player,
-                            x: cx,
-                            y: cy,
-                            frozen: false,
-                            scale: (1, 1),
-                            mirror: cell.mirrored,
-                        }),
+                        Some(player) => {
+                            if cell_door::is_door(cell.index) {
+                                let id = cell.index as u16;
+                                let first = a
+                                    .labels
+                                    .iter()
+                                    .find(|l| l.id == id)
+                                    .map_or(0, |l| l.frame as usize);
+                                let next = a
+                                    .labels
+                                    .iter()
+                                    .map(|l| l.frame as usize)
+                                    .filter(|&f| f > first)
+                                    .min()
+                                    .unwrap_or(a.frames.len());
+                                let fx = if cell.version >= 1006 { 16 } else { 15 };
+                                let mut d =
+                                    cell_door::CellDoor::new(cell.fields.get(fx..).unwrap_or(&[]));
+                                d.origin = (cx, cy);
+                                d.layer = cz;
+                                d.sprite = scenery;
+                                d.first = first;
+                                d.last = next.saturating_sub(1).max(first);
+                                d.frame = if d.state == cell_door::OPEN {
+                                    d.last
+                                } else {
+                                    first
+                                };
+                                d.triggers = cell.triggers.clone();
+                                s.cell_doors.push(d);
+                            }
+                            scenery += 1;
+                            s.sprites.push(Sprite {
+                                layer: Layer::Scenery,
+                                anim: a,
+                                player,
+                                x: cx,
+                                y: cy,
+                                frozen: false,
+                                scale: (1, 1),
+                                mirror: cell.mirrored,
+                            })
+                        }
                         None => s.warnings.push(format!(
                             "{}: rótulo {} inexistente",
                             cell.animation, cell.index
@@ -401,7 +443,46 @@ impl Scene {
                     Err(e) => s.warnings.push(format!("{}: {e}", cell.animation)),
                 }
             }
-            if !cell.border.is_empty() {
+            let door = s
+                .cell_doors
+                .last_mut()
+                .filter(|d| d.origin == (cx, cy) && d.layer == cz);
+            if let Some(d) = door {
+                // a colisão da porta fica fora das caixas fixas: as duas versões do BRD
+                for closed in [true, false] {
+                    let name = cell_door::border_name(cell.index, closed);
+                    let boxes: Vec<Rect> = assets
+                        .archive()
+                        .get(&name)
+                        .and_then(Border::parse)
+                        .map(|b| {
+                            b.boxes
+                                .into_iter()
+                                .filter(|bx| bx.kind == BOX)
+                                .map(|bx| {
+                                    let w = i32::from(bx.width);
+                                    let x = if cell.mirrored {
+                                        CELL - i32::from(bx.x) - w
+                                    } else {
+                                        i32::from(bx.x)
+                                    };
+                                    Rect {
+                                        x: cx.saturating_add(x),
+                                        y: cy.saturating_add(i32::from(bx.y)),
+                                        w,
+                                        h: i32::from(bx.height),
+                                    }
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if closed {
+                        d.closed = boxes;
+                    } else {
+                        d.open = boxes;
+                    }
+                }
+            } else if !cell.border.is_empty() {
                 match assets.archive().get(&cell.border).and_then(Border::parse) {
                     Ok(b) => s.borders.extend(b.boxes.into_iter().map(|mut bx| {
                         if cell.mirrored {
@@ -562,7 +643,6 @@ impl Scene {
         s.sprites.sort_by_key(|p| p.layer);
         s.jake_flags = jake_flags;
         s.layers = i32::from(level.grid_z).max(1);
-        s.layer_worlds = (0..s.layers).map(|z| World::new(s.cell_rects(z))).collect();
         s.set_jake_layer(jake_layer);
         s.time_limit = i32::from(level.field_1004.max(0));
         s.timer = s.time_limit * TIMER_TICKS_PER_SECOND;
@@ -572,6 +652,7 @@ impl Scene {
         s.explosion_anim = assets.animation("OEX.ANM").ok();
         for name in ["OBU.ANM", "OBS00.ANM"]
             .into_iter()
+            .chain(arsenal::ANIMS)
             .chain(behaviour::enemy::ANIMS)
         {
             if let Ok(a) = assets.animation(name) {
@@ -580,6 +661,7 @@ impl Scene {
         }
         for name in ["OBU00.BRD", "OBU01.BRD", "OBU02.BRD", "OBS.BRD"]
             .into_iter()
+            .chain(arsenal::BORDERS)
             .chain(behaviour::enemy::BORDERS)
         {
             if let Ok(b) = assets.archive().get(name).and_then(Border::parse) {
@@ -710,6 +792,10 @@ impl Scene {
         if let Some(b) = self.jake.as_mut().and_then(|j| j.special.take()) {
             self.apply_special(b);
         }
+        if let Some(r) = self.jake.as_mut().and_then(|j| j.punch.take()) {
+            self.apply_punch(r);
+        }
+        self.tick_cell_doors();
         self.spawn_shots();
         if self.outcome.is_none() {
             // balas à queima-roupa: acertam já na boca, antes de voar
@@ -720,6 +806,7 @@ impl Scene {
             self.events.extend(pre.events);
             let up_edge = input & crate::input::UP != 0 && self.prev_input & crate::input::UP == 0;
             if up_edge {
+                self.try_switch();
                 self.try_exit();
             }
             self.tick_entities();
@@ -779,19 +866,19 @@ impl Scene {
         self.projectile_borders.get(name).cloned()
     }
 
-    /// Balas e cápsulas que o Jake disparou neste tique viram entidades; som do tiro ao
-    /// entrar num estado de tiro; aviso de sem munição.
+    /// Projéteis e cápsulas que o Jake disparou neste tique viram entidades; som do tiro ao
+    /// entrar num estado de tiro; aviso de sem munição e de troca de arma (3090).
     fn spawn_shots(&mut self) {
         let focus = self.focus();
         let Some(j) = self.jake.as_mut() else { return };
         let shots: Vec<_> = j.shots.drain(..).collect();
-        if j.no_ammo {
+        if j.no_ammo || j.switched {
             self.events
                 .push(Event::Sound(Cue::ui(crate::jake::SOUND_NO_AMMO, 0)));
         }
-        if let Some(c) = focus.filter(|_| j.is_firing() && j.label_changed()) {
+        if let (Some(c), Some(id)) = (focus, j.fire_sound()) {
             self.events.push(Event::Sound(Cue::at(
-                SOUND_PISTOL,
+                id,
                 crate::sound::PRIORITY_FRAME,
                 c,
                 self.jake_layer,
@@ -799,14 +886,19 @@ impl Scene {
         }
         let layer = self.jake_layer;
         for s in shots {
-            let e = if s.casing {
-                self.casing_entity(&s, layer)
-            } else {
-                self.bullet_entity(&s, layer)
-            };
-            if let Some(e) = e {
+            if let Some(e) = self.shot_entity(&s, layer) {
                 self.entities.push(e);
             }
+        }
+    }
+
+    /// Entidade de um `Shot` do Jake pelo tipo.
+    fn shot_entity(&mut self, s: &crate::jake::Shot, layer: i32) -> Option<Entity> {
+        use crate::jake::ShotKind;
+        match s.kind {
+            ShotKind::Bullet => self.bullet_entity(s, layer),
+            ShotKind::Casing => self.casing_entity(s, layer),
+            _ => self.weapon_entity(s, layer),
         }
     }
 
@@ -846,7 +938,7 @@ impl Scene {
             kind,
             x,
             y,
-            flags: if kind == crate::entity::CASING {
+            flags: if kind == crate::entity::CASING || kind == crate::entity::SHELL {
                 0x2031
             } else {
                 0x2019
@@ -1195,11 +1287,22 @@ impl Scene {
             .collect()
     }
 
+    /// Células e portas de célula da camada `layer`, no estado atual.
+    fn layer_solids(&self, layer: i32) -> Vec<Rect> {
+        let mut v = self.cell_rects(layer);
+        v.extend(self.door_solids(layer));
+        v
+    }
+
     /// Põe o Jake na camada `layer` (`+0x17c`): as caixas das células passam a ser as dessa
-    /// camada e o mundo é refeito.
+    /// camada e o mundo é refeito. Os mundos de células de cada camada (para os outros
+    /// objetos) são refeitos junto: aqui também chegam as mudanças das portas de célula.
     pub fn set_jake_layer(&mut self, layer: i32) {
         self.jake_layer = layer;
-        self.cell_solids = self.cell_rects(layer);
+        self.cell_solids = self.layer_solids(layer);
+        self.layer_worlds = (0..self.layers)
+            .map(|z| World::new(self.layer_solids(z)))
+            .collect();
         self.cell_world = World::new(self.cell_solids.clone());
         self.rebuild_world();
     }
@@ -1303,6 +1406,12 @@ impl Scene {
                     Behaviour::Exit(_) => behaviour::exit::tick(e),
                     Behaviour::Bullet(_) => behaviour::bullet::tick(e, &ctx, &mut out),
                     Behaviour::Casing(_) => behaviour::casing::tick(e, &mut ctx, &mut out),
+                    Behaviour::Pellet(_) => behaviour::pellet::tick(e, &ctx, &mut out),
+                    Behaviour::Rocket(_) => behaviour::rocket::tick(e, &ctx, &mut out),
+                    Behaviour::Star(_) => behaviour::star::tick(e, &ctx, &mut out),
+                    Behaviour::Grenade(_) => behaviour::grenade::tick(e, &ctx, &mut out),
+                    Behaviour::Piston(_) => behaviour::piston::tick(e, &ctx, &mut out),
+                    Behaviour::Switch(_) => behaviour::switch::tick(e),
                     Behaviour::Sentinel(_) => behaviour::sentinel::tick(e, &mut ctx, &mut out),
                     Behaviour::HopMine(_) => behaviour::hop_mine::tick(e, &mut ctx, &mut out),
                     Behaviour::MineGenerator(_) => {
@@ -1319,6 +1428,7 @@ impl Scene {
         }
         self.rng = rng;
         self.bullet_hits(&mut out);
+        self.weapon_hits(&mut out);
         self.resolve_impacts(&mut out);
         self.object_interactions(&mut out);
         // Explosões: dano de área ao Jake e às minas, e o efeito visual (`OEX.ANM`).
@@ -1343,6 +1453,9 @@ impl Scene {
         if let Some(j) = self.jake.as_mut() {
             if let Some(h) = out.heal {
                 j.health = h;
+            }
+            if let Some(p) = out.poison {
+                j.poison = p;
             }
             if let Some(inv) = out.inventory.take() {
                 j.inventory = inv;

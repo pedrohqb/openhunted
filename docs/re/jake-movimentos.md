@@ -125,11 +125,11 @@ estados sem controle (derrubada etc.) a caixa menor fica até a padrão caber.
 100 (`PUSHSHLD`): ESQ/DIR contra parede; anima 100 até o fim → 101 (`0x00425d04`). Em 101:
 BAIXO → agachar; sem bloqueio a 32 px à frente ou sem chão a 4 px → 102 (`0x00425ced`) →
 parado; numa zona PR **0x20** (só na primeira entrada no 101) chama `0x0040f040(célula,
-máscara dos contatos +0x94…+0xbc, 1)` [inferido: empurra o bloco/objeto da célula]; vx =
+máscara das chaves +0x94…+0xbc, 1)`: a porta da célula (`itens-campanha.md`); vx =
 ±4 px/tique (32), vy = 0; anima 101 em laço. Som 0x13b3 ao começar.
 
 ## Em aberto
 
 - `0x0043b0cb`, `0x00426f6a`, `0x004235c4` (pré-tratamentos) e o estado 4.
-- O que `0x0040f040` move numa zona 0x20 (158 zonas nos dados).
+- (resolvido: `0x0040f040` é a porta de célula, `itens-campanha.md`)
 - Se a pose 1 no ar (contato durante o pulo) é só visual até a queda.
