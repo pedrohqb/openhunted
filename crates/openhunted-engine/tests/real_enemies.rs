@@ -477,6 +477,131 @@ fn enemies_fuzz_without_panics() {
     assert!(tested >= 30, "só {tested} fases com inimigos");
 }
 
+/// Tipos da M10.
+const M10: [u32; 9] = [3, 4, 41, 87, 88, 89, 105, 107, 109];
+
+/// Tiques de vida depois dos quais um objeto criado em jogo não pode estar nas células.
+const SETTLE_TICKS: u32 = 40;
+
+/// Em toda fase (solo ou não) com tipos da M10, três partidas de 3000 tiques (fácil, médio e
+/// difícil, sementes diferentes): sem pânico; os inimigos da fase e os criados em jogo
+/// (formigas, clones, minas, ao fim de `SETTLE_TICKS` de vida) ficam na fase e fora das
+/// células da própria camada; mortos ≤ total.
+#[test]
+fn m10_fuzz_all_levels_with_spawned() {
+    use openhunted_engine::Difficulty;
+    if data().is_none() {
+        return;
+    }
+    // uma thread por dificuldade (cada uma abre os dados)
+    let tested: Vec<u32> = std::thread::scope(|sc| {
+        let runs: Vec<_> = [Difficulty::Easy, Difficulty::Normal, Difficulty::Hard]
+            .into_iter()
+            .enumerate()
+            .map(|(run, d)| sc.spawn(move || fuzz_m10_levels(run as u32, d)))
+            .collect();
+        runs.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    assert!(
+        tested.iter().all(|&n| n >= 10),
+        "fases com tipos da M10: {tested:?}"
+    );
+}
+
+/// Uma partida de 3000 tiques em cada fase com tipos da M10, na dificuldade `difficulty` e
+/// com sementes próprias da rodada `run`; devolve quantas fases testou.
+fn fuzz_m10_levels(run: u32, difficulty: openhunted_engine::Difficulty) -> u32 {
+    let gd = data().unwrap();
+    let la = gd.levels().unwrap();
+    let mut names: Vec<String> = la
+        .names()
+        .into_iter()
+        .filter(|n| n.to_uppercase().ends_with(".LEV"))
+        .collect();
+    names.sort();
+    let mut tested = 0;
+    for name in &names {
+        let Ok(l) = Level::parse(&la.get(name).unwrap()) else {
+            continue;
+        };
+        let mut a = Assets::new(gd.resources().unwrap());
+        let mut s = Scene::build(&l, &mut a).unwrap();
+        if !s.entities.iter().any(|e| M10.contains(&e.kind)) {
+            continue;
+        }
+        tested += 1;
+        s.difficulty = difficulty;
+        let mut seed: u32 = 0x5eed_1000 ^ (tested << 4) ^ run;
+        s.rng = openhunted_engine::rng::Rng::new(seed);
+        let n0 = s.entities.len();
+        let start: Vec<(usize, bool)> = s
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.alive && watched(e.kind))
+            .map(|(i, e)| {
+                let inside = e
+                    .bounds()
+                    .is_some_and(|b| s.layer_cells(e.layer).blocked(&b));
+                (i, inside)
+            })
+            .collect();
+        let mut born: Vec<u32> = vec![];
+        let mut input = 0;
+        for t in 0..3000u32 {
+            if t % 9 == 0 {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                input = [
+                    0,
+                    LEFT,
+                    RIGHT,
+                    LEFT | SHOOT,
+                    RIGHT | SHOOT,
+                    JUMP,
+                    UP,
+                    SHOOT,
+                    DOWN,
+                ][(seed >> 16) as usize % 9];
+            }
+            s.tick(input);
+            while born.len() < s.entities.len() - n0 {
+                born.push(t);
+            }
+            if t % 10 != 9 {
+                continue;
+            }
+            let ctx = format!("{name} {difficulty:?} tique {t}");
+            assert!(
+                (0..=s.kills_total).contains(&s.kills),
+                "{ctx}: {} mortos de {}",
+                s.kills,
+                s.kills_total
+            );
+            for &(i, inside) in &start {
+                let e = &s.entities[i];
+                if e.alive {
+                    check_enemy(&s, i, inside, &ctx);
+                } else {
+                    assert!(
+                        e.health <= 0,
+                        "{ctx}: objeto {i} (tipo {}) sumiu com vida {}",
+                        e.kind,
+                        e.health
+                    );
+                }
+            }
+            for (k, &b) in born.iter().enumerate() {
+                let i = n0 + k;
+                let e = &s.entities[i];
+                if e.alive && watched(e.kind) && t - b >= SETTLE_TICKS {
+                    check_enemy(&s, i, false, &format!("{ctx} (criado no tique {b})"));
+                }
+            }
+        }
+    }
+    tested
+}
+
 /// Índice do primeiro objeto do tipo `kind` que passa em `f`.
 fn find(s: &Scene, kind: u32, f: impl Fn(&openhunted_engine::Entity) -> bool) -> usize {
     s.entities

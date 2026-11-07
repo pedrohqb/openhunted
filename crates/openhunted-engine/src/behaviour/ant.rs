@@ -27,6 +27,10 @@ pub const STUCK_TICKS: i32 = 3;
 /// (`0x420979`: sonda de vy = 0x78, 1/8 px) ou com obstáculo novo → vira.
 pub const LOOK_AHEAD: i32 = 0x40;
 pub const FLOOR_PROBE: i32 = 15;
+/// Nascida (ou posta) com a caixa nas células: no 1º tique sai para o lugar livre mais perto,
+/// até 64 px para os lados ou para cima (Ruling da revisão: a caixa do `OAN.BRD` posta no
+/// ponto do formigueiro cruza a parede em várias fases).
+pub const PUSH_OUT: i32 = 64;
 /// Sons: 3151 (10 % ao andar, por volta do rótulo) e 3153 (mordida).
 pub const SOUND_WALK: u16 = 3151;
 pub const SOUND_BITE: u16 = 3153;
@@ -120,6 +124,8 @@ pub struct AntState {
     /// Último x andando e tiques nele (`+0x274`, `+0x27a`).
     pub last_x: i32,
     pub stuck: i32,
+    /// Já saiu das células em que nasceu (ou nasceu livre).
+    pub placed: bool,
     pub wound: Wound,
 }
 
@@ -137,6 +143,7 @@ impl AntState {
             turning: false,
             last_x: i32::MIN,
             stuck: 0,
+            placed: false,
             wound: Wound::default(),
         }
     }
@@ -191,16 +198,39 @@ pub fn spawned(at: (i32, i32), variant: i32, layer: i32, hill_mirror: bool) -> E
     }
 }
 
+/// Desloca a formiga para o lugar livre mais perto (lado para onde olha, o outro, para cima).
+fn push_out(e: &mut Entity, me: Rect, right: bool, cells: &crate::World) {
+    if !cells.blocked(&me) {
+        return;
+    }
+    let side = if right { 1 } else { -1 };
+    for d in 1..=PUSH_OUT {
+        for (dx, dy) in [(side * d, 0), (-side * d, 0), (0, -d)] {
+            if !cells.blocked(&me.moved(dx, dy)) {
+                e.x += dx;
+                e.y += dy;
+                return;
+            }
+        }
+    }
+}
+
 pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
+    let mut st = match &e.behaviour {
+        Behaviour::Ant(s) => s.clone(),
+        _ => return,
+    };
+    if !st.placed {
+        st.placed = true;
+        if let Some(me) = e.bounds() {
+            push_out(e, me, st.right, ctx.cells_for(e.layer));
+        }
+    }
     let Some(me) = e.bounds() else {
         e.alive = false;
         return;
     };
     let c = enemy::center(&me);
-    let mut st = match &e.behaviour {
-        Behaviour::Ant(s) => s.clone(),
-        _ => return,
-    };
     let outside = c.0 < 0 || c.1 < 0 || c.0 >= ctx.level.0 || c.1 >= ctx.level.1;
     // dano (`0x42077e`): 0 não faz nada; vida 1, qualquer dano positivo mata (fumaça de
     // raio 15)

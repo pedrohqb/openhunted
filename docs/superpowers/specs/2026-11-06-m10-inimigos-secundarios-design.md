@@ -76,7 +76,10 @@ e `anticorpo-manta.md`, e a dificuldade (`opcoes-salvamento.md`, `0x487854`).
   ao espelho do formigueiro (`0x414c13`). A formiga anda 2 px/tique [velocidade inferida];
   vira (rótulo 3, parada) depois de 3 tiques no mesmo x (`0x420153`) e, no fim de cada passo,
   se 0x40 px à frente não há chão até 15 px abaixo ou há um sólido que ela ainda não toca
-  (`0x42081d`; a física já deixa sair do sólido em que nasceu); com o jogador a ≤ 60 px, à
+  (`0x42081d`; a física já deixa sair do sólido em que nasceu). Nascida (ou posta) com a
+  caixa nas células da camada — a caixa do `OAN.BRD` no ponto do formigueiro cruza a parede
+  em várias fases —, no 1º tique vai ao lugar livre mais perto, até 64 px para os lados
+  (primeiro o que olha) ou para cima [Ruling: o original não mostra esse empurrão]; com o jogador a ≤ 60 px, à
   vista, para e morde 5 a cada 10 tiques. Entrar no formigueiro (estados 6/−1), o desvio de
   outra formiga e a alternância 4/5 da mordida não são portados. No tique em que os gatilhos
   se cumprem o formigueiro só liga (`0x414b1b` → `0x414bb8`, sai).
