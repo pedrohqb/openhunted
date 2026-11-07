@@ -4,6 +4,7 @@
 //! `pausa.md`, `fim-de-missao.md`).
 
 pub mod briefing;
+pub mod config;
 pub mod generic;
 pub mod hud;
 pub mod results;
