@@ -139,6 +139,7 @@ Diálogo 320×256 aberto por um comando do menu da janela (`0x4017f9`, Help → 
 
 ## Em aberto
 
-- Máquina exata de `SINPU`/`SKEYB`/`SJOYS`/`SEGOC` (estados 8–15) e o comando do "About".
+- Máquina exata de `SEGOC` (estados 8 e 15) e o comando do "About" (`SINPU`/`SKEYB`/`SJOYS` em
+  [`casca-acabamento.md`](casca-acabamento.md)).
 - Tabelas de rótulos do retrato (`0x47f714`, `0x47f754`).
 - Regras completas da disputa (`SHVLD`, `SH2HS`).

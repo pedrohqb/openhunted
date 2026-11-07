@@ -5,10 +5,12 @@
 
 pub mod briefing;
 pub mod config;
-pub mod credits;
+pub mod devices;
 pub mod generic;
 pub mod heroes;
 pub mod hud;
+pub mod intro;
+pub mod keys;
 pub mod levels;
 pub mod options;
 pub mod page;

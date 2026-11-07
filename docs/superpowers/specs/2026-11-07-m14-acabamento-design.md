@@ -35,7 +35,8 @@ troca de teclas, o joystick e a luz por região, como no original.
   original; valores ilegíveis → padrão. **O pular padrão do jogador 1 é Shift** (como no
   original; antes do port, espaço).
 - `SKEYB`: clique numa ação espera a tecla (nome piscando a cada 6 tiques, RESET com o
-  rótulo 34, retrato fazendo a ação, descrição da ação); Esc ou clique cancela; outra tecla
+  rótulo 34, retrato fazendo a ação, descrição da ação); Esc ou clique cancela (Ruling:
+  clique no RESET volta só a ação, como o rótulo "reset" sugere); outra tecla
   troca com a ação que a usava (nos dois jogadores). RESET: na espera, a ação; fora, tudo.
   DONE/Esc gravam e voltam ao `SINPU`. Ruling: a descrição de soco e de próxima arma é a
   certa (o original as troca).
@@ -49,9 +50,10 @@ troca de teclas, o joystick e a luz por região, como no original.
 
 ## Dispositivos (`SINPU`) e joystick
 
-- `SINPU`: os grupos dos dois jogadores marcam o dispositivo gravado; Joystick *n* fica
-  cinza sem o *n*-ésimo joystick; mesmo dispositivo nos dois → troca; CUSTOMIZE abre
-  `SKEYB` ou `SJOYS` do jogador. Ruling: o jogador 2 só grava (não há dois jogadores).
+- `SINPU`: os grupos dos dois jogadores marcam o dispositivo gravado; Joystick *n* sem o
+  *n*-ésimo joystick não se escolhe nem se navega (Ruling: sem o desenho cinza, bit 4 do
+  controle, `0x44322c`); mesmo dispositivo nos dois → troca; CUSTOMIZE abre `SKEYB` ou
+  `SJOYS` do jogador. Ruling: o jogador 2 só grava (não há dois jogadores).
 - Ruling: joystick pela API de joystick da SDL3, na ordem de conexão (até 4): eixos 0/1
   `>> 8` (−128…127, como `joyGetPos`), o primeiro chapéu como direção cheia, botão *n* =
   índice SDL *n* − 1. `SJOYS`: espera um botão (o menor apertado); tecla ou clique cancela;

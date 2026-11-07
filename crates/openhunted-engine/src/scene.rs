@@ -5,6 +5,7 @@ mod ai;
 mod arsenal;
 mod cell_door;
 mod garathe;
+pub mod light;
 mod switches;
 
 use std::rc::Rc;
@@ -167,6 +168,9 @@ pub struct Scene {
     ai_shots: Vec<(usize, usize)>,
     /// Grade de células da IA (bits de passagem, zonas, portas).
     ai_grid: crate::ai::CellGrid,
+    /// Luz por célula (`light`) e, para cada sprite de `sprites`, a célula com luz dele.
+    pub lights: light::Lights,
+    sprite_light: Vec<Option<usize>>,
     /// Dificuldade (`0x487854`): a casca a põe pela opção gravada; padrão médio.
     pub difficulty: crate::Difficulty,
     /// Confusão do jogador (`+0x264`): tiques com os pares de direção trocados (Entidade).
@@ -181,6 +185,11 @@ pub const TIMER_TICKS_PER_SECOND: i32 = 20;
 
 /// Tipo de objeto do Jake.
 const JAKE: u32 = 1;
+
+/// Estado de um alvo de gatilho em `states` (`None` = não existe: vale verdadeiro).
+fn states_on(states: &[(i32, bool)], id: i32) -> Option<bool> {
+    states.iter().find(|(i, _)| *i == id).map(|(_, o)| *o)
+}
 
 /// A fase tem o Jake controlável no modo solo (como em `Scene::build`): um início de jogador
 /// de tipo 1 no modo solo ou, sem modo solo, algum objeto de tipo 1. Nas fases do Garathe
@@ -391,6 +400,8 @@ impl Scene {
             confusion: 0,
             ai_shots: Vec::new(),
             ai_grid: crate::ai::CellGrid::default(),
+            lights: light::Lights::default(),
+            sprite_light: Vec::new(),
         }
     }
 
@@ -444,8 +455,11 @@ impl Scene {
             confusion: 0,
             ai_shots: Vec::new(),
             ai_grid: crate::ai::CellGrid::default(),
+            lights: light::Lights::default(),
+            sprite_light: Vec::new(),
         };
         let mut scenery = 0usize;
+        s.lights = light::Lights::from_level(level);
         let mut jake_layer = 0;
         let mut jake_flags = 0;
         let mut objects: Vec<&LevelObject> = level.objects.iter().collect();
@@ -492,6 +506,8 @@ impl Scene {
                                 s.cell_doors.push(d);
                             }
                             scenery += 1;
+                            s.sprite_light
+                                .push(s.lights.index_of((i % gx, (i / gx) % gy, cz)));
                             s.sprites.push(Sprite {
                                 layer: Layer::Scenery,
                                 anim: a,
@@ -573,6 +589,8 @@ impl Scene {
                         let frame = d.fields.first().map_or(0, |&f| f.max(0) as usize);
                         let frame = if frame < a.frames.len() { frame } else { 0 };
                         let player = AnimPlayer::from_frame(&a, frame);
+                        s.sprite_light
+                            .push(s.lights.index_of((i % gx, (i / gx) % gy, cz)));
                         s.sprites.push(Sprite {
                             layer: Layer::Decoration,
                             anim: a,
@@ -640,7 +658,13 @@ impl Scene {
             }
             s.entities.push(e);
         }
-        s.sprites.sort_by_key(|p| p.layer);
+        // ordem de desenho por camada, levando junto a célula com luz de cada sprite
+        let mut paired: Vec<(Sprite, Option<usize>)> = std::mem::take(&mut s.sprites)
+            .into_iter()
+            .zip(std::mem::take(&mut s.sprite_light))
+            .collect();
+        paired.sort_by_key(|(p, _)| p.layer);
+        (s.sprites, s.sprite_light) = paired.into_iter().unzip();
         s.jake_flags = jake_flags;
         s.layers = i32::from(level.grid_z).max(1);
         s.set_jake_layer(jake_layer);
@@ -671,6 +695,8 @@ impl Scene {
         s.mines_at_start = behaviour::enemy::kills_total(&s.entities);
         s.kills_total = s.mines_at_start;
         s.ai_grid = ai::cell_grid(level, &s.prop_zones);
+        let states = s.trigger_states();
+        s.lights.init(&|id| states_on(&states, id));
         Ok(s)
     }
 
@@ -684,21 +710,46 @@ impl Scene {
         camera: (i32, i32),
         overlay: bool,
     ) {
-        for sp in &self.sprites {
-            draw_sprite(sp, assets, fb, camera, None);
-        }
-        // tabelas de cor das rotinas de desenho `+0x1c4` (`docs/re/cores-sprites.md`)
+        // tabelas de cor das rotinas de desenho `+0x1c4` (`docs/re/cores-sprites.md`) e de
+        // sombra da luz por célula (`light`): `T[i] = S[A[i]]`; sem tabela do objeto, a
+        // identidade (1, 0)
         let dls = assets.dls();
-        let map = |t: Option<crate::tint::Tint>| Some(dls.as_ref()?.table(t?, 0));
+        let map = |t: Option<crate::tint::Tint>, look: Option<light::Look>| {
+            let shadow = match look {
+                Some(light::Look::Shaded(s)) => s,
+                _ => 0,
+            };
+            if t.is_none() && shadow == 0 {
+                return None;
+            }
+            let t = t.unwrap_or(crate::tint::Tint::new(1, 0));
+            Some(dls.as_ref()?.table(t, shadow))
+        };
+        for (i, sp) in self.sprites.iter().enumerate() {
+            let look = self
+                .sprite_light
+                .get(i)
+                .copied()
+                .flatten()
+                .and_then(|c| self.lights.look(c));
+            if look == Some(light::Look::Hidden) {
+                continue;
+            }
+            draw_sprite(sp, assets, fb, camera, map(None, look).as_ref());
+        }
         for (i, e) in self.entities.iter().enumerate() {
             if !e.visible() {
+                continue;
+            }
+            let look = self.lights.look_at(e.center(), e.layer);
+            if look == Some(light::Look::Hidden) {
                 continue;
             }
             match (&e.behaviour, &e.sprite) {
                 (Behaviour::Graffiti(g), Some(sp)) => draw_graffiti(e, g, sp, assets, fb, camera),
                 (Behaviour::Laser(l), _) => draw_laser(e, l, fb, camera),
                 (_, Some(sp)) => {
-                    let m = map(crate::tint::entity(e, i, self.tick_count));
+                    let m = map(crate::tint::entity(e, i, self.tick_count), look);
                     draw_sprite(sp, assets, fb, camera, m.as_ref());
                 }
                 _ => {}
@@ -709,8 +760,13 @@ impl Scene {
             .as_ref()
             .filter(|_| self.jake.as_ref().is_none_or(crate::jake::Jake::is_visible))
         {
-            let m = map(self.jake.as_ref().map(crate::jake::Jake::tint));
-            draw_sprite(j, assets, fb, camera, m.as_ref());
+            let look = self
+                .focus()
+                .and_then(|c| self.lights.look_at(c, self.jake_layer));
+            if look != Some(light::Look::Hidden) {
+                let m = map(self.jake.as_ref().map(crate::jake::Jake::tint), look);
+                draw_sprite(j, assets, fb, camera, m.as_ref());
+            }
         }
         if overlay {
             for (bx, by, _, b) in &self.borders {
@@ -809,6 +865,7 @@ impl Scene {
         }
         self.tick_player_extras();
         self.tick_cell_doors();
+        self.tick_lights();
         self.spawn_shots();
         if self.outcome.is_none() {
             self.tick_ai_players();
@@ -877,6 +934,24 @@ impl Scene {
             }
         }
         self.tick_count = self.tick_count.saturating_add(1);
+    }
+
+    /// Estado ligado de cada objeto vivo com id (alvos das listas de gatilhos).
+    fn trigger_states(&self) -> Vec<(i32, bool)> {
+        self.entities
+            .iter()
+            .filter(|e| e.alive && e.id != 0)
+            .map(|e| (e.id, e.on))
+            .collect()
+    }
+
+    /// Luz das células (`0x432d39`).
+    fn tick_lights(&mut self) {
+        if self.lights.cells.is_empty() {
+            return;
+        }
+        let states = self.trigger_states();
+        self.lights.tick(&|id| states_on(&states, id));
     }
 
     fn assets_anim(&self, name: &str) -> Option<Rc<Animation>> {

@@ -140,4 +140,5 @@ campanha), ordenadas por pontuação decrescente.
 - O bloco salvo inclui o ponteiro da lista de missões (`0x47ff3c`): carregar põe um ponteiro
   velho ali [inferido: risco do original; o porte não deve gravar isso].
 - `HideMouse` e a 2ª leitura de `NumSounds` não lidas por dentro.
-- Nome exato da chave de dispositivo do jogador 2 (só `Player1Input` aparece como texto).
+- (Resolvido em [`casca-acabamento.md`](casca-acabamento.md): a chave do jogador 2 é `Player2Input`,
+  e os padrões de `InputKeys1/2` e `Joystick1/2`.)

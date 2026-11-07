@@ -2,27 +2,32 @@
 //! A casca da M9 sobre o `App` (`docs/superpowers/specs/2026-11-06-m9-casca-design.md`):
 //! as telas restantes do `SMAIN` (`docs/re/menus-restantes.md`), opções gravadas, jogo
 //! salvo e lista de heróis (`opcoes-salvamento.md`), peças do carro com `S_CAR`, filmes,
-//! créditos e música (`videos-musica.md`).
+//! créditos e música (`videos-musica.md`); da M14 (`2026-11-07-m14-acabamento-design.md`),
+//! a abertura em laço, as teclas, os dispositivos e o joystick (`casca-acabamento.md`).
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use openhunted_engine::devices::{Device, DeviceState, InputReader, resolve};
+use openhunted_engine::display_palette;
 use openhunted_engine::shell::config::{Config, Film};
-use openhunted_engine::shell::credits::Credits;
+use openhunted_engine::shell::devices::DeviceScreen;
 use openhunted_engine::shell::generic::GenericBox;
 use openhunted_engine::shell::heroes::{Car, Heroes, Info, InfoKind, NameEntry};
+use openhunted_engine::shell::intro::{self, Roll, Scroller, Splash};
+use openhunted_engine::shell::keys::{self, KeyScreen};
 use openhunted_engine::shell::levels::{Entry, LevelSelect};
 use openhunted_engine::shell::options::Options;
 use openhunted_engine::shell::results::{Choice, Results};
 use openhunted_engine::shell::{Dir, Input, Page, Placement, Reply, Screen, menu, next_mission};
-use openhunted_engine::{TICK_MS, display_palette};
 use openhunted_formats::{Palette, SaveGame, Sound, parse_text_list};
 
-use super::{App, Back, Key, State};
+use super::{App, Back, JoyRaw, Key, State};
 use crate::audio::{Pcm, Sfx};
 use crate::music::{Music, track_name};
 use crate::storage::{self, Storage, clean_name, read_save};
+
 use crate::video::Movie;
 
 /// Textos do `SYSTEM.RES` usados aqui.
@@ -36,11 +41,12 @@ const BLACK_MS: u32 = 1000;
 /// Peças para os filmes do meio e do final.
 const MIDDLE_PIECE: i32 = 7;
 const LAST_PIECE: i32 = 15;
-/// Teclas do port na ordem dos botões 17001–17010 do `SKEYB` (códigos VK; o nome é a linha
-/// do `KEYS.RES`): cima, baixo, esquerda, direita, Ctrl, espaço, X, PgUp, Z, PgDn.
-const PORT_KEYS: [usize; 10] = [38, 40, 37, 39, 17, 32, 88, 33, 90, 34];
-/// Cor padrão do jogador 1 (`0x497320 = 35`, `DLS.TBL`).
-const PLAYER1_COLORS: u16 = 35;
+/// Cor padrão dos jogadores 1 e 2 (`0x497320`, `DLS.TBL`).
+const PLAYER_COLORS: [u16; 2] = [35, 36];
+/// Menu sem mexer por 30 s: a abertura em laço (`0x43f641`, estado 12345).
+pub const IDLE_MS: u32 = 30_000;
+/// Mudança de direção do joystick que conta como atividade no menu (limiar de `0x407e5c`).
+const IDLE_AXIS: i16 = 50;
 /// Avisos do port (sem texto no `SYSTEM.RES`): sem pasta de dados do usuário (sem `HOME`)
 /// e nome de jogo salvo vazio depois de limpo.
 pub const NO_STORAGE: &str = "SAVED GAMES ARE NOT AVAILABLE: NO HOME FOLDER.";
@@ -68,16 +74,42 @@ pub enum PageKind {
 /// Um passo da sequência de filmes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
+    /// Tela preta.
     Black(u32),
+    /// Espera com a tela de antes (o título, depois da voz 4101).
+    Pause(u32),
     Voice(u16),
     Film(Film),
+    Logo,
+    Title,
+    Story,
     Credits,
 }
+
+/// Paleta convertida para RGBA.
+type Lut = [[u8; 4]; 256];
 
 enum Running {
     Wait(u32),
     Film(Movie),
-    Credits(Box<Credits>, u32),
+    Splash(Box<Splash>, Option<Box<Lut>>),
+    Roll(Box<Scroller>),
+}
+
+/// A abertura (`0x4399e0(1)`): logotipo, preto, voz 4100, filme, título, voz 4101, história,
+/// créditos.
+fn intro_steps() -> VecDeque<Step> {
+    VecDeque::from([
+        Step::Logo,
+        Step::Black(intro::logo::BLACK_MS),
+        Step::Voice(intro::logo::VOICE),
+        Step::Film(Film::Intro),
+        Step::Title,
+        Step::Voice(intro::title::VOICE),
+        Step::Pause(intro::title::AFTER_MS),
+        Step::Story,
+        Step::Credits,
+    ])
 }
 
 /// O que vem depois da sequência.
@@ -91,6 +123,10 @@ pub struct Show {
     steps: VecDeque<Step>,
     cur: Option<Running>,
     then: After,
+    /// A abertura: uma interrupção encerra tudo; sem ela, recomeça (`0x4399e0(0)`).
+    intro: bool,
+    /// Última tela da abertura (fica durante a voz e a espera que a seguem) e a paleta dela.
+    backdrop: Option<(Box<Splash>, Option<Box<Lut>>)>,
 }
 
 /// Fábrica de filmes pelo nome do AVI.
@@ -120,6 +156,13 @@ pub(super) struct Casca {
     music: Option<Music>,
     movies: Option<Movies>,
     pub(super) track_title: Option<String>,
+    /// Tempo sem atividade no menu principal.
+    pub(super) idle_ms: u32,
+    /// Joysticks da SDL neste quadro, a leitura do jogador 1 (espera da combinação) e o
+    /// joystick da tela `SJOYS` aberta.
+    joys: Vec<JoyRaw>,
+    reader: InputReader,
+    joy_page: usize,
 }
 
 fn nav(k: Key) -> Option<Input> {
@@ -215,11 +258,49 @@ impl App {
         self.m9.config = c;
     }
 
-    /// Começa a abertura (o filme `hh*.avi`); sem filmes, fica no menu.
+    /// Começa a abertura em laço (`0x4399e0(1)` e `(0)`): repete até uma tecla, um clique
+    /// ou um botão de joystick, e volta ao menu. Sem filme, o passo dele é pulado.
     pub fn play_intro(&mut self) {
-        if self.m9.movies.is_some() {
-            self.start_show(vec![Step::Film(Film::Intro)], After::Menu);
+        self.start_show(intro_steps().into(), After::Menu);
+        if let State::Show(s) = &mut self.state {
+            s.intro = true;
         }
+    }
+
+    /// Paleta de um recurso `.PAL`, convertida para RGBA.
+    fn lut_of(&self, name: &str) -> Option<Box<Lut>> {
+        let p = Palette::parse(self.assets.archive().get(name).ok()?).ok()?;
+        let p = display_palette(&p);
+        let mut lut = [[0u8; 4]; 256];
+        for (l, c) in lut.iter_mut().zip(p.0.iter()) {
+            *l = [c[0], c[1], c[2], 255];
+        }
+        Some(Box::new(lut))
+    }
+
+    /// Paleta da sequência na tela (logotipo e título têm a própria).
+    pub(super) fn show_lut(&self) -> Option<&Lut> {
+        let State::Show(s) = &self.state else {
+            return None;
+        };
+        match &s.cur {
+            Some(Running::Splash(_, l)) => l.as_deref(),
+            Some(Running::Wait(_)) => s.backdrop.as_ref().and_then(|(_, l)| l.as_deref()),
+            _ => None,
+        }
+    }
+
+    /// Duração de um som do `SOUND.RES` em ms (0 sem ele).
+    fn sound_ms(&self, id: u16) -> u32 {
+        self.assets
+            .archive()
+            .get(&format!("SX_{id:04}.WAV"))
+            .ok()
+            .and_then(|d| Sound::parse(d).ok())
+            .and_then(|s| Pcm::decode(&s))
+            .map_or(0, |p| {
+                (p.frames() as u64 * 1000 / u64::from(p.rate.max(1))) as u32
+            })
     }
 
     /// Zera a campanha (`0x440fe0`): nome, herói, peças e o arquivo salvo.
@@ -377,32 +458,57 @@ impl App {
         }
     }
 
+    /// Joysticks ligados (os da SDL, até 4).
+    pub fn joysticks(&self) -> usize {
+        self.m9.joys.len().min(4)
+    }
+
+    /// Dispositivos em vigor dos dois jogadores (`0x43edc1`).
+    pub fn devices(&self) -> [Device; 2] {
+        resolve(self.m9.config.devices, self.joysticks())
+    }
+
     fn open_input(&mut self) {
+        let (c, n) = (self.m9.config.clone(), self.joysticks());
         self.open_page("SINPU.ITF", Placement::Full, PageKind::Input, |s, _| {
-            Box::new(Info::new(s, InfoKind::Input, None, &[]))
+            Box::new(DeviceScreen::new(s, c, n))
         });
     }
 
-    fn open_keys(&mut self) {
-        let keys = self
-            .assets
-            .archive()
-            .get("KEYS.RES")
-            .map(parse_text_list)
-            .unwrap_or_default();
-        let names: Vec<String> = PORT_KEYS
-            .iter()
-            .map(|&vk| keys.get(vk - 1).cloned().unwrap_or_default())
-            .collect();
-        let font = self.font.clone();
-        let colors = self.dls_table(PLAYER1_COLORS);
-        self.open_page("SKEYB.ITF", Placement::Full, PageKind::Keys, |s, _| {
-            let mut i = Info::new(s, InfoKind::Keys, font, &names);
-            i.screen.set_remap(
-                openhunted_engine::shell::heroes::info_ids::KEYS_CHARACTER,
-                colors,
-            );
-            Box::new(i)
+    /// `SKEYB` (teclado) ou `SJOYS` (joystick) do jogador `p` (CUSTOMIZE).
+    fn open_keys(&mut self, p: usize) {
+        let text = |a: &App, n: &str| {
+            a.assets
+                .archive()
+                .get(n)
+                .map(parse_text_list)
+                .unwrap_or_default()
+        };
+        let Some(font) = self.font.clone() else {
+            return;
+        };
+        let colors = self.dls_table(PLAYER_COLORS[p.min(1)]);
+        let (c, garathe) = (self.m9.config.clone(), p == 1);
+        let (itf, kind, joy, names, descs) = match self.devices()[p.min(1)] {
+            Device::Joystick(n) => {
+                let j = usize::from(n - 1);
+                let count = self.m9.joys.get(j).map_or(0, |r| r.count);
+                let t = text(self, "JOYSTICK.RES");
+                ("SJOYS.ITF", keys::Kind::Joystick(count), j, t.clone(), t)
+            }
+            _ => (
+                "SKEYB.ITF",
+                keys::Kind::Keyboard,
+                0,
+                text(self, "KEYS.RES"),
+                text(self, "SHELL.RES"),
+            ),
+        };
+        self.m9.joy_page = joy;
+        self.open_page(itf, Placement::Full, PageKind::Keys, |s, _| {
+            let mut k = KeyScreen::new(s, font, kind, p, joy, c, names, descs, garathe);
+            k.screen.set_remap(keys::ids::CHARACTER, colors);
+            Box::new(k)
         });
     }
 
@@ -439,12 +545,16 @@ impl App {
         };
         match (kind, reply) {
             (_, Reply::Unavailable) => self.set_notice(openhunted_engine::shell::page::UNAVAILABLE),
-            (PageKind::Options, Reply::Config(c)) => self.apply_config(c, true),
+            (PageKind::Options | PageKind::Input, Reply::Config(c)) => self.apply_config(c, true),
+            (PageKind::Keys, Reply::Config(c)) => {
+                self.apply_config(c, true);
+                self.open_input();
+            }
             (PageKind::Levels, Reply::Pick(i)) => {
                 self.index = Some(i);
                 self.start_mission(Back::Menu);
             }
-            (PageKind::Input, Reply::Customize) => self.open_keys(),
+            (PageKind::Input, Reply::Customize(p)) => self.open_keys(p),
             (PageKind::Keys, Reply::Close) => self.open_input(),
             (PageKind::Car, Reply::Close) => match self.m9.film.take() {
                 Some(film) => {
@@ -518,6 +628,8 @@ impl App {
                 }
                 return;
             }
+            // na espera de tecla, as teclas chegam por `vk_down`
+            State::Page { page, .. } if page.capturing() => return,
             State::Page { page, .. } => {
                 let input = if page.wants_text() {
                     match key {
@@ -613,11 +725,16 @@ impl App {
                     b.draw(&mut self.fb, bmp, font);
                 }
             }
-            State::Show(s) => {
-                if let Some(Running::Credits(c, _)) = &s.cur {
-                    c.draw(&mut self.fb);
+            State::Show(s) => match &s.cur {
+                Some(Running::Roll(r)) => r.draw(&mut self.fb),
+                Some(Running::Splash(sp, _)) => sp.draw(&mut self.fb),
+                Some(Running::Wait(_)) => {
+                    if let Some((sp, _)) = &s.backdrop {
+                        sp.draw(&mut self.fb);
+                    }
                 }
-            }
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -643,6 +760,8 @@ impl App {
 
     pub(super) fn update_music(&mut self, ms: u32) {
         let mode = self.mode();
+        let rolling =
+            matches!(&self.state, State::Show(s) if matches!(s.cur, Some(Running::Roll(_))));
         let Some(m) = self.m9.music.as_mut() else {
             return;
         };
@@ -655,6 +774,8 @@ impl App {
                 }
             }
             Mode::Briefing => m.silence(),
+            // a história e os créditos rolam com a música dos menus (`0x402d48` no laço)
+            Mode::Show if rolling => m.menu(),
             Mode::Show => {}
         }
     }
@@ -875,6 +996,8 @@ impl App {
             steps: steps.into(),
             cur: None,
             then,
+            intro: false,
+            backdrop: None,
         }));
         self.advance_show(0);
     }
@@ -887,6 +1010,24 @@ impl App {
                     m.silence();
                 }
                 Some(Running::Wait(ms))
+            }
+            Step::Pause(ms) => Some(Running::Wait(ms)),
+            Step::Logo => {
+                // o logotipo para a música (`0x4042c4`)
+                if let Some(m) = music {
+                    m.silence();
+                }
+                let ms = self.sound_ms(intro::logo::SOUND);
+                let lut = self.lut_of(intro::logo::PALETTE);
+                let sp = Splash::logo(&mut self.assets, ms).ok()?;
+                self.sounds.push(intro::logo::SOUND);
+                Some(Running::Splash(Box::new(sp), lut))
+            }
+            Step::Title => {
+                let lut = self.lut_of(intro::title::PALETTE);
+                let sp = Splash::title(&mut self.assets).ok()?;
+                self.sounds.extend(intro::title::SOUNDS);
+                Some(Running::Splash(Box::new(sp), lut))
             }
             Step::Voice(id) => {
                 let pcm = self
@@ -911,16 +1052,20 @@ impl App {
                 }
                 Some(Running::Film(movie))
             }
-            Step::Credits => {
+            Step::Story | Step::Credits => {
+                let (roll, res) = match step {
+                    Step::Story => (Roll::Story, "STORY.RES"),
+                    _ => (Roll::Credits, "CREDITS.RES"),
+                };
                 let lines = self
                     .assets
                     .archive()
-                    .get("CREDITS.RES")
+                    .get(res)
                     .map(parse_text_list)
                     .unwrap_or_default();
-                Credits::load(&mut self.assets, lines)
+                Scroller::load(&mut self.assets, roll, &lines)
                     .ok()
-                    .map(|c| Running::Credits(Box::new(c), 0))
+                    .map(|c| Running::Roll(Box::new(c)))
             }
         }
     }
@@ -932,6 +1077,10 @@ impl App {
         let mut ms = ms;
         loop {
             if show.cur.is_none() {
+                if show.intro && show.steps.is_empty() {
+                    // vista inteira: recomeça (`0x4399e0(0)`)
+                    show.steps = intro_steps();
+                }
                 let Some(step) = show.steps.pop_front() else {
                     if let Some(m) = self.m9.music.as_mut() {
                         m.end_film();
@@ -942,6 +1091,9 @@ impl App {
                     }
                     return;
                 };
+                if matches!(step, Step::Black(_) | Step::Story | Step::Credits) {
+                    show.backdrop = None;
+                }
                 show.cur = self.start_step(step);
                 continue;
             }
@@ -954,18 +1106,21 @@ impl App {
                     m.advance(ms);
                     m.done()
                 }
-                Some(Running::Credits(c, acc)) => {
-                    *acc += ms;
-                    while *acc >= TICK_MS && !c.done() {
-                        *acc -= TICK_MS;
-                        c.tick();
-                    }
-                    c.done()
+                Some(Running::Splash(sp, _)) => {
+                    sp.advance(ms);
+                    sp.done()
+                }
+                Some(Running::Roll(r)) => {
+                    r.advance(ms);
+                    r.done()
                 }
                 None => true,
             };
             if !finished {
                 break;
+            }
+            if let Some(Running::Splash(sp, lut)) = show.cur.take() {
+                show.backdrop = Some((sp, lut));
             }
             if let Some(m) = self.m9.music.as_mut() {
                 m.end_film();
@@ -978,14 +1133,98 @@ impl App {
 }
 
 impl Show {
-    /// Tecla ou clique: pula o passo corrente.
+    /// Tecla, clique ou botão de joystick: pula o passo corrente; na abertura, encerra a
+    /// sequência inteira (`0x43a123`: a primeira interrupção acaba tudo).
     fn skip(&mut self) {
+        if self.intro {
+            self.intro = false;
+            self.steps.clear();
+            self.backdrop = None;
+        }
         match self.cur.as_mut() {
             Some(Running::Wait(left)) => *left = 0,
             Some(Running::Film(m)) => m.skip(),
-            Some(Running::Credits(c, _)) => c.skip(),
+            Some(Running::Splash(..)) | Some(Running::Roll(_)) => self.cur = None,
             None => {}
         }
+    }
+}
+
+impl App {
+    /// Uma tecla com o código VK do Windows (antes de `key_down`): na espera do `SKEYB` vai
+    /// para a tela (e devolve `true`: a tecla não segue); na partida, as teclas de pular e de
+    /// CIMA do jogador 1 viram a batida rápida (`tap`).
+    pub fn vk_down(&mut self, vk: u8) -> bool {
+        self.m9.idle_ms = 0;
+        if let State::Page {
+            page, notice: None, ..
+        } = &mut self.state
+        {
+            if page.capturing() {
+                page.raw_key(vk);
+                return true;
+            }
+        }
+        let keys = self.m9.config.keys[0];
+        let keyboard = self.devices()[0].is_keyboard();
+        if let (State::Play { pause: None, .. }, Some(v)) = (&self.state, self.viewer.as_mut()) {
+            use openhunted_engine::devices::slot;
+            use openhunted_engine::input::{JUMP, UP};
+            // com a dica aberta, a tecla só a fecha (não vira pulo nem CIMA)
+            if keyboard && v.modal().is_none() {
+                if vk == keys[slot::JUMP] {
+                    v.tap(JUMP);
+                } else if vk == keys[slot::UP] {
+                    v.tap(UP);
+                }
+            }
+        }
+        false
+    }
+
+    /// Os joysticks da SDL neste quadro (na ordem: Joystick 1–4). Botão novo interrompe a
+    /// abertura e, na espera do `SJOYS`, vai para a tela; direção nova conta como atividade.
+    pub fn set_joysticks(&mut self, joys: Vec<JoyRaw>) {
+        let dir = |v: i16| (v > IDLE_AXIS) as i8 - (v < -IDLE_AXIS) as i8;
+        let mut fresh = Vec::with_capacity(joys.len());
+        for (i, j) in joys.iter().enumerate() {
+            let old = self.m9.joys.get(i).copied().unwrap_or_default();
+            fresh.push(j.buttons & !old.buttons);
+            if (dir(j.x), dir(j.y)) != (dir(old.x), dir(old.y)) {
+                self.m9.idle_ms = 0;
+            }
+        }
+        self.m9.joys = joys;
+        if fresh.iter().any(|&b| b != 0) {
+            self.m9.idle_ms = 0;
+        }
+        match &mut self.state {
+            State::Show(s) if fresh.iter().any(|&b| b != 0) => s.skip(),
+            State::Page {
+                page, notice: None, ..
+            } if page.capturing() => {
+                if let Some(&b) = fresh.get(self.m9.joy_page) {
+                    page.joy_buttons(b);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Entrada do jogador 1 neste quadro pelo dispositivo dele (`0x407e2d`): o teclado pelas
+    /// teclas do `HUNTER.INI` (`pressed(vk)`), ou o joystick escolhido no `SINPU`.
+    pub fn read_input(&mut self, pressed: &dyn Fn(u8) -> bool, select: u8) {
+        let st = match self.devices()[0] {
+            Device::Joystick(n) => match self.m9.joys.get(usize::from(n - 1)) {
+                Some(j) => {
+                    DeviceState::joystick(j.x, j.y, j.buttons, j.count, &self.m9.config.buttons[0])
+                }
+                None => DeviceState::keyboard(&self.m9.config.keys[0], pressed),
+            },
+            _ => DeviceState::keyboard(&self.m9.config.keys[0], pressed),
+        };
+        let bits = self.m9.reader.bits(&st);
+        self.set_input(bits, select);
     }
 }
 
@@ -1329,7 +1568,7 @@ mod tests {
         }));
         let film = format!("play {}", crate::music::FILM_ID);
         // a abertura é criada antes da janela: nada toca nem anda até o primeiro quadro
-        a.play_intro();
+        a.start_show(vec![Step::Film(Film::Intro)], After::Menu);
         a.advance(400);
         assert!(
             !log.borrow().contains(&film),
@@ -1360,29 +1599,200 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Avança em passos de 50 ms até a sequência chegar a `step` (ou desistir).
+    fn run_to(a: &mut App, step: Option<Step>, max_ms: u32) -> u32 {
+        let mut t = 0;
+        while t < max_ms {
+            let cur = a.show_steps().map(|s| s.first().copied());
+            if cur == Some(step) {
+                return t;
+            }
+            a.advance(50);
+            t += 50;
+        }
+        panic!("não chegou a {step:?} em {max_ms} ms");
+    }
+
     #[test]
-    fn intro_film_then_menu_and_unavailable_two_player_modes() {
+    fn intro_runs_logo_film_title_story_credits_in_a_loop_until_a_key() {
         let root = temp("app-intro");
         let Some(mut a) = app(&root, None) else {
             return;
         };
-        a.play_intro();
-        assert_eq!(
-            a.mode(),
-            super::super::Mode::Menu,
-            "sem filmes, fica no menu"
-        );
-        a.set_movies(Box::new(|_| {
+        let asked = Rc::new(RefCell::new(Vec::new()));
+        let log = asked.clone();
+        a.set_movies(Box::new(move |name| {
+            log.borrow_mut().push(name.to_string());
             Some(Movie::new(Box::new(Fake { n: 30, i: 0 }), None))
         }));
         a.play_intro();
-        assert_eq!(a.show_steps(), Some(vec![]));
+        assert_eq!(a.mode(), super::super::Mode::Show);
+        a.advance(50);
+        assert!(a.take_sounds().contains(&intro::logo::SOUND));
+        // o logotipo com a paleta dele
         let mut rgba = vec![0u8; 640 * 480 * 4];
         a.render_rgba(&mut rgba);
-        a.advance(1000);
+        assert_eq!(a.show_lut().copied(), a.lut_of("SIERRA.PAL").map(|l| *l));
+        // som 3403, 193 quadros do "tp" e 500 ms
+        let logo = run_to(&mut a, Some(Step::Voice(intro::logo::VOICE)), 60_000);
+        let want = a.sound_ms(intro::logo::SOUND) + 193 * 50 + 500;
+        assert!(
+            logo.abs_diff(want) <= 100,
+            "logotipo {logo} ms, esperado {want}"
+        );
+        run_to(&mut a, Some(Step::Title), 60_000);
+        a.render_rgba(&mut rgba); // o primeiro quadro do filme começa o relógio dele
+        run_to(&mut a, Some(Step::Voice(intro::title::VOICE)), 60_000);
+        let heard = a.take_sounds();
+        assert!(
+            intro::title::SOUNDS.iter().all(|s| heard.contains(s)),
+            "{heard:?}"
+        );
+        assert_eq!(*asked.borrow(), ["HHDARK.AVI"]);
+        run_to(&mut a, Some(Step::Credits), 120_000);
+        // a história subiu inteira; os créditos acabam e a abertura recomeça
+        run_to(&mut a, Some(Step::Black(intro::logo::BLACK_MS)), 120_000);
+        assert_eq!(a.mode(), super::super::Mode::Show, "em laço");
+        // uma tecla encerra tudo
+        a.key_down(Key::Other);
+        a.advance(50);
+        assert_eq!(a.mode(), super::super::Mode::Menu);
+        // sem filmes: o passo do filme é pulado
+        let mut b = app(&root, None).unwrap();
+        b.play_intro();
+        // com o filme pulado, o título já é o passo corrente
+        run_to(&mut b, Some(Step::Voice(intro::title::VOICE)), 60_000);
+        assert_eq!(b.mode(), super::super::Mode::Show);
+        // um botão de joystick também interrompe
+        b.set_joysticks(vec![JoyRaw::default()]);
+        b.set_joysticks(vec![JoyRaw {
+            buttons: 1,
+            count: 4,
+            ..Default::default()
+        }]);
+        b.advance(50);
+        assert_eq!(b.mode(), super::super::Mode::Menu);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn thirty_idle_seconds_in_the_menu_start_the_intro() {
+        let root = temp("app-idle");
+        let Some(mut a) = app(&root, None) else {
+            return;
+        };
+        for _ in 0..590 {
+            a.advance(50);
+        }
+        a.pointer_move(10, 10);
+        for _ in 0..590 {
+            a.advance(50);
+        }
+        assert_eq!(
+            a.mode(),
+            super::super::Mode::Menu,
+            "o ponteiro zerou o relógio"
+        );
+        for _ in 0..20 {
+            a.advance(50);
+        }
         assert_eq!(a.mode(), super::super::Mode::Show);
-        a.advance(2000);
-        assert_eq!(a.mode(), super::super::Mode::Menu, "o filme acabou");
+        a.pointer_button(true);
+        a.advance(50);
+        assert_eq!(a.mode(), super::super::Mode::Menu);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rebinding_keys_and_the_joystick_persists_and_drives_the_game() {
+        use openhunted_engine::devices::{DEFAULT_KEYS, slot};
+        use openhunted_engine::input::{JUMP, RIGHT, SHOOT, STEALTH};
+        use openhunted_engine::shell::devices::ids as dev;
+        use openhunted_engine::shell::keys::ids as k;
+        let root = temp("app-keys");
+        let Some(mut a) = app(&root, None) else {
+            return;
+        };
+        click(&mut a, menu::INPUT_DEVICES);
+        assert_eq!(a.page_kind(), Some(PageKind::Input));
+        click(&mut a, dev::CUSTOMIZE[0]);
+        assert_eq!(a.page_kind(), Some(PageKind::Keys));
+        click(&mut a, k::ACTION + slot::JUMP as u16);
+        // na espera, a tecla crua vai para a tela e não navega
+        assert!(a.vk_down(32));
+        click(&mut a, k::DONE);
+        assert_eq!(a.page_kind(), Some(PageKind::Input));
+        assert_eq!(a.config().keys[0][slot::JUMP], 32, "espaço no pular");
+        let st = Storage::at(&root);
+        assert_eq!(st.load_config().keys[0][slot::JUMP], 32, "gravado");
+        let txt = std::fs::read_to_string(&st.config_file).unwrap();
+        assert!(
+            txt.contains("InputKeys1=38,40,37,39,17,32,88,33,90,34"),
+            "{txt}"
+        );
+        // um joystick: o Joystick 1 do jogador 1, botões trocados no SJOYS
+        a.set_joysticks(vec![JoyRaw {
+            count: 6,
+            ..Default::default()
+        }]);
+        a.key_down(Key::Escape);
+        run(&mut a, 1);
+        click(&mut a, menu::INPUT_DEVICES);
+        click(&mut a, dev::FIRST[0] + 1);
+        assert_eq!(a.devices()[0], Device::Joystick(1));
+        click(&mut a, dev::CUSTOMIZE[0]);
+        assert_eq!(a.page_kind(), Some(PageKind::Keys));
+        click(&mut a, k::ACTION + slot::SHOOT as u16);
+        a.set_joysticks(vec![JoyRaw {
+            buttons: 1 << 2,
+            count: 6,
+            ..Default::default()
+        }]);
+        a.set_joysticks(vec![JoyRaw {
+            count: 6,
+            ..Default::default()
+        }]);
+        click(&mut a, k::DONE);
+        assert_eq!(a.config().buttons[0], [3, 2, 1, 4, 5, 6]);
+        let b = app(&root, None).unwrap();
+        assert_eq!(b.config().devices[0], Some(Device::Joystick(1)));
+        assert_eq!(b.config().buttons[0], [3, 2, 1, 4, 5, 6]);
+        // no jogo: meia inclinação para a direita anda; o botão 3 atira
+        a.key_down(Key::Escape);
+        run(&mut a, 1);
+        click(&mut a, menu::NEW_GAME);
+        a.key_down(Key::Enter); // GO
+        run(&mut a, 6);
+        assert_eq!(a.mode(), super::super::Mode::Play);
+        a.set_joysticks(vec![JoyRaw {
+            x: 80,
+            buttons: 1 << 2,
+            count: 6,
+            ..Default::default()
+        }]);
+        a.read_input(&|_| false, 0);
+        assert_eq!(a.viewer().unwrap().input().0, RIGHT | STEALTH | SHOOT);
+        // sem o joystick, o teclado com as teclas gravadas
+        a.set_joysticks(vec![]);
+        a.read_input(&|vk| vk == 32, 0);
+        assert_eq!(a.viewer().unwrap().input().0, JUMP);
+        assert!(!a.vk_down(32));
+        assert_eq!(
+            a.viewer().unwrap().input().1 & JUMP,
+            JUMP,
+            "o toque rápido do pulo"
+        );
+        assert_ne!(DEFAULT_KEYS[0][slot::JUMP], 32);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn two_player_modes_stay_unavailable() {
+        let root = temp("app-multi");
+        let Some(mut a) = app(&root, None) else {
+            return;
+        };
+        let mut rgba = vec![0u8; 640 * 480 * 4];
         click(&mut a, menu::MULTI_PLAYER);
         assert_eq!(a.page_kind(), Some(PageKind::Multi));
         click(

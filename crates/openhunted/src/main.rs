@@ -6,15 +6,16 @@
 //! Uso: `openhunted --data <CD, pasta Hunter/ ou .iso> [--level T_J_001.LEV] [--frames N]
 //! [--no-intro]`
 //! Nas telas: mouse, setas (levam o ponteiro aos botões), Enter/espaço clicam, Esc cancela
-//! (no menu, sai). No jogo: setas movem o Jake, espaço pula, Ctrl atira (segurando,
-//! rajadas; com as setas, mira para cima e nas diagonais), Z dá soco, X anda furtivo,
-//! PageUp/PageDown trocam de arma e 1–6 a escolhem, CIMA usa a saída, P/Pause pausa;
+//! (no menu, sai). No jogo, as teclas do `hunter.ini` (padrão do original: setas movem,
+//! Shift pula, Ctrl atira, Z dá soco, X anda furtivo, PageUp/PageDown trocam de arma) ou o
+//! joystick escolhido em "Input Devices"; 1–6 escolhem a arma, P/Pause pausa;
 //! qualquer tecla solta fecha a dica do tutorial. Os efeitos sonoros tocam pelo dispositivo
 //! de áudio padrão (sem ele, o jogo segue mudo). Sem Jake na fase, as setas rolam a tela,
 //! PageUp/PageDown pulam uma tela e Home/End vão às pontas. Tab mostra a colisão e os
 //! objetos de lógica.
 
 mod audio;
+mod keymap;
 #[allow(dead_code)]
 mod music;
 #[allow(dead_code)]
@@ -38,7 +39,7 @@ use sdl3::messagebox::{MessageBoxFlag, show_simple_message_box};
 use sdl3::mouse::MouseButton;
 use sdl3::pixels::PixelFormat;
 
-use shell::{App, Held, Key};
+use shell::{App, JoyRaw, Key};
 
 struct Args {
     data: PathBuf,
@@ -170,6 +171,18 @@ fn run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     texture.set_scale_mode(sdl3::render::ScaleMode::Nearest);
     let mut events = sdl.event_pump().map_err(|e| e.to_string())?;
+    // joysticks (até 4, na ordem de conexão): Joystick 1–4 do `SINPU`
+    let joy_sys = sdl.joystick().ok();
+    let open_joys = |sys: &Option<sdl3::JoystickSubsystem>| -> Vec<sdl3::joystick::Joystick> {
+        let Some(sys) = sys else { return Vec::new() };
+        sys.joysticks()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|id| sys.open(id).ok())
+            .take(4)
+            .collect()
+    };
+    let mut joys = open_joys(&joy_sys);
     let mut rgba = vec![0u8; SCREEN_W * SCREEN_H * 4];
     let mut last = Instant::now();
     let mut frame: u64 = 0;
@@ -188,11 +201,23 @@ fn run() -> Result<(), String> {
                 } => app.focus_lost(),
                 Event::KeyUp { .. } => app.key_up(),
                 Event::TextInput { text, .. } => app.text_input(&text),
+                Event::JoyDeviceAdded { .. } | Event::JoyDeviceRemoved { .. } => {
+                    joys = open_joys(&joy_sys);
+                }
                 Event::KeyDown {
-                    keycode: Some(k),
+                    keycode,
+                    scancode,
                     repeat: false,
                     ..
-                } => app.key_down(key(k)),
+                } => {
+                    // a tecla crua primeiro: a espera do `SKEYB` a consome
+                    let raw = scancode
+                        .and_then(keymap::vk)
+                        .is_some_and(|v| app.vk_down(v));
+                    if let (false, Some(k)) = (raw, keycode) {
+                        app.key_down(key(k));
+                    }
+                }
                 Event::MouseMotion { x, y, .. } => {
                     let (lx, ly) = to_logical(&canvas, x, y);
                     app.pointer_move(lx, ly);
@@ -229,31 +254,23 @@ fn run() -> Result<(), String> {
                 text.stop(canvas.window());
             }
         }
+        app.set_joysticks(joys.iter().map(joy_raw).collect());
         let keys = events.keyboard_state();
-        let held = |sc: &[Scancode]| sc.iter().any(|&s| keys.is_scancode_pressed(s));
-        app.set_held(Held {
-            left: held(&[Scancode::Left]),
-            right: held(&[Scancode::Right]),
-            up: held(&[Scancode::Up]),
-            down: held(&[Scancode::Down]),
-            jump: held(&[Scancode::Space]),
-            shoot: held(&[Scancode::LCtrl, Scancode::RCtrl]),
-            stealth: held(&[Scancode::X]),
-            punch: held(&[Scancode::Z]),
-            prev_weapon: held(&[Scancode::PageUp]),
-            next_weapon: held(&[Scancode::PageDown]),
-            select: [
-                Scancode::_1,
-                Scancode::_2,
-                Scancode::_3,
-                Scancode::_4,
-                Scancode::_5,
-                Scancode::_6,
-            ]
-            .iter()
-            .position(|&k| keys.is_scancode_pressed(k))
-            .map_or(0, |i| i as u8 + 1),
-        });
+        let select = [
+            Scancode::_1,
+            Scancode::_2,
+            Scancode::_3,
+            Scancode::_4,
+            Scancode::_5,
+            Scancode::_6,
+        ]
+        .iter()
+        .position(|&k| keys.is_scancode_pressed(k))
+        .map_or(0, |i| i as u8 + 1);
+        app.read_input(
+            &|vk| keymap::held(vk, |sc| keys.is_scancode_pressed(sc)),
+            select,
+        );
         let status = app.status();
         if status != shown {
             let _ = canvas
@@ -281,6 +298,37 @@ fn run() -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(16));
     }
     Ok(())
+}
+
+/// Estado de um joystick da SDL como o `joyGetPos` do original: eixos 0/1 `>> 8`
+/// (−128…127); o primeiro chapéu, quando apertado, dá a direção cheia (Ruling).
+fn joy_raw(j: &sdl3::joystick::Joystick) -> JoyRaw {
+    use sdl3::joystick::HatState;
+    let axis = |i: u32| j.axis(i).map_or(0, |v| v >> 8);
+    let (mut x, mut y) = (axis(0), axis(1));
+    if j.num_hats() > 0 {
+        let h = j.hat(0).map_or(0, HatState::to_raw);
+        if h & 0x08 != 0 {
+            x = -128;
+        } else if h & 0x02 != 0 {
+            x = 127;
+        }
+        if h & 0x01 != 0 {
+            y = -128;
+        } else if h & 0x04 != 0 {
+            y = 127;
+        }
+    }
+    let count = j.num_buttons().min(32);
+    let buttons = (0..count)
+        .filter(|&b| j.button(b).unwrap_or(false))
+        .fold(0u32, |m, b| m | 1 << b);
+    JoyRaw {
+        x,
+        y,
+        buttons,
+        count,
+    }
 }
 
 /// Coordenadas da janela → tela lógica 640×480 (com a escala e as bordas).

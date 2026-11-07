@@ -125,8 +125,8 @@ trapaça `0x49738c`, com `+0x48 ≠ 0` e `+0x48 & máscara = 0` fala (3715/3714 
 3730/3732 Garathe) e recusa; senão exige `0x435bd8(+0xa0, 2, 2)` (entradas 3–4) verdadeiro,
 ou fala (3715/3719, 3730/3741); aceita → `0x40eed4(3)`. Aberta → `0x40eed4(2)`. Devolve
 estado = 3. O Jake chama ao fim do rótulo 100 (empurrar, `0x425d04`) sobre zona PR 0x20,
-com a célula da posição dele (`x >> 7`, `y >> 7`, camada). As entradas 1–2 de `+0xa0` não
-são lidas por nenhuma das rotinas vistas.
+com a célula da posição dele (`x >> 7`, `y >> 7`, camada). As entradas 1–2 de `+0xa0` são a
+luz da célula (`casca-acabamento.md`).
 
 ## Em aberto
 
