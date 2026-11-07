@@ -23,6 +23,9 @@ pub const SOUND_LONG_LANDING: u16 = 5053;
 pub const SOUND_PUSH: u16 = 5043;
 pub const SPEECH_WALL_MEDIUM: u16 = 3734;
 pub const SPEECH_WALL_LONG: u16 = 3740;
+/// Empurrar (`0x42a9a4`): 44 `PUSHHAND` toca uma vez (atraso 0); no fim, som 5043 e o laço
+/// 46 (atraso 1), em cuja entrada a zona 0x20 pede a porta de célula (`0x42aa74`).
+pub const PUSH_START: u16 = 44;
 /// Investida do pulo longo (`0x429bda`): 7 de dano com tranco e empurrão.
 pub const BODY_CHECK_DAMAGE: i32 = 7;
 pub const BODY_CHECK_PUSH: i32 = 8;
@@ -106,10 +109,11 @@ pub(super) fn mirrored(s: State) -> bool {
 }
 
 /// Todos os rótulos usados (para conferir contra o `MINOTAUR.ANM` real).
-pub const ALL_LABELS: [u16; 47] = [
+pub const ALL_LABELS: [u16; 48] = [
     1,
     10,
     46,
+    PUSH_START,
     21,
     24,
     22,
@@ -206,6 +210,8 @@ mod tests {
             (63, 4),
             (121, 22),
             (127, 28),
+            (44, 3),
+            (46, 24),
         ] {
             m.insert(l, n);
         }
@@ -237,6 +243,45 @@ mod tests {
         for _ in 0..n {
             j.tick(input, w);
         }
+    }
+
+    /// Empurrar: 44 (3 quadros, atraso 0) → som 5043 → laço 46 (atraso 1); a porta de célula
+    /// é pedida ao entrar no 46 (`0x42a9a4`, `0x42aa74`), não no fim do primeiro laço do 46.
+    #[test]
+    fn push_plays_44_then_loops_46_and_asks_the_door_on_entry() {
+        let mut w = floor_world();
+        w = World::new(
+            w.solids()
+                .iter()
+                .copied()
+                .chain([Rect {
+                    x: 32,
+                    y: 0,
+                    w: 20,
+                    h: 100,
+                }])
+                .collect(),
+        );
+        let mut j = garathe(&w, 0);
+        let mut seen = vec![];
+        for _ in 0..12 {
+            j.tick(RIGHT, &w);
+            seen.push((j.state(), j.label(), j.door_push, j.sound));
+        }
+        let first = seen
+            .iter()
+            .position(|s| s.0 == State::Push)
+            .expect("empurra");
+        let labels: Vec<u16> = seen[first..].iter().map(|s| s.1).collect();
+        assert_eq!(&labels[..5], &[44, 44, 44, 46, 46]);
+        let doors: Vec<usize> = (first..seen.len()).filter(|&i| seen[i].2).collect();
+        assert_eq!(
+            doors,
+            vec![first + 3],
+            "pede a porta uma vez, ao entrar no 46"
+        );
+        assert_eq!(seen[first + 3].3, Some(SOUND_PUSH));
+        assert!(seen[first + 4..].iter().all(|s| s.3.is_none()));
     }
 
     #[test]

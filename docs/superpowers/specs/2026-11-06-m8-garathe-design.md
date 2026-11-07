@@ -35,7 +35,8 @@ e põe o que difere num perfil por personagem.
 
 ### Mapa de estados do Garathe (semântico → estado/rótulo)
 
-Parado 1/1 (c1) · correr 10/10 · empurrar 46/46 (c1) · furtivo → **andar de luta 3/103**
+Parado 1/1 (c1) · correr 10/10 · empurrar 44 (uma vez) → 5043 → 46/46 (c1; a porta de
+célula é pedida na entrada do 46) · furtivo → **andar de luta 3/103**
 (arte espelhada, k 3) · pulo parado 21 · para cima 20 (k 2) · da corda 19 · preparo 24 →
 longo 25 · médio 22 · queda 27 · queda descontrolada 29 · pousos 28 (queda), 23 (médio,
 k 1), 26 (longo: 24 ao contrário, k 1, som 5053), 30 (duro) → 31 · empurrado 58 · derrubado
