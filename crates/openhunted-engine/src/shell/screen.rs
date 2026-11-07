@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use openhunted_formats::{Animation, Bitmap, Font, Interface, Result};
 
-use crate::anim::{AnimPlayer, draw_ops};
+use crate::anim::draw_ops;
 use crate::assets::Assets;
 use crate::physics::Rect;
 use crate::render::{Framebuffer, SCREEN_H, SCREEN_W, draw_text, measure_text};
@@ -79,6 +79,66 @@ struct Ctl {
     looping: bool,
     /// Trata como botão (tipo 6, ou setas instaladas pela tela).
     button: bool,
+    /// Item de grupo de opção (`0x4431d6`): clica ao apertar; quadro 2 marcado, 1 realçado,
+    /// 0 apagado.
+    option: bool,
+    marked: bool,
+    /// Toca o rótulo uma vez e para no último quadro (`S_CAR`, `0x445ad3`).
+    once: bool,
+    /// Tabela de cor do `DLS.TBL` aplicada ao desenho (`0x43becd`; retrato da `SLEVL`).
+    remap: Option<Rc<[u8; 256]>>,
+}
+
+/// Quadros lógicos da animação: com a tabela A, os rótulos contam nela e cada entrada aponta
+/// o quadro físico (`docs/formats/anm.md`); sem ela, os quadros são os próprios.
+fn logical_len(anim: &Animation) -> usize {
+    if anim.table_a.is_empty() {
+        anim.frames.len()
+    } else {
+        anim.table_a.len()
+    }
+}
+
+/// Quadro físico de um quadro lógico (fora da tabela: nenhum).
+fn physical(anim: &Animation, frame: usize) -> Option<usize> {
+    if anim.table_a.is_empty() {
+        Some(frame)
+    } else {
+        anim.table_a.get(frame).map(|&f| usize::from(f))
+    }
+}
+
+/// Primeiro quadro lógico e número de quadros do rótulo: até o quadro que termina a
+/// animação (opcode 1) ou o início do rótulo seguinte (como `AnimPlayer`, pela tabela A).
+fn label_range(anim: &Animation, label: u16) -> Option<(usize, usize)> {
+    let start = usize::from(anim.labels.iter().find(|l| l.id == label)?.frame);
+    let next = anim
+        .labels
+        .iter()
+        .map(|l| usize::from(l.frame))
+        .filter(|&f| f > start)
+        .min()
+        .unwrap_or_else(|| logical_len(anim))
+        .max(start + 1);
+    for f in start..next {
+        let ends = physical(anim, f)
+            .and_then(|p| anim.frames.get(p))
+            .and_then(|fr| {
+                anim.script
+                    .iter()
+                    .position(|i| i.offset == fr.script_offset)
+            })
+            .is_some_and(|i0| {
+                anim.script[i0..]
+                    .iter()
+                    .find(|i| i.op == 0 || i.op == 1)
+                    .is_some_and(|i| i.op == 1)
+            });
+        if ends {
+            return Some((start, f + 1 - start));
+        }
+    }
+    Some((start, next - start))
 }
 
 /// Texto escrito numa área (centrado, como `0x44214c`).
@@ -136,9 +196,7 @@ impl Screen {
             .map(|c| {
                 let (start, count) = match (c.field_f, c.label) {
                     (0, _) | (_, None) => (0, 0),
-                    (_, Some(l)) => {
-                        AnimPlayer::at_label(&anim, l).map_or((0, 0), |p| (p.frame(), p.len()))
-                    }
+                    (_, Some(l)) => label_range(&anim, l).unwrap_or((0, 0)),
                 };
                 Ctl {
                     id: c.id,
@@ -160,6 +218,10 @@ impl Screen {
                     },
                     looping: c.kind == 0 && count > 1,
                     button: c.kind == BUTTON,
+                    option: false,
+                    marked: false,
+                    once: false,
+                    remap: None,
                 }
             })
             .collect();
@@ -217,6 +279,11 @@ impl Screen {
         }
     }
 
+    /// Deslocamento da tela (coordenadas dos controles → tela 640×480).
+    pub fn origin(&self) -> (i32, i32) {
+        self.offset
+    }
+
     /// Retângulo do controle na tela 640×480.
     pub fn rect(&self, id: u16) -> Option<Rect> {
         self.ctl(id).map(|c| Rect {
@@ -271,6 +338,65 @@ impl Screen {
             c.frame = 0;
             c.flags |= flags::UPDATE;
         }
+    }
+
+    /// Torna o controle um item de grupo de opção (`0x443257` liga um e apaga os outros;
+    /// quem marca é a tela, com `set_marked`).
+    pub fn make_option(&mut self, id: u16) {
+        if let Some(c) = self.ctl_mut(id) {
+            c.option = true;
+            c.button = false;
+            c.looping = false;
+            c.frame = 0;
+            c.flags |= flags::UPDATE | flags::NAV;
+        }
+    }
+
+    pub fn set_marked(&mut self, id: u16, marked: bool) {
+        if let Some(c) = self.ctl_mut(id) {
+            c.marked = marked;
+            if c.option {
+                c.frame = if marked {
+                    2.min(c.count.saturating_sub(1))
+                } else {
+                    0
+                };
+            }
+        }
+    }
+
+    /// Troca o rótulo da animação do controle (volta ao primeiro quadro).
+    pub fn set_label(&mut self, id: u16, label: u16) {
+        let range = label_range(&self.anim, label);
+        if let Some(c) = self.ctl_mut(id) {
+            let (start, count) = range.unwrap_or((0, 0));
+            c.start = start;
+            c.count = count;
+            c.frame = 0;
+            c.looping = !c.button && !c.option && !c.once && count > 1;
+        }
+    }
+
+    /// Toca o rótulo uma vez, parando no último quadro.
+    pub fn play_once(&mut self, id: u16) {
+        if let Some(c) = self.ctl_mut(id) {
+            c.once = true;
+            c.looping = false;
+            c.frame = 0;
+        }
+    }
+
+    /// Desenha o controle recolorido pela tabela (cor `i` → `tabela[i]`).
+    pub fn set_remap(&mut self, id: u16, table: Option<Rc<[u8; 256]>>) {
+        if let Some(c) = self.ctl_mut(id) {
+            c.remap = table;
+        }
+    }
+
+    /// O ponteiro está sobre o controle visível.
+    pub fn hit(&self, id: u16) -> bool {
+        self.ctl(id)
+            .is_some_and(|c| c.flags & flags::HIDDEN == 0 && self.inside(c))
     }
 
     pub fn pointer(&self) -> (i32, i32) {
@@ -344,6 +470,29 @@ impl Screen {
                 c.frame = (c.frame + 1) % c.count;
                 continue;
             }
+            if c.once {
+                let c = &mut self.ctls[i];
+                c.frame = (c.frame + 1).min(c.count.saturating_sub(1));
+                continue;
+            }
+            if c.option {
+                let inside = self.inside(c);
+                let id = c.id;
+                let pressed = self.pressed;
+                let c = &mut self.ctls[i];
+                let last = c.count.saturating_sub(1);
+                c.frame = if c.marked {
+                    2.min(last)
+                } else if inside {
+                    1.min(last)
+                } else {
+                    0
+                };
+                if inside && pressed && self.captured.is_none() {
+                    activated = activated.or(Some(id));
+                }
+                continue;
+            }
             if !c.button {
                 continue;
             }
@@ -409,6 +558,9 @@ impl Screen {
     /// Desenha o quadro `frame` da animação da tela deslocado por `(dx, dy)` (relativo à
     /// tela): uso das telas para peças com posição própria (alça da barra de rolagem).
     pub fn draw_anim_frame(&self, fb: &mut Framebuffer, frame: usize, dx: i32, dy: i32) {
+        let Some(frame) = physical(&self.anim, frame) else {
+            return;
+        };
         for op in draw_ops(&self.anim, frame) {
             let Some(bmp) = self.bitmaps.get(&op.bitmap.to_uppercase()) else {
                 continue;
@@ -427,7 +579,14 @@ impl Screen {
 
     /// Primeiro quadro do rótulo `label` da animação da tela.
     pub fn label_frame(&self, label: u16) -> Option<usize> {
-        AnimPlayer::at_label(&self.anim, label).map(|p| p.frame())
+        label_range(&self.anim, label).map(|(s, _)| s)
+    }
+
+    /// Tamanho (largura, altura) do primeiro quadro do rótulo, pelo quadro da animação.
+    pub fn label_size(&self, label: u16) -> Option<(i32, i32)> {
+        let f = physical(&self.anim, self.label_frame(label)?)?;
+        let fr = self.anim.frames.get(f)?;
+        Some((i32::from(fr.width), i32::from(fr.height)))
     }
 
     /// Desenha os controles visíveis em ordem de id (`0x461b8a`: quadro na posição
@@ -437,12 +596,23 @@ impl Screen {
             if c.flags & flags::HIDDEN != 0 || c.count == 0 {
                 continue;
             }
-            self.draw_anim_frame(
-                fb,
+            let (f, x, y) = (
                 c.start + c.frame,
                 c.rect.x + c.origin.0,
                 c.rect.y + c.origin.1,
             );
+            match &c.remap {
+                None => self.draw_anim_frame(fb, f, x, y),
+                Some(t) => {
+                    let mut tmp = Framebuffer::new(fb.width, fb.height);
+                    self.draw_anim_frame(&mut tmp, f, x, y);
+                    for (o, &p) in fb.pixels.iter_mut().zip(&tmp.pixels) {
+                        if p != 0 {
+                            *o = t[usize::from(p)];
+                        }
+                    }
+                }
+            }
         }
         for t in &self.texts {
             if let Some(r) = self.rect(t.id) {
@@ -679,6 +849,77 @@ pub(crate) mod tests {
         assert_eq!(px(&fb, 10, 30), 0, "removido");
         assert_eq!(px(&fb, 40, 0), 5, "laço no quadro 4");
         assert!(s.rect(102).is_none());
+    }
+
+    #[test]
+    fn options_click_on_press_and_show_marked_or_hover_frames() {
+        let mut s = synth_screen(Placement::Full);
+        s.make_option(101);
+        s.make_option(102);
+        s.set_marked(102, true);
+        assert_eq!(s.frame(102), Some((2, 3)));
+        s.handle(Input::PointerMove(11, 11));
+        assert_eq!(s.handle(Input::Tick), None);
+        assert_eq!(s.frame(101), Some((1, 3)), "realce");
+        s.handle(Input::PointerDown);
+        assert_eq!(s.handle(Input::Tick), Some(101), "clica ao apertar");
+        s.handle(Input::PointerUp);
+        assert_eq!(s.handle(Input::Tick), None);
+        assert!(s.hit(101) && !s.hit(102));
+        s.set_marked(101, true);
+        s.set_marked(102, false);
+        s.handle(Input::Tick);
+        assert_eq!((s.frame(101), s.frame(102)), (Some((2, 3)), Some((0, 3))));
+    }
+
+    #[test]
+    fn play_once_stops_on_the_last_frame_and_labels_change() {
+        let mut s = synth_screen(Placement::Full);
+        s.set_label(103, 4);
+        assert_eq!(s.frame(103), Some((0, 3)));
+        s.play_once(103);
+        for _ in 0..5 {
+            s.handle(Input::Tick);
+        }
+        assert_eq!(s.frame(103), Some((2, 3)), "parado no último");
+        assert_eq!(s.label_frame(4), Some(6));
+        assert_eq!(s.label_size(4), Some((4, 4)));
+    }
+
+    #[test]
+    fn table_a_maps_logical_frames_to_physical() {
+        let (anim, bmps) = synth_anim();
+        let mut a = (*anim).clone();
+        // rótulo 2 passa a começar no quadro lógico 20, que aponta o físico 1
+        a.table_a = (0..30)
+            .map(|i| if i >= 20 { (i - 19) as u16 } else { 0 })
+            .collect();
+        a.labels.iter_mut().find(|l| l.id == 2).unwrap().frame = 20;
+        let itf = Interface::parse(&mkitf_controls(
+            "t.anm",
+            &[(0, 100, 0, 0, 64, 64, 1, 1), (6, 101, 10, 10, 4, 4, 1, 2)],
+        ))
+        .unwrap();
+        let s = Screen::with_bitmaps(&itf, Rc::new(a), bmps, Placement::Full);
+        assert_eq!(s.frame(101), Some((0, 5)), "até o opcode 1 do físico 5");
+        let mut fb = Framebuffer::new(64, 64);
+        s.draw(&mut fb);
+        assert_eq!(px(&fb, 10, 10), 2, "lógico 20 → físico 1");
+    }
+
+    #[test]
+    fn remap_recolors_only_the_control() {
+        let mut s = synth_screen(Placement::Full);
+        let mut t = [0u8; 256];
+        for (i, v) in t.iter_mut().enumerate() {
+            *v = i as u8;
+        }
+        t[2] = 99;
+        s.set_remap(101, Some(Rc::new(t)));
+        let mut fb = Framebuffer::new(64, 64);
+        s.draw(&mut fb);
+        assert_eq!(px(&fb, 10, 10), 99, "botão recolorido");
+        assert_eq!(px(&fb, 0, 0), 1, "fundo intacto");
     }
 
     #[test]

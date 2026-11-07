@@ -74,6 +74,8 @@ struct Voice {
     pos: u64,
     /// Passo por quadro de saída (taxa da fonte / taxa da saída), 16.16.
     step: u64,
+    /// Recomeça do início ao acabar (sinal 2 de `0x43c93d`; música dos menus).
+    looping: bool,
 }
 
 /// Mixer de até 16 sons.
@@ -83,6 +85,8 @@ pub struct Mixer {
     voices: Vec<Voice>,
     /// Soma por quadro (E, D) antes da saturação, reaproveitada entre chamadas.
     acc: Vec<(i32, i32)>,
+    /// Volume mestre em 1/256 (`SfxVolume`/`MusicVolume`, `0x44e040`).
+    master: i32,
 }
 
 impl Mixer {
@@ -92,7 +96,34 @@ impl Mixer {
             voices: Vec::with_capacity(CHANNELS),
             // 16 K quadros: cabe qualquer pedido do SDL sem alocar na thread de áudio
             acc: Vec::with_capacity(16 * 1024),
+            master: 256,
         }
+    }
+
+    /// Volume mestre (0–100) aplicado a todos os sons.
+    pub fn set_master(&mut self, volume: u8) {
+        self.master = i32::from(volume.min(100)) * 256 / 100;
+    }
+
+    /// Começa um som em laço (como `play`).
+    pub fn play_looped(&mut self, id: u16, pcm: Arc<Pcm>, priority: u16, volume: u8) -> bool {
+        if !self.play(id, pcm, priority, volume, 0) {
+            return false;
+        }
+        if let Some(v) = self.voices.iter_mut().rev().find(|v| v.id == id) {
+            v.looping = true;
+        }
+        true
+    }
+
+    /// Para todas as instâncias do som `id` (`0x44ded8`).
+    pub fn stop(&mut self, id: u16) {
+        self.voices.retain(|v| v.id != id);
+    }
+
+    /// O som `id` está tocando.
+    pub fn is_playing(&self, id: u16) -> bool {
+        self.voices.iter().any(|v| v.id == id)
     }
 
     /// Sons tocando agora.
@@ -121,6 +152,7 @@ impl Mixer {
             pcm,
             gain: gains(volume, pan),
             pos: 0,
+            looping: false,
         };
         if self.voices.len() < CHANNELS {
             self.voices.push(voice);
@@ -148,24 +180,30 @@ impl Mixer {
         let acc = &mut self.acc;
         acc.clear();
         acc.resize(out.len() / 2, (0, 0));
+        let master = self.master;
         for v in &mut self.voices {
             let ch = usize::from(v.pcm.channels);
             let total = v.pcm.frames() as u64;
+            let (gl, gr) = ((v.gain.0 * master) >> 8, (v.gain.1 * master) >> 8);
             for a in acc.iter_mut() {
-                let f = v.pos >> 16;
+                let mut f = v.pos >> 16;
                 if f >= total {
-                    break;
+                    if !v.looping {
+                        break;
+                    }
+                    v.pos -= total << 16;
+                    f = v.pos >> 16;
                 }
                 let i = f as usize * ch;
                 let l = i32::from(v.pcm.samples[i]);
                 let r = i32::from(v.pcm.samples[i + ch - 1]);
-                a.0 += (l * v.gain.0) >> 8;
-                a.1 += (r * v.gain.1) >> 8;
+                a.0 += (l * gl) >> 8;
+                a.1 += (r * gr) >> 8;
                 v.pos += v.step;
             }
         }
         self.voices
-            .retain(|v| (v.pos >> 16) < v.pcm.frames() as u64);
+            .retain(|v| v.looping || (v.pos >> 16) < v.pcm.frames() as u64);
         for (o, a) in out.chunks_exact_mut(2).zip(acc.iter()) {
             o[0] = a.0.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
             o[1] = a.1.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
@@ -179,11 +217,33 @@ impl Mixer {
 /// Destino dos sons resolvidos (o mixer, a SDL ou um registro nos testes).
 pub trait SoundOut {
     fn play(&mut self, id: u16, pcm: Arc<Pcm>, priority: u16, volume: u8, pan: i16);
+    /// Som em laço (música dos menus).
+    fn play_looped(&mut self, id: u16, pcm: Arc<Pcm>, priority: u16, volume: u8) {
+        self.play(id, pcm, priority, volume, 0);
+    }
+    fn stop(&mut self, _id: u16) {}
+    fn is_playing(&mut self, _id: u16) -> bool {
+        false
+    }
+    /// Volume mestre (0–100).
+    fn set_master(&mut self, _volume: u8) {}
 }
 
 impl SoundOut for Mixer {
     fn play(&mut self, id: u16, pcm: Arc<Pcm>, priority: u16, volume: u8, pan: i16) {
         Mixer::play(self, id, pcm, priority, volume, pan);
+    }
+    fn play_looped(&mut self, id: u16, pcm: Arc<Pcm>, priority: u16, volume: u8) {
+        Mixer::play_looped(self, id, pcm, priority, volume);
+    }
+    fn stop(&mut self, id: u16) {
+        Mixer::stop(self, id);
+    }
+    fn is_playing(&mut self, id: u16) -> bool {
+        Mixer::is_playing(self, id)
+    }
+    fn set_master(&mut self, volume: u8) {
+        Mixer::set_master(self, volume);
     }
 }
 
@@ -220,6 +280,11 @@ impl Sfx {
                 pcm.map(Arc::new)
             })
             .clone()
+    }
+
+    /// Volume mestre dos efeitos (0–100; abaixo de 10 o chamador já passa 0).
+    pub fn set_volume(&mut self, volume: u8) {
+        self.out.set_master(volume);
     }
 
     /// Toca os sons de um tique ouvidos pela vista centrada em `listener` na camada `layer`.
@@ -295,6 +360,26 @@ impl SoundOut for SdlOut {
     fn play(&mut self, id: u16, pcm: Arc<Pcm>, priority: u16, volume: u8, pan: i16) {
         if let Some(mut feed) = self.stream.lock() {
             feed.mixer.play(id, pcm, priority, volume, pan);
+        }
+    }
+    fn play_looped(&mut self, id: u16, pcm: Arc<Pcm>, priority: u16, volume: u8) {
+        if let Some(mut feed) = self.stream.lock() {
+            feed.mixer.play_looped(id, pcm, priority, volume);
+        }
+    }
+    fn stop(&mut self, id: u16) {
+        if let Some(mut feed) = self.stream.lock() {
+            feed.mixer.stop(id);
+        }
+    }
+    fn is_playing(&mut self, id: u16) -> bool {
+        self.stream
+            .lock()
+            .is_some_and(|feed| feed.mixer.is_playing(id))
+    }
+    fn set_master(&mut self, volume: u8) {
+        if let Some(mut feed) = self.stream.lock() {
+            feed.mixer.set_master(volume);
         }
     }
 }
@@ -424,6 +509,35 @@ pub(crate) mod tests {
         assert_eq!(m.playing().iter().filter(|&&i| i == 101).count(), 1);
         // som vazio não ocupa canal
         assert!(!Mixer::new(11025).play(1, pcm(11025, &[]), 0, 100, 0));
+    }
+
+    #[test]
+    fn looping_voice_wraps_until_stopped() {
+        let mut m = Mixer::new(11025);
+        assert!(m.play_looped(3000, pcm(11025, &[1, 2, 3]), 5000, 100));
+        let mut out = [0i16; 14];
+        m.mix(&mut out);
+        assert_eq!(out, [1, 1, 2, 2, 3, 3, 1, 1, 2, 2, 3, 3, 1, 1]);
+        assert!(m.is_playing(3000), "o laço não sai do canal");
+        m.mix(&mut out[..4]);
+        assert_eq!(out[..4], [2, 2, 3, 3], "continua de onde parou");
+        m.stop(3000);
+        assert!(!m.is_playing(3000));
+        assert_eq!(m.active(), 0);
+    }
+
+    #[test]
+    fn master_volume_scales_everything() {
+        let mut m = Mixer::new(11025);
+        m.set_master(50);
+        m.play(1, pcm(11025, &[1000]), 0, 100, 0);
+        let mut out = [0i16; 2];
+        m.mix(&mut out);
+        assert_eq!(out, [500, 500]);
+        m.set_master(0);
+        m.play(1, pcm(11025, &[1000]), 0, 100, 0);
+        m.mix(&mut out);
+        assert_eq!(out, [0, 0]);
     }
 
     /// Um som tocado: id, prioridade, volume e pan.

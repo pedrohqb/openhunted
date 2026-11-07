@@ -12,13 +12,23 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 ## Status
 
 **M8: o Garathe Den jogável.** Nas missões do Minotauro (`T_M`, `I_M`, `H_M`, `D_M`) o
-jogador controla o Garathe: corre a 15 px/tique, anda em pose de luta (X), pula médio ou longo
-(com preparo; no longo, a investida fere quem ele toca), pulo parado e para cima, redes,
-camadas, rasteja, pendura e anda na barra, esconde-se (o robô não o vê) e usa o especial
-(BAIXO+ATIRAR: 1 de vida por tique, 16 tiques). Armas: garras, clava (Z usa a clava), chicote
-(golpe que se divide), facas (cravam na parede e são recolhidas), granadas e estrelas; só ele
-pega a clava, as facas e o chicote. A `T_M_002` é vencida de ponta a ponta
-(`t_m_002_can_be_won`). Regras em `docs/superpowers/specs/2026-11-06-m8-garathe-design.md`.
+jogador controla o Garathe, com os movimentos dele (corrida a 15 px/tique, pose de luta, pulo
+longo com investida, rastejar, barra, esconder, especial) e as armas dele (garras, clava,
+chicote, facas, granadas, estrelas). A `T_M_002` é vencida de ponta a ponta. Regras em
+`docs/superpowers/specs/2026-11-06-m8-garathe-design.md`.
+
+**M9: a casca completa.** Todos os botões do menu principal levam às telas originais:
+carregar (Restore), escolher missão (`SLEVL`, com a marca nas vencidas e o retrato do
+personagem), opções (`SOPTI`: dificuldade, brilho, volumes da música e dos efeitos, gravadas
+na hora), dispositivos e teclas (`SINPU`/`SKEYB`, só consulta), heróis (`SHERO`), "Sobre"
+(no botão Help) e dois jogadores (`SMULT`, com o aviso de que esses modos não existem). Depois
+de cada vitória que dá uma peça do carro aparece `S_CAR`; a 7ª peça traz o filme do meio
+(com as vozes) e a 15ª o final e os créditos. Na contagem do resultado, a soma dos recordes
+entra na lista de heróis (`hunter.fam`, pedindo o nome) e o jogo é gravado num `.hhg`
+compatível com o original (o nome do arquivo é pedido na primeira vez). A música dos menus
+(`SX_3000.WAV`) toca em laço; na partida, as faixas de uma pasta tomam o lugar das do CD. Os
+filmes AVI (Indeo 3.2) tocam pelo `ffmpeg`, se houver. Regras e simplificações em
+`docs/superpowers/specs/2026-11-06-m9-casca-design.md`.
 
 **M7b: o arsenal do Jake e os itens da campanha.** Além da pistola, o Jake soca (Z, ou
 ATIRAR com os punhos: 8 de dano na frente), atira com a espingarda (o chumbo se divide em
@@ -43,42 +53,20 @@ embaixo; leva metade do dano, é imune a fogo e morre em 30 explosões. As morte
 jogador contam no resultado; os sons de cada um tocam pelos quadros (`SOUND.TBL`). Regras e
 simplificações em `docs/superpowers/specs/2026-11-06-m7a-inimigos-design.md`.
 
-**M6b: os demais movimentos do Jake.** O esqueleto `JAKE.SKE` move o Jake como no original
-(andar furtivo, impulso do pulo estendido, pulos parado e para cima, aterrissagens, escalada,
-engatinhar, barra) e o desenho acompanha a captura. CIMA diante de uma corda, escada ou rede
-agarra e escala; PULAR solta em pulo. As portas de camada levam o Jake de uma camada à outra
-com CIMA/BAIXO. CIMA sem zona esconde o Jake; BAIXO agacha e engatinha; o pulo para cima contra
-um teto pendura na barra. BAIXO+ATIRAR com vida acima de 25 é o especial: custa 3 de vida e destrói ou fere o
-que estiver a menos de 70 px. Com os objetos da M6a, as missões tutoriais `T_J_003`, `T_J_005`
-e `T_J_007` podem ser vencidas de ponta a ponta (testes `t_j_00x_can_be_won`).
+**M6b: os demais movimentos do Jake** (`JAKE.SKE`): andar furtivo, pulos parado e para
+cima, aterrissagens, escalada de cordas, escadas e redes, portas de camada, esconder-se,
+agachar e engatinhar, barra no teto e o especial BAIXO+ATIRAR. **M6a: os objetos das missões
+tutoriais** (olho-laser, barril, fogo, cerca elétrica, grafite, peça do carro, teletransporte,
+portas `OH`, coletáveis): `T_J_003`, `T_J_005` e `T_J_007` podem ser vencidas de ponta a
+ponta.
 
-**M6a: os objetos das missões tutoriais `T_J_003/005/007`.** O olho-laser varre o teto e
-dispara rajadas de raios no Jake que entra no cone; o barril tomba quando o Jake encosta, rola empurrado, explode com tiro, fogo,
-raio, explosão ou batida rápida, em cadeia; o fogo cresce e queima 1 por tique; a cerca
-elétrica faísca e dá choque; o grafite escreve o texto do `GRAFFITI.RES`; a peça do carro
-flutua e, apanhada, cumpre o objetivo; o teletransporte some com o Jake e o põe no destino; as
-paredes e portas `OH` abrem por empurrão ou gatilho e fecham por tempo; a pistola, a munição,
-a comida, as armaduras, o lança-foguetes e as granadas são apanhados.
+**M5: as telas em volta do jogo.** Menu principal (`SMAIN.ITF`), briefing (`SLEVD.ITF`),
+partida em 640×405 com a barra de estado (`INVBAR01.BMP`), pausa (P ou Pause) e resultado
+(`SMISS.ITF`: mortos, pontos, bônus, recorde; REPLAY, NEXT, MAIN MENU). Uma fase aberta com `--level` fora
+da lista de missões não grava recorde nem jogo.
 
-**M5: as telas em volta do jogo.** O jogo abre no menu principal original (`SMAIN.ITF`, com
-fogo, faíscas e botões animados, mouse ou teclado); "New Game" começa a campanha solo na
-primeira missão do `ENGLEVEL.TXT`, com o briefing (`SLEVD.ITF`: título e descrição, rolagem,
-GO/CANCEL) sobre o primeiro quadro da fase. A partida ocupa 640×405 com a barra de estado
-original embaixo (`INVBAR01.BMP`: vida, rosto, armadura, armas com munição, cronômetro de
-rolo); P ou Pause pausa ("GAME PAUSED"). No fim, a tela de resultado (`SMISS.ITF`) conta
-mortos, pontos e bônus de vitória, guarda o recorde da missão na sessão e oferece REPLAY,
-NEXT (a próxima missão solo) e MAIN MENU. Uma fase aberta com `--level` fora da lista de
-missões não grava recorde e o NEXT dela volta ao menu.
-
-**M4c: efeitos sonoros.** **M4b: a pistola.** **M4a: a primeira missão é jogável de ponta a ponta.** Na `T_J_001`, o
-Jake corre, pula e cai, colide com o cenário e com os objetos sólidos, apanha a vida e a
-armadura, lê as dicas do tutorial, atira com a pistola (rajadas de 3, mira para cima e nas
-diagonais, munição no HUD) nas minas flutuantes que o perseguem (ou elas explodem nele,
-tiram vida, empurram e derrubam), chega à saída, aperta CIMA e vence; se a vida acaba, morre
-e perde. Os efeitos sonoros tocam (tiro, cápsulas, faíscas, explosões, coleta, dicas, choque
-da saída), posicionados em relação à câmera, com volume e pan pela distância e 16 canais com
-prioridade, como no original. Tudo com as
-constantes e as regras lidas do executável original (`docs/re/`).
+**M4: a primeira missão (`T_J_001`) jogável de ponta a ponta**, com a pistola e os efeitos
+sonoros posicionados (16 canais com prioridade, como no original).
 
 Etapas anteriores: M1 formatos (a biblioteca `openhunted-formats` lê os dados do CD, pasta ou
 `.iso`: bitmaps, paletas, sons, textos, animações, cenários, interfaces, fontes, fases;
@@ -87,11 +75,11 @@ corre e pula; M3b objetos sólidos e presença por modo de jogo.
 
 Ainda não há: os demais inimigos (Morte, Camaleão,
 catapulta, dardos, Anticorpo, Manta, Entidade, Minotauro inimigo), o equilíbrio na beirada (162/163),
-música, os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, a
-abertura (logotipo, filme, história, créditos), os demais botões do menu (carregar, escolher
-missão, opções, dispositivos, heróis, ajuda, dois jogadores), tesouros e segredos, gravação de
-recordes e de jogo, as cores do herói escolhido (o Garathe usa a paleta da fase). Os obstáculos `OPO` (gotas, bloco que cai,
-portão) ainda não agem.
+os passos e demais sons por quadro do Jake e do cenário, o zumbido das minas, o logotipo, o
+título e a história da abertura (só o filme toca) e o laço de demonstração, os efeitos da
+dificuldade no jogo, a troca de teclas e o joystick, os modos de dois jogadores, tesouros e
+segredos, as cores do herói (o Garathe usa a paleta da fase). Os obstáculos `OPO` (gotas,
+bloco que cai, portão) ainda não agem.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
 reversa, em [`docs/re/`](docs/re/).
@@ -108,13 +96,34 @@ cargo run --release -p openhunted -- --data /caminho/Hunter_Hunted.iso
 cargo run --release -p openhunted --features bundled-sdl -- --data /caminho/Hunter_Hunted.iso
 ```
 
-Opções: `--level T_J_001.LEV` (pula o menu e abre o briefing dessa fase), `--frames N` (fecha
-depois de N quadros). A variável `OPENHUNTED_DATA` substitui `--data`.
+Opções: `--level T_J_001.LEV` (pula a abertura e o menu e abre o briefing dessa fase),
+`--frames N` (fecha depois de N quadros), `--no-intro` (sem o filme de abertura). A variável
+`OPENHUNTED_DATA` substitui `--data`.
+
+Arquivos do jogador (criados na primeira gravação):
+
+- `~/.config/openhunted/hunter.ini` (ou `$XDG_CONFIG_HOME/openhunted/`): as opções, com as
+  chaves do `HUNTER.INI` original (`Difficulty`, `MusicVolume`, `SfxVolume`, `Brightness`)
+  e `MusicDir`, a pasta das faixas de música;
+- `~/.local/share/openhunted/` (ou `$XDG_DATA_HOME/openhunted/`): `hunter.fam` (lista de
+  heróis) e `saves/*.hhg` (jogos salvos, no formato do original).
+
+Filmes: com o `ffmpeg` no PATH (decodificador `indeo3`), a abertura e os filmes da 7ª e da
+15ª peça tocam ampliados na janela; qualquer tecla ou clique pula. Sem ele, são pulados.
+
+Música: os menus tocam `SX_3000.WAV`. As faixas de áudio do CD não estão na imagem de dados;
+para ouvi-las na partida, extraia-as do CD para uma pasta e aponte `OPENHUNTED_MUSIC` (ou
+`MusicDir`) para ela: os arquivos tocam em ordem de nome e recomeçam do primeiro (`.wav`
+direto; `.ogg`, `.mp3`, `.flac` e outros pelo `ffmpeg`). Com o número da faixa no nome
+(`track02.wav`), o título da janela mostra o nome original ("Shock Wave"…).
 
 Nas telas: o mouse aponta e clica; as setas levam o ponteiro ao botão mais próximo naquela
 direção e Enter ou espaço clicam; Esc cancela (no briefing, volta; no resultado vindo do jogo,
 nada; no menu, sai do jogo). No briefing, CIMA/BAIXO rolam o texto longo. Na tela de
-resultado, uma tecla salta a contagem.
+resultado, uma tecla salta a contagem. Em "escolher missão", CIMA/BAIXO mudam a missão e
+Enter carrega. Nos campos de nome, digita-se pelo teclado, Backspace apaga, Enter confirma e
+Esc desiste (no nome do arquivo, desistir não grava). "Restore" já traz o nome do jogo salvo
+mais recente.
 
 No jogo: setas movem o personagem (o Jake ou, nas missões do Minotauro, o Garathe), espaço pula (correndo, o pulo escolhe a distância conforme o chão
 adiante; com CIMA, para cima), Ctrl atira (segurando, rajadas; com as setas mira para cima e
