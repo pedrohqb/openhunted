@@ -136,11 +136,23 @@ caixa da Entidade (`0x405698`). Logo a confusão só vale **com a Entidade dentr
 - Passeio `0x42221b`: `v = (cos, sen)(+0x274)·(+0x2c) >> 11`, limitado só por cima a `+0x34`;
   a cada tique o ângulo gira **±0x1000 (22,5°)** (sentido `+0x27a`). O "ricochete" contado
   contra `+0x28` é uma **volta completa** (16 tiques): o passeio são laços.
-- `0x421e9b(obj, ponto)`: `v = (ponto − centro)/2`, limitado só por cima a `+0x34`; componentes
-  < 10 dobram; chegou quando a distância < largura + 15.
-- Manta, perseguição `0x422031`: alvo à esquerda → etapas 4→5→6; senão 1→2→3. Pontos: borda
-  direita da caixa do alvo e topo − `rand%10`; 3: +75 px; 6: −60 px. No fim, `0x4223e2`
-  espelha a casa em x pela posição atual (y −`rand%10`) e modo 5 (volta).
+- `0x421e9b(obj, ponto)` (Anticorpo: `0x411cff`): `v = (ponto − centro)/2`, limitado só por
+  cima a `+0x34`; depois cada componente **< 10 dobra**: o código chama `abs()` (`0x40d1fd`)
+  sobre o booleano `v < 10`, logo toda componente negativa também dobra (o limite −32…37 é
+  só do vx, depois). A velocidade sai sempre; devolve "chegou" quando a distância < largura + 15.
+- Etapa inicial (`+0x273`, `0x411600`/`0x421866`): posição x do alvo < a do voador → 4,
+  senão 1.
+- Manta, perseguição `0x422031`: ponto-base = **centro x** da caixa do alvo e topo −
+  `rand%10` (sorteado a cada tique). Etapas: 1 base − 60 → 2 base → 3 base + 75 (alvo à
+  direita); 4 base + 75 → 5 base → 6 base − 60 (alvo à esquerda). Ao chegar ao fim (3 ou 6),
+  `0x4223e2` espelha a casa em x pela posição atual (y −`rand%10`) e modo 5 (volta); a
+  velocidade do tique ainda é a do ponto. Com o alvo a < 40 px (`0x4225ab`) e fora dos
+  estados 4/5 → estado 4 (bote), sem sair da perseguição; a mordida sai no fim do 4.
+- Anticorpo, perseguição `0x411e95`: ponto-base = **centro** da caixa do alvo; etapas 1 −75 →
+  2 centro → 3 +75 / 4 +75 → 5 centro → 6 −75; ao chegar ao centro (2 e 5) **morde**
+  (`0x412249`) e segue; no fim, `0x41222b` espelha a casa só em x e modo 5.
+- Tempo da perseguição (`+0x276`): só sobe com `rand & 1` (metade dos tiques) [não portado:
+  a porta conta todo tique].
 
 ## Bits de célula `0x2/0x8/0x10/0x40` [confirmado pela busca de caminho]
 

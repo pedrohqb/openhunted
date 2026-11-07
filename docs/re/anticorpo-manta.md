@@ -54,8 +54,10 @@ Anticorpo: tabela `0x4720c0`; Manta: `0x473180`. `+0x38` (50/30/50/20) não foi 
    - **1, passeio**: anda na direção `+0x274` (`(cos, sen)·+0x2c`), até `+0x30` tiques ou
      `+0x28` ricochetes (`0x42221b`).
    - **2, mergulho**: `0x421fd6` leva-o ao alvo; ao chegar, modo 4.
-   - **3, perseguição**: até `+0x30` tiques; a menos de **40 px** (centros, `0x4225ab`) do
-     alvo → estado/rótulo 4 (bote).
+   - **3, perseguição**: até `+0x30` tiques; passa pelo alvo em três pontos (etapas
+     `+0x273`, ver `inimigos-menores-2.md`): o Anticorpo morde ao passar pelo centro; a Manta,
+     a menos de **40 px** (centros, `0x4225ab`), entra no estado/rótulo 4 (bote) sem sair da
+     perseguição.
    - **4/5, bote e retorno**: `0x4221b0` volta à casa; acabado, recomeça o passeio.
 4. vx limitado a −32…37 (1/8 px).
 
@@ -64,10 +66,11 @@ Percepção (`0x421c69` na Manta): jogador vivo, mesma camada, distância ≤ `+
 
 ## Ataque [confirmado]
 
-No fim do rótulo 4 (bote):
+- Anticorpo (`0x412249`, no modo 4 e ao passar pelo centro na perseguição): som **3071**
+  "Antibody" na posição dele e `0x43d629(anticorpo, alvo, variante)`.
 
-- Anticorpo (`0x412249`): som **3071** "Antibody" posicional e `0x43d629(anticorpo, alvo,
-  variante)`.
+No fim do rótulo 4 (bote, em qualquer modo; o modo 4 da Manta já põe o modo 5):
+
 - Manta (`0x422416`): põe-se momentaneamente na posição do alvo e chama `0x43d629(manta,
   alvo, variante)`; depois estado 5 → 1.
 

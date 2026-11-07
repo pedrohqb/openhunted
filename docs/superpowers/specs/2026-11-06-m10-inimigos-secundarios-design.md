@@ -57,9 +57,15 @@ e `anticorpo-manta.md`, e a dificuldade (`opcoes-salvamento.md`, `0x487854`).
   a compensa); as velocidades do passeio e do mergulho estão em 1/8 px.
 - Ruling: o bote fere o alvo no fim do rótulo de ataque sem novo teste de distância (como
   `0x412249`/`0x422416`); natureza `0x10` é dano comum. Rótulo de ataque do Anticorpo: 2.
-- Ruling: a varredura da Manta (`0x422031`) vai à borda da caixa do alvo do lado em que ela
-  está (topo − `rand%10`), depois 75 px (direita) ou 60 px (esquerda) além; ao chegar ao
-  primeiro ponto a menos de 40 px do alvo, dá o bote; no fim, volta a uma casa espelhada.
+- Ruling (revisão): a perseguição segue as etapas `+0x273` dos dois voadores (`0x411e95`,
+  `0x422031`): etapa inicial pelo lado da posição do alvo; três pontos sobre o ponto-base
+  (Anticorpo: centro do alvo, −75/0/+75 ou +75/0/−75, mordendo ao passar pelo centro; Manta:
+  centro x e topo − `rand%10` a cada tique, −60/0/+75 ou +75/0/−60, com o rótulo do bote a
+  < 40 px sem sair da perseguição); no fim, casa espelhada em x e volta. A mordida da Manta
+  sai no fim do rótulo 4, em qualquer modo, pela linha `(89, 0, v)` do `DAMAGE.TBL`
+  (empurrão pela velocidade dela, em px). O tempo da perseguição conta todo tique (o
+  original, metade). A velocidade para um ponto dobra toda componente < 10, negativas
+  incluídas (`abs(v < 10)`). O byte dormente do Anticorpo é com sinal (≤ 0 dorme).
 - Ruling: o formigueiro espera os gatilhos; a cada `values[2]` tiques (0 → tabela: 100/50/55)
   cria uma formiga na sua posição enquanto `values[1]` (0 → 9/5/3; −1 = sem fim) não zera
   (`0x414aed`); variante da formiga = campo 5 − 1. A formiga anda 2 px/tique e vira na
