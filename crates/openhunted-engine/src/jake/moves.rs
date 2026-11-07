@@ -833,6 +833,10 @@ impl Jake {
             center: (b.x + b.w / 2, b.y + b.h / 2),
             layer: self.layer,
         });
+        // piscar do efeito do Jake (`0x427671`; o do Garathe, `0x42c348`, não pisca)
+        if !self.is_garathe() {
+            self.flash.start(crate::tint::FLASH_SPECIAL, 0);
+        }
         self.hurt(Pending {
             amount: self.profile().special.self_damage,
             ..Default::default()

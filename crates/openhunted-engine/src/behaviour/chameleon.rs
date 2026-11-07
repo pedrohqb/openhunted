@@ -142,7 +142,7 @@ impl ChameleonState {
         VARIANTS[self.variant.min(4)]
     }
 
-    /// Sumiu de todo (invisível depois do esmaecer): não é desenhado.
+    /// Sumiu de todo: o limiar do esmaecer chegou a 0x91 (`crate::tint::chameleon`).
     pub fn faded(&self) -> bool {
         self.fade >= FADE_TICKS
     }
@@ -554,6 +554,9 @@ mod tests {
         s.invisible = true;
         s.fade = FADE_TICKS - 1;
         tick(&mut k, &mut c, &mut Out::default());
-        assert!(k.alive && !k.visible() && k.health > 0);
+        assert!(k.alive && k.health > 0);
+        // sumido: ainda desenhado, só com os pixels de origem < 0x91 (`0x419391`)
+        assert!(k.visible() && matches!(&k.behaviour, Behaviour::Chameleon(s) if s.faded()));
+        assert_eq!(crate::tint::entity(&k, 0, 0).unwrap().cutoff, Some(0x91));
     }
 }

@@ -31,13 +31,13 @@ remapeamento de índice de cor (cor `i` → `tabela[i]`).
 | 0, 1, 34 | identidade |
 | 2–17 | escurecimento progressivo (cada vez mais cores levadas a poucos índices escuros) |
 | 18–33 | outra rampa, para tons próprios (`0xde`, `0xce`, `0xcc`, `0x9f`…) [inferido: clarão/cor] |
-| 35–47 | recolorações (ex.: cores 1–2 → `0xdd`); 35–38 = cores dos personagens |
+| 35–47 | metade baixa comum (cores fixas, ex.: 1 → `0xdd`) e rampa de 128 tons na alta; 35/36 = Jake/Garathe |
 
 `0x43becd(tabela, fator)` compõe a tabela escolhida com uma tabela de sombra
 (`0x496c18`) em `0x481048`, que o desenho usa; o resultado é recalculado só quando a
-combinação muda. Tabelas ≥ 34 com fator ≠ 0 só remapeiam as 128 primeiras cores e parte do
-resto [inferido]. Uso conhecido: `p=` do `ENGLEVEL.TXT` (35–38) e cor dos jogadores
-(`../re/menus-restantes.md`).
+combinação muda. Com tabela ≥ 34 e fator ≠ 0, a metade alta é deslocada pelo fator
+[confirmado]. Detalhes e usos (sprites com rotina de desenho, `p=` do `ENGLEVEL.TXT`, cor
+dos jogadores) em [`../re/cores-sprites.md`](../re/cores-sprites.md).
 
 ## `DAMAGE.TBL`
 

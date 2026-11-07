@@ -263,8 +263,15 @@ fn label_lengths(a: &Animation) -> HashMap<u16, usize> {
         .collect()
 }
 
-/// Desenha um sprite com a câmera.
-fn draw_sprite(sp: &Sprite, assets: &mut Assets, fb: &mut Framebuffer, camera: (i32, i32)) {
+/// Desenha um sprite com a câmera; com `map`, cada pixel passa pela tabela de cor
+/// (`crate::tint`).
+fn draw_sprite(
+    sp: &Sprite,
+    assets: &mut Assets,
+    fb: &mut Framebuffer,
+    camera: (i32, i32),
+    map: Option<&[u8; 256]>,
+) {
     for op in draw_ops(&sp.anim, sp.player.frame()) {
         let Ok(bmp) = assets.bitmap(&op.bitmap) else {
             continue;
@@ -283,7 +290,10 @@ fn draw_sprite(sp: &Sprite, assets: &mut Assets, fb: &mut Framebuffer, camera: (
         let x = sp.x.saturating_add(ox).saturating_sub(camera.0);
         let y = sp.y.saturating_add(sc(op.y)).saturating_sub(camera.1);
         // Índice 0 transparente em todas as camadas (ver docs/re/cenario.md).
-        fb.blit_scaled(frame, x, y, sp.scale, sp.mirror, true);
+        match map {
+            Some(m) => fb.blit_scaled_mapped(frame, x, y, sp.scale, sp.mirror, m),
+            None => fb.blit_scaled(frame, x, y, sp.scale, sp.mirror, true),
+        }
     }
 }
 
@@ -305,7 +315,7 @@ fn draw_graffiti(
             mirror: false,
             ..sp.clone()
         };
-        draw_sprite(&glyph, assets, fb, camera);
+        draw_sprite(&glyph, assets, fb, camera, None);
     }
 }
 
@@ -669,16 +679,22 @@ impl Scene {
         overlay: bool,
     ) {
         for sp in &self.sprites {
-            draw_sprite(sp, assets, fb, camera);
+            draw_sprite(sp, assets, fb, camera, None);
         }
-        for e in &self.entities {
+        // tabelas de cor das rotinas de desenho `+0x1c4` (`docs/re/cores-sprites.md`)
+        let dls = assets.dls();
+        let map = |t: Option<crate::tint::Tint>| Some(dls.as_ref()?.table(t?, 0));
+        for (i, e) in self.entities.iter().enumerate() {
             if !e.visible() {
                 continue;
             }
             match (&e.behaviour, &e.sprite) {
                 (Behaviour::Graffiti(g), Some(sp)) => draw_graffiti(e, g, sp, assets, fb, camera),
                 (Behaviour::Laser(l), _) => draw_laser(e, l, fb, camera),
-                (_, Some(sp)) => draw_sprite(sp, assets, fb, camera),
+                (_, Some(sp)) => {
+                    let m = map(crate::tint::entity(e, i, self.tick_count));
+                    draw_sprite(sp, assets, fb, camera, m.as_ref());
+                }
                 _ => {}
             }
         }
@@ -687,7 +703,8 @@ impl Scene {
             .as_ref()
             .filter(|_| self.jake.as_ref().is_none_or(crate::jake::Jake::is_visible))
         {
-            draw_sprite(j, assets, fb, camera);
+            let m = map(self.jake.as_ref().map(crate::jake::Jake::tint));
+            draw_sprite(j, assets, fb, camera, m.as_ref());
         }
         if overlay {
             for (bx, by, _, b) in &self.borders {

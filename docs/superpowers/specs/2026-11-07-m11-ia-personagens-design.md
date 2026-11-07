@@ -99,6 +99,7 @@ setas), como no original.
 - A investida do Garathe da IA fere só o humano (uma vez por pulo).
 - O cálculo exato de "logo abaixo" na barra (`0x42e05d`): `|dx| < 32` e alvo abaixo.
 - Sem sons próprios; o tiro e o corpo soam posicionais, como no jogador.
+- Cada IA sorteia com gerador próprio (não mexe no dos demais).
 
 ## Testes
 

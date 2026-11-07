@@ -11,10 +11,16 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M12: as cores dos sprites.** O Jake, o Garathe, o Camaleão, o Anticorpo, o robô de
+segurança, o gerador de minas e as minas flutuantes são desenhados pela tabela de cor do
+`DLS.TBL` que o original monta para cada um (antes saíam com ruído de arco-íris): o Jake e o
+Garathe piscam ao serem feridos, envenenados ou eletrocutados; o Camaleão tem a cor da
+variante, cicla de cor ao se clonar e, invisível, só deixa ver o brilho do corpo; robôs,
+geradores e minas pulsam. Regras em `docs/superpowers/specs/2026-11-07-m12-cores-design.md`.
+
 **M11: personagens do computador.** Minotauros e Jakes sem jogador agem pela IA do original
-(veem a 400 px, caçam, recuam, vagam, socam ou atiram pela distância, pulam buracos, fogem de
-perigos, seguem o jogador de célula em célula), com o corpo do jogador: as balas do jogador os
-matam e os tiros deles o ferem. Regras em `docs/superpowers/specs/2026-11-07-m11-ia-personagens-design.md`.
+(veem a 400 px, caçam, recuam, vagam, golpeiam ou atiram, pulam buracos, fogem de perigos,
+seguem o jogador pelas células), com o corpo do jogador: ferem e são feridos. Regras em `docs/superpowers/specs/2026-11-07-m11-ia-personagens-design.md`.
 
 **M10: inimigos secundários e dificuldade.** Morte (aparece ao lado do jogador, irradia,
 atira, some), Camaleão (morde, fica invisível, se clona), Anticorpo e Manta (laços, mergulho,
@@ -64,15 +70,9 @@ embaixo; leva metade do dano, é imune a fogo e morre em 30 explosões. As morte
 jogador contam no resultado; os sons de cada um tocam pelos quadros (`SOUND.TBL`). Regras e
 simplificações em `docs/superpowers/specs/2026-11-06-m7a-inimigos-design.md`.
 
-**M6b: os demais movimentos do Jake** (`JAKE.SKE`): andar furtivo, pulos parado e para
-cima, aterrissagens, escalada de cordas, escadas e redes, portas de camada, esconder-se,
-agachar e engatinhar, barra no teto e o especial BAIXO+ATIRAR. **M6a: os objetos das missões
-tutoriais** (olho-laser, barril, fogo, cerca elétrica, grafite, peça do carro, teletransporte,
-portas `OH`, coletáveis): `T_J_003`, `T_J_005` e `T_J_007` podem ser vencidas de ponta a
-ponta.
-
-**M5: as telas em volta do jogo**: menu, briefing, partida com a barra de estado, pausa e
-resultado (uma fase aberta com `--level` fora da lista não grava recorde nem jogo).
+**M6b** os demais movimentos do Jake (furtivo, pulos, cordas, escadas, camadas, esconder,
+agachar, barra, especial); **M6a** os objetos dos tutoriais (`T_J_003/005/007` vencíveis);
+**M5** menu, briefing, barra, pausa e resultado.
 
 Etapas anteriores: M4 a `T_J_001` de ponta a ponta, com a pistola e o som posicional; M1
 formatos (`openhunted-formats` lê o CD, pasta ou `.iso`; [`docs/formats/`](docs/formats/README.md));
@@ -81,8 +81,8 @@ M2 visualizador; M3a o Jake corre e pula; M3b objetos sólidos e presença por m
 Ainda não há: o equilíbrio na beirada (162/163), os passos e
 demais sons por quadro do Jake e do cenário, o zumbido das minas, o logotipo, o título e a
 história da abertura (só o filme toca) e o laço de demonstração, a troca de teclas e o joystick,
-os modos de dois jogadores, tesouros e segredos, as cores do herói (o Garathe usa a paleta da
-fase). Os obstáculos `OPO` (gotas, bloco que cai, portão) ainda não agem.
+os modos de dois jogadores (e a cor escolhida para cada um), tesouros e segredos, a luz por
+região sobre os objetos. Os obstáculos `OPO` (gotas, bloco que cai, portão) ainda não agem.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
 reversa, em [`docs/re/`](docs/re/).

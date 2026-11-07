@@ -89,7 +89,7 @@ projéteis inimigos de `projeteis.md` e o dano de `dano-vida.md`.
 
 ## Simplificações declaradas
 
-- Sem cores pulsantes (`0x43becd`); o pulso do OSR só dispara o som 3157.
+- Cores pulsantes (`0x43becd`): feitas na M12 (`2026-11-07-m12-cores-design.md`).
 - O efeito do acerto da bala no OSR é a faísca comum (`oex15`), não `oex14`.
 - O estado do OHS na água/barril e o bit `0x100000` não são tratados.
 

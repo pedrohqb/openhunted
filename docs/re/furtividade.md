@@ -65,7 +65,7 @@ Entra pela mira (`tiro-jake.md`: BAIXO com `desc+0x0c ≠ 0` e vida > 25), estad
 O efeito:
 
 1. O próprio Jake: `+0x24c = 3` (dano pendente, consumido no tique), tipo `+0x252 |= 0` (comum), sem empurrão
-   (`+0x244 = +0x248 = 0`); `0x004081ae(jake, 0x27, 4)` [inferido: piscar].
+   (`+0x244 = +0x248 = 0`); `0x004081ae(jake, 0x27, 4)`: pisca na tabela de cor 0x27 (`cores-sprites.md`).
 2. Centro = centro da caixa do Jake (`0x004351b5`). Para cada objeto da lista `0x488e7c`
    (não o Jake, mesma camada, `+0x178 & 0x80003 = 0x80001`, presente no modo, vaga de
    jogador ocupada), mede a distância entre os centros (`0x00467328`): só age se for
@@ -104,6 +104,6 @@ proteção em `0x0043d629`].
 - Se algum inimigo reage à velocidade/ruído (andar × correr).
 - Quem são os tipos 25, 29, 99, 100, 106 e 108 (também destruídos pelo especial).
 - Os demais inimigos (fora o tipo 8) ignoram o esconderijo? Nenhum outro teste achado.
-- `0x004081ae` (efeito visual) e a variante do registro de cada soco.
+- A variante do registro de cada soco.
 - Ordem de desenho do escondido (`+0x1b4 = 0x28`): o OpenHunted ainda não tem campo de
   ordem de desenho e desenha o Jake sempre na mesma posição.

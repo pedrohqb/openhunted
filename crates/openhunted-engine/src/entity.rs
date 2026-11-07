@@ -246,14 +246,15 @@ impl Entity {
         self.alive
     }
 
-    /// Desenhado neste tique: vivo e não escondido pelos gatilhos (fogo, grafite).
+    /// Desenhado neste tique: vivo e não escondido pelos gatilhos (fogo, grafite). O
+    /// Camaleão invisível continua desenhado: o limiar da tabela de cor apaga o corpo
+    /// (`crate::tint::chameleon`).
     pub fn visible(&self) -> bool {
         self.alive
             && match &self.behaviour {
                 Behaviour::Fire(s) => s.visible,
                 Behaviour::Graffiti(s) => s.visible,
                 Behaviour::Death(s) => !s.hidden(),
-                Behaviour::Chameleon(s) => !s.faded(),
                 _ => true,
             }
     }

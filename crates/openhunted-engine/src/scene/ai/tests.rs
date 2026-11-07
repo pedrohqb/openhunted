@@ -213,3 +213,17 @@ fn ai_without_health_is_a_corpse_that_ignores_everything() {
     assert!(b.is_dead(), "vida 0 morre no primeiro tique");
     assert_eq!(s.entities.len(), 1, "nada criado");
 }
+
+#[test]
+fn ai_characters_draw_with_the_player_colour_tables() {
+    let j = ai_at(Character::Jake, 0, 100, &[(0, 0)], FISTS);
+    let g = ai_at(Character::Garathe, 0, 100, &[(0, 0)], 1);
+    assert_eq!(
+        crate::tint::entity(&j, 0, 0).map(|t| t.table),
+        Some(crate::tint::JAKE)
+    );
+    assert_eq!(
+        crate::tint::entity(&g, 0, 0).map(|t| t.table),
+        Some(crate::tint::GARATHE)
+    );
+}

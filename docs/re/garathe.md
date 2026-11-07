@@ -8,7 +8,7 @@ que muda. Convenção: **[confirmado]** lido no código ou nos dados; **[inferid
 ## Identidade e inicialização [confirmado]
 
 - Tipo de objeto **2** (`+0x18 = 2`; Jake = 1). Inicialização `0x004279b3` (par da tabela
-  de tipos em `0x47d490`); atualização `+0x1c0 = 0x00427b68`; desenho `+0x1c4 = 0x004282d3`;
+  de tipos em `0x47d490`); atualização `+0x1c0 = 0x00427b68`; desenho `+0x1c4 = 0x004282d3` (tabela de cor 36, `cores-sprites.md`);
   `+0x1cc = 0x00407796` (pisão, como o Jake); `+0x1c8 = 0`.
 - Nas fases: `MINOTAUR.ANM` (ou `minotaur.ANM`) e `MN_DEFLT.BRD`; escala sempre L/A = **39/58**
   (todos os objetos tipo 2 dos dumps). O quadro 0 tem 66 × 97, logo escala 58/97.
@@ -184,4 +184,3 @@ estados 54–56 (`furtividade.md`).
 - IA do Minotauro: ver [`minotauro-ia.md`](minotauro-ia.md).
 - Quanto a faca cravada devolve; geração final e fim do chicote 108.
 - `desc+0x08` (103, 113) e `+0x00` do registro do especial (8): não lidos.
-- Conferir no jogo o efeito visual de `0x4282d3` (`0x43becd`).

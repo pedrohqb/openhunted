@@ -98,6 +98,45 @@ impl Framebuffer {
         }
     }
 
+    /// Como `blit_scaled`, passando cada pixel pela tabela `map` (`0x481048`); é
+    /// transparente o pixel cujo valor **remapeado** é 0 (`0x44f641`).
+    pub fn blit_scaled_mapped(
+        &mut self,
+        frame: &Frame,
+        x: i32,
+        y: i32,
+        scale: (i32, i32),
+        mirror: bool,
+        map: &[u8; 256],
+    ) {
+        let (num, den) = if scale.0 > 0 && scale.1 > 0 {
+            (i64::from(scale.0), i64::from(scale.1))
+        } else {
+            (1, 1)
+        };
+        let (fw, fh) = (i64::from(frame.width), i64::from(frame.height));
+        if frame.pixels.len() < (fw * fh) as usize || fw == 0 || fh == 0 {
+            return;
+        }
+        let dw = (fw * num / den).clamp(1, 4096);
+        let dh = (fh * num / den).clamp(1, 4096);
+        let (x, y) = (i64::from(x), i64::from(y));
+        let (w, h) = (self.width as i64, self.height as i64);
+        for dy in y.max(0)..(y + dh).min(h) {
+            let sy = ((dy - y) * den / num).min(fh - 1);
+            for dx in x.max(0)..(x + dw).min(w) {
+                let mut sx = ((dx - x) * den / num).min(fw - 1);
+                if mirror {
+                    sx = fw - 1 - sx;
+                }
+                let p = map[usize::from(frame.pixels[(sy * fw + sx) as usize])];
+                if p != 0 {
+                    self.pixels[(dy * w + dx) as usize] = p;
+                }
+            }
+        }
+    }
+
     fn put(&mut self, x: i64, y: i64, color: u8) {
         if x >= 0 && y >= 0 && (x as usize) < self.width && (y as usize) < self.height {
             self.pixels[y as usize * self.width + x as usize] = color;
@@ -412,6 +451,36 @@ mod tests {
             (0, 0, (1000, 1)),
         ] {
             fb.blit_scaled(&g, x, y, sc, true, true);
+        }
+    }
+
+    #[test]
+    fn mapped_blit_remaps_and_skips_mapped_zero() {
+        // 7 → 0 (transparente depois do remapeamento), demais somam 100
+        let mut map: [u8; 256] = std::array::from_fn(|i| (i as u8).wrapping_add(100));
+        map[0] = 0;
+        map[7] = 0;
+        let mut fb = Framebuffer::new(4, 3);
+        fb.clear(9);
+        fb.blit_scaled_mapped(&sprite(), 1, 1, (1, 1), false, &map);
+        assert_eq!(fb.pixels, vec![9, 9, 9, 9, 9, 9, 105, 106, 9, 9, 9, 108]);
+        let mut fb = Framebuffer::new(3, 1);
+        let g = Frame {
+            width: 3,
+            height: 1,
+            pixels: vec![1, 0, 3],
+        };
+        fb.blit_scaled_mapped(&g, 0, 0, (1, 1), true, &map);
+        assert_eq!(fb.pixels, vec![103, 0, 101]);
+        let mut fb = Framebuffer::new(4, 1);
+        fb.blit_scaled_mapped(&g, 0, 0, (2, 1), false, &map);
+        assert_eq!(fb.pixels, vec![101, 101, 0, 0]);
+        for (x, y, sc) in [
+            (i32::MIN, 0, (1, 1)),
+            (0, i32::MAX, (3, 1)),
+            (-2, -1, (0, 1)),
+        ] {
+            fb.blit_scaled_mapped(&g, x, y, sc, true, &map);
         }
     }
 

@@ -19,6 +19,7 @@ pub mod rng;
 pub mod scene;
 pub mod shell;
 pub mod sound;
+pub mod tint;
 pub mod triggers;
 pub mod verdict;
 
