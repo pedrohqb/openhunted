@@ -671,3 +671,21 @@ fn listener_and_focus_per_player() {
     assert!((690..760).contains(&f.0), "{f:?}");
     assert_eq!(s.layer_of(1), Some(0));
 }
+
+/// Fogo amigo no coop (nenhum uso de `0x497304` no dano): a bala do 1 fere o 2; e o tempo
+/// esgotado é derrota.
+#[test]
+fn coop_friendly_fire_and_timer() {
+    let mut s = duo(Mode::Coop, (340, PISTOL), (400, PISTOL));
+    for _ in 0..8 {
+        s.tick_players([SHOOT, 0]);
+    }
+    assert!(
+        s.player_jake(1).unwrap().health.hp < 100,
+        "o 2 levou a bala"
+    );
+    s.time_limit = 1;
+    s.timer = 1;
+    run(&mut s, [0, 0], 40);
+    assert_eq!(s.outcome, Some(Outcome::Defeat));
+}

@@ -411,6 +411,23 @@ mod tests {
         assert_eq!(player(true, &f), Tint::new(36, 0));
     }
 
+    /// Cor da disputa (`+0x280`): a base é desenhada; o piscar na própria cor troca 37 → 35.
+    #[test]
+    fn deathmatch_colour_is_the_base_and_swaps_on_flash() {
+        let mut f = Flash::default();
+        assert_eq!(player_coloured(false, 37, &f), Tint::new(37, 0));
+        assert_eq!(
+            player_coloured(true, 0, &f),
+            Tint::new(36, 0),
+            "0 = a padrão"
+        );
+        f.start((37, 4), 37);
+        f.tick(false);
+        f.tick(false);
+        f.tick(false);
+        assert_eq!(player_coloured(false, 37, &f), Tint::new(35, 0));
+    }
+
     #[test]
     fn chameleon_color_clone_cycle_and_fade() {
         let mut s = ChameleonState::new(2);

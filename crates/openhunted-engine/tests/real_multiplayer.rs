@@ -114,6 +114,38 @@ fn every_deathmatch_level_builds_in_all_pairings() {
     }
 }
 
+/// Cada ponto de renascimento de cada `M_*` (`fields[14] & 4`): o Jake e o Garathe que
+/// renascem ali assentam fora do cenário e dentro da fase.
+#[test]
+fn every_spawn_point_is_clear() {
+    let Some(gd) = data() else { return };
+    for name in names(&gd, "M_") {
+        let l = level(&gd, &name);
+        for chars in [PAIRS[0], PAIRS[2]] {
+            let mut a = Assets::new(gd.resources().unwrap());
+            let s0 = Scene::build_with(&l, &mut a, duel(chars)).unwrap();
+            for (k, &(x, y, layer)) in s0.spawn_points.iter().enumerate() {
+                let mut s = s0.clone();
+                s.player_jake_mut(1)
+                    .unwrap()
+                    .respawn_at(Some((x, y)), layer);
+                s.place_player(
+                    1,
+                    {
+                        let j = s.player_jake(1).unwrap();
+                        (j.body.x, j.body.y)
+                    },
+                    layer,
+                );
+                for t in 0..20 {
+                    s.tick_players([0, 0]);
+                    check_player(&s, &format!("{name} ponto {k}"), 1, t);
+                }
+            }
+        }
+    }
+}
+
 /// Toda `C_*` monta no cooperativo com os dois jogadores das vagas: Jake e Garathe nas `C_2`,
 /// dois Jakes nas `C_J`, dois Garathes nas `C_M`.
 #[test]
