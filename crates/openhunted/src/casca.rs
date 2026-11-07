@@ -772,7 +772,6 @@ impl App {
         let i = self.index.unwrap_or(0) as i32;
         SaveGame {
             name: self.m9.player.clone(),
-            list_len: self.missions.len() as i32,
             solo_count: self.missions.len() as i32,
             current: i,
             last_loaded: i,
@@ -1080,7 +1079,9 @@ mod tests {
         assert_eq!(a.save_path(), Some(path.as_path()));
         let saved = read_save(&path).unwrap();
         assert_eq!(saved, a.save_game(&path), "gravado e relido igual");
-        assert_eq!(&saved.to_bytes()[0x7a0..0x7a8], &[0; 8]);
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[0xa0..0xa4], &[0; 4], "o original remonta a lista");
+        assert_eq!(&bytes[0x7a0..0x7a8], &[0; 8]);
         assert_eq!(saved.records[0], a.records[0]);
         assert!(saved.hero_id > 0);
         // carregar noutra sessão: a T_J_001 já tem recorde → a próxima sem recorde

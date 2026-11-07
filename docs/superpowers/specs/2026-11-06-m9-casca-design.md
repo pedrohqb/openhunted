@@ -63,8 +63,10 @@ começa em LOAD). SINGLE PLAYER fica marcado. Retrato 22010: rótulo 17 (Jake) o
 - `.hhg` (formato em `openhunted-formats::save`): bloco de 1 960 bytes; lê se o tamanho é
   1 960 e começa pela assinatura; grava nome, missão corrente, última carregada, pontuação
   acumulada, id de herói, peças, caminho, fase (`HUNTER.HLS|arquivo`), recordes `i32[300]`.
-  Ruling: `0x0a0` recebe o tamanho da lista solo, `0x0a8` 0, e os campos efêmeros/ponteiro
-  `0x7a0`/`0x7a4` são **sempre zero** (o original gravava um ponteiro).
+  Ruling: `0x0a0` (tamanho da lista), `0x0a8` e o ponteiro/capacidade da lista
+  `0x7a0`/`0x7a4` são **sempre zero** (o original gravava o ponteiro; um tamanho ≠ 0 com o
+  ponteiro nulo faria o NEXT do original, `0x440e95` → `0x440f25`, ler `[0x47ff3c]` sem
+  remontar a lista em `0x4406d3`); a leitura os ignora.
 - Ruling: pasta `$XDG_DATA_HOME/openhunted/saves/` (padrão `~/.local/share/...`); o nome
   vem do `SHIGH` (título 10042 "Save Game As:"), limpo para letras, dígitos, espaço, `-` e
   `_` (até 32), com `.hhg`. Primeira gravação da campanha pergunta; depois grava direto no
