@@ -40,8 +40,14 @@ projéteis inimigos de `projeteis.md` e o dano de `dano-vida.md`.
 
 - Ruling: dificuldade normal (`0x487854 = 1`): nenhum dano é dobrado nem dividido.
 - Ruling: as distâncias `|dx|`/`|dy|` da percepção usam os centros das caixas (o original usa
-  `+0x150` no `|dy|` da sentinela e da mina saltadora; os centros dão o mesmo efeito sem
-  depender do quadro de referência).
+  `+0x150`, o y do quadro de referência, no `|dy|` da sentinela e da mina saltadora). Não é
+  o mesmo número: o centro fica meia altura abaixo de `+0x150`, o que desloca a janela de
+  50 px de `|dy|` para baixo; a diferença é aceita para não depender do quadro.
+- Ruling (revisão): cada objeto que não é o Jake anda contra as células da própria camada
+  (um mundo por camada, refeito com as portas de célula; `Ctx::cells_for`); a linha de visão
+  segue no mundo do Jake, salvo o OSR seguindo a última posição vista em outra camada.
+- Ruling: o "pode andar" do Bruiser (`0x417836`) já é o do original: passo de 17 px livre e,
+  na posição à frente, a caixa inteira cai até 15 px (`0x41817d`); não há sonda mais estreita.
 - Ruling: a linha de visão amostra 16 pontos do segmento entre os centros no mundo do Jake,
   ignorando os pontos dentro das caixas de quem olha e do alvo.
 - Ruling: o OSR flutua sem gravidade (como a mina, `minas.md`); a gravidade só age na queda
@@ -56,17 +62,26 @@ projéteis inimigos de `projeteis.md` e o dano de `dano-vida.md`.
 - Ruling: as bocas do OSR e do Bruiser estão em px da fase (sem escala); a do OSR espelha
   pela caixa (`x' = 2·caixa.x + caixa.l − x`).
 - Ruling: raios não ferem o OSR (como o olho-laser não se fere com os próprios).
-- Ruling: projéteis inimigos voam retos (o foguete 21 também; `0x40d678` não lido) e só
-  atingem o Jake e o cenário; não ferem outros objetos.
+- Ruling: projéteis inimigos voam retos (o foguete 21 também; `0x40d678` não lido) e
+  atingem o Jake, o cenário e os objetos sólidos da camada (portas, barris…), que levam a
+  linha `(tipo, vítima)` do `DAMAGE.TBL` (`(106, 28)`: 5, natureza 2, o barril detona; o
+  efeito `oex14` dessa linha vira o impacto comum). Não param nos inimigos da M7a nem os
+  ferem (nascem dentro das caixas de quem atira).
 - Ruling: o terremoto do Bruiser vira o choque sem dano do Jake (estado 15, o mesmo do
   cambaleio), renovado enquanto o contador durar e ele estiver no chão.
+- Ruling (revisão): o terremoto só sai com alvo (`0x418229` testa `+0x280`), nos quadros de
+  QUAKE e de TURN sem olhar a capacidade 3; o 3131 é sem posição e, como a cena não sabe o
+  que o mixer toca, não se repete antes de 43 tiques (a duração do `SX_3131.WAV`).
 - Ruling: o fogo do Bruiser nasce com a altura sorteada 25–49 e míngua 1 a cada 2 tiques.
 - Ruling: o Bruiser fala uma frase por vez (sem as encadeadas), com 60 tiques de silêncio.
 - Ruling: a tabela de passos do rótulo 3 do Bruiser só tem os 10 valores lidos; o resto é 0.
 - Ruling: o OHS morre ao tocar o Jake (caixas a 1 px) ou ao levar qualquer dano de bala; o
   contato com outros objetos não é testado.
-- Ruling: o crédito de morte vai ao jogador quando o golpe que mata vem de uma bala ou do
-  especial dele; explosões não creditam.
+- Ruling (revista na revisão): no solo, toda morte de um tipo contado (3, 4, 7, 8, 10, 11,
+  89, 102–105, 109; `fim-de-missao.md`) conta para o jogador, qualquer que seja a causa; as
+  minas de gerador nunca contam; o total é o número de objetos desses tipos na montagem (o
+  original recontaria no fim as minas de gerador ainda vivas; aqui não entram). A cena
+  recalcula os mortos a cada tique (`enemy::kills`); só os tipos portados podem morrer.
 - Ruling: a explosão de morte do OHG e do OSE não deixa o objeto como destroço sólido; o OSR,
   o OSE e o OBR deixam o destroço desenhado e sem colisão.
 - Ruling: o especial BAIXO+ATIRAR fere esses inimigos pela linha `(1, 0, 9)` (M6b) e, se

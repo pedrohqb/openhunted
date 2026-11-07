@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! OpenHunted: o jogo Hunter Hunted numa janela SDL3: menu principal, briefing, a partida
-//! com a barra de estado e a tela de resultado.
+//! OpenHunted: o jogo Hunter Hunted numa janela SDL3: abertura, menu principal e as telas
+//! dele, briefing, a partida com a barra de estado, a tela de resultado, jogo salvo, música
+//! e filmes (estes pelo `ffmpeg`, se houver).
 //!
-//! Uso: `openhunted --data <CD, pasta Hunter/ ou .iso> [--level T_J_001.LEV] [--frames N]`
+//! Uso: `openhunted --data <CD, pasta Hunter/ ou .iso> [--level T_J_001.LEV] [--frames N]
+//! [--no-intro]`
 //! Nas telas: mouse, setas (levam o ponteiro aos botões), Enter/espaço clicam, Esc cancela
 //! (no menu, sai). No jogo: setas movem o Jake, espaço pula, Ctrl atira (segurando,
 //! rajadas; com as setas, mira para cima e nas diagonais), Z dá soco, X anda furtivo,
@@ -13,6 +15,12 @@
 //! objetos de lógica.
 
 mod audio;
+#[allow(dead_code)]
+mod music;
+#[allow(dead_code)]
+mod storage;
+#[allow(dead_code)]
+mod video;
 // partes da API usadas só pelos testes e pelo exemplo `shots`
 #[allow(dead_code)]
 mod shell;
@@ -36,17 +44,20 @@ struct Args {
     data: PathBuf,
     level: Option<String>,
     frames: Option<u64>,
+    intro: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut data = std::env::var_os("OPENHUNTED_DATA").map(PathBuf::from);
     let mut level = None;
     let mut frames = None;
+    let mut intro = true;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--data" => data = it.next().map(PathBuf::from),
             "--level" => level = Some(it.next().ok_or("--level sem valor")?),
+            "--no-intro" => intro = false,
             "--frames" => {
                 frames = Some(
                     it.next()
@@ -56,7 +67,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "-h" | "--help" => {
                 return Err(
-                    "uso: openhunted --data <CD|Hunter/|.iso> [--level ARQ.LEV] [--frames N]"
+                    "uso: openhunted --data <CD|Hunter/|.iso> [--level ARQ.LEV] [--frames N] [--no-intro]"
                         .into(),
                 );
             }
@@ -64,10 +75,12 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     let data = data.ok_or("informe --data (raiz do CD, pasta Hunter/ ou imagem .iso)")?;
+    let intro = intro && level.is_none();
     Ok(Args {
         data,
         level,
         frames,
+        intro,
     })
 }
 
@@ -98,6 +111,7 @@ fn key(k: Keycode) -> Key {
         Keycode::PageDown => Key::PageDown,
         Keycode::Home => Key::Home,
         Keycode::End => Key::End,
+        Keycode::Backspace => Key::Backspace,
         _ => Key::Other,
     }
 }
@@ -106,11 +120,35 @@ fn run() -> Result<(), String> {
     let args = parse_args()?;
     let mut app = App::load(&args.data, args.level.as_deref()).map_err(|e| e.to_string())?;
 
+    // opções, heróis e jogos salvos nas pastas do usuário (XDG)
+    if let Some(st) = storage::Storage::from_env() {
+        app.set_storage(st);
+    }
+    // filmes pelo `ffmpeg`, se houver (senão, são pulados)
+    if video::ffmpeg_available() {
+        if let Ok(gd) = openhunted_formats::open_data(&args.data) {
+            app.set_movies(Box::new(move |name| {
+                video::open_ffmpeg(gd.read_movie(name).ok()?)
+            }));
+        }
+    }
     let sdl = sdl3::init().map_err(|e| e.to_string())?;
-    // Som: sem dispositivo de áudio, avisa uma vez e segue mudo.
+    // Som: sem dispositivo de áudio, avisa uma vez e segue mudo. A música tem saída própria.
     match audio::SdlOut::open(&sdl) {
-        Ok(out) => app.set_sound(audio::Sfx::new(Box::new(out))),
+        Ok(out) => {
+            app.set_sound_with_volume(audio::Sfx::new(Box::new(out)));
+            if let Ok(m) = audio::SdlOut::open(&sdl) {
+                let dir = std::env::var_os("OPENHUNTED_MUSIC")
+                    .map(PathBuf::from)
+                    .or_else(|| app.config().music_dir.clone().map(PathBuf::from));
+                let tracks = dir.map(|d| music::list_tracks(&d)).unwrap_or_default();
+                app.set_music(Box::new(m), tracks);
+            }
+        }
         Err(e) => eprintln!("aviso: sem áudio ({e}); o jogo segue sem som"),
+    }
+    if args.intro {
+        app.play_intro();
     }
     let video = sdl.video().map_err(|e| e.to_string())?;
     let window = video
@@ -136,6 +174,8 @@ fn run() -> Result<(), String> {
     let mut last = Instant::now();
     let mut frame: u64 = 0;
     let mut shown = String::new();
+    let text = video.text_input();
+    let mut typing = false;
 
     'main: loop {
         for ev in events.poll_iter() {
@@ -147,6 +187,7 @@ fn run() -> Result<(), String> {
                     ..
                 } => app.focus_lost(),
                 Event::KeyUp { .. } => app.key_up(),
+                Event::TextInput { text, .. } => app.text_input(&text),
                 Event::KeyDown {
                     keycode: Some(k),
                     repeat: false,
@@ -178,6 +219,15 @@ fn run() -> Result<(), String> {
         }
         if app.quit_requested() {
             break;
+        }
+        // entrada de texto só com o campo de edição aberto (`SHIGH`)
+        if app.wants_text() != typing {
+            typing = !typing;
+            if typing {
+                text.start(canvas.window());
+            } else {
+                text.stop(canvas.window());
+            }
         }
         let keys = events.keyboard_state();
         let held = |sc: &[Scancode]| sc.iter().any(|&s| keys.is_scancode_pressed(s));

@@ -81,6 +81,13 @@ impl GameData {
         self.source.read(&format!("{}{file}", self.prefix))
     }
 
+    /// Lê um filme da pasta `Movies` do CD (`"%s\..\Movies\%s"` a partir do `CDPath`,
+    /// `docs/re/videos-musica.md`): ao lado da pasta do jogo, ou dentro dela quando os dados
+    /// apontam direto para a pasta `Hunter/`.
+    pub fn read_movie(&self, name: &str) -> Result<Vec<u8>> {
+        self.source.read(&format!("MOVIES/{name}"))
+    }
+
     /// Carrega o arquivo de recursos (`RESOURCE.MAP` e volumes).
     pub fn resources(&self) -> Result<ResourceArchive> {
         let map = self.read("RESOURCE.MAP")?;

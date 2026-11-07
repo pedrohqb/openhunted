@@ -4,11 +4,18 @@
 //! `pausa.md`, `fim-de-missao.md`).
 
 pub mod briefing;
+pub mod config;
+pub mod credits;
 pub mod generic;
+pub mod heroes;
 pub mod hud;
+pub mod levels;
+pub mod options;
+pub mod page;
 pub mod results;
 pub mod screen;
 
+pub use page::{Page, Reply};
 pub use screen::{CANCEL, Dir, Input, Placement, Screen};
 
 use openhunted_formats::MissionInfo;

@@ -86,8 +86,11 @@ pub struct Ctx<'a> {
     pub jake: Option<&'a Jake>,
     pub jake_layer: i32,
     pub world: &'a World,
-    /// Só as caixas das células (para quem se move sem ser o Jake).
+    /// Só as caixas das células da camada do Jake.
     pub cells: &'a World,
+    /// Só as caixas das células de cada camada (índice = camada), para quem se move sem ser
+    /// o Jake: cada objeto anda contra as células da própria camada (`cells_for`).
+    pub layer_cells: &'a [World],
     /// Estado "ligado" de um id de gatilho antes do tique (`None` = id inexistente).
     pub on: &'a dyn Fn(i32) -> Option<bool>,
     pub rng: &'a mut Rng,
@@ -98,6 +101,17 @@ pub struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
+    /// Células da camada `layer` (a do Jake é `cells`; camada sem mundo próprio também).
+    pub fn cells_for(&self, layer: i32) -> &World {
+        if layer == self.jake_layer {
+            return self.cells;
+        }
+        usize::try_from(layer)
+            .ok()
+            .and_then(|l| self.layer_cells.get(l))
+            .unwrap_or(self.cells)
+    }
+
     /// Caixa do Jake, se ele está vivo e em jogo.
     pub fn jake_bounds(&self) -> Option<Rect> {
         self.jake.filter(|j| j.is_active()).map(|j| j.body.bounds())
@@ -125,8 +139,6 @@ pub struct Out {
     pub teleport: Option<teleporter::Request>,
     /// Inventário do Jake depois de apanhar armas e munição neste tique.
     pub inventory: Option<crate::jake::Inventory>,
-    /// Inimigos mortos por balas do jogador neste tique (`0x497348`).
-    pub kills: i32,
     /// Objetos que os inimigos pedem (tiros, minas, fogo): a cena os cria com os recursos.
     pub enemy_spawns: Vec<enemy::Spawn>,
     /// Terremoto do Bruiser (`0x418229`): tiques de cambaleio para o Jake, se perto.
@@ -287,10 +299,37 @@ pub(crate) mod test_support {
             jake_layer: 0,
             world: w,
             cells: w,
+            layer_cells: &[],
             on,
             rng,
             hints: &[],
             level: (10_000, 10_000),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{ctx, ctx_with_jake};
+    use super::*;
+
+    #[test]
+    fn cells_for_picks_the_layer_world() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(0, 0);
+        let layers = [
+            World::default(),
+            World::new(vec![Rect {
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+            }]),
+        ];
+        let mut c = ctx(&j, &w, &on);
+        c.layer_cells = &layers;
+        assert!(std::ptr::eq(c.cells_for(0), &w), "a do Jake é `cells`");
+        assert!(std::ptr::eq(c.cells_for(1), &layers[1]));
+        assert!(std::ptr::eq(c.cells_for(7), &w), "camada sem mundo");
     }
 }

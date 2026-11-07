@@ -144,7 +144,10 @@ impl MineGeneratorState {
 }
 
 /// Antes do tique: cada gerador ganha a sua marca e conta as minas vivas dela
-/// (`0x41e62d` esquece as vagas cujas minas morreram).
+/// (`0x41e62d` esquece as vagas cujas minas morreram). A marca é o índice + 1 na lista de
+/// entidades: vale porque a cena só acrescenta entidades no fim e nunca as remove nem
+/// reordena (as mortas ficam com `alive = false`); se isso mudar, a marca tem de virar um id
+/// estável guardado no gerador.
 pub fn sync(entities: &mut [Entity]) {
     let owners: Vec<u32> = entities
         .iter()
@@ -224,9 +227,6 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 push: BLAST_PUSH,
                 damage: BLAST_DAMAGE,
             });
-            if w.by_player {
-                out.kills += 1;
-            }
             e.alive = false;
             e.on = true;
             return;
@@ -358,7 +358,8 @@ mod tests {
         enemy::hurt(&mut g, &p, true);
         tick(&mut g, &mut c, &mut out);
         assert!(!g.alive);
-        assert_eq!((out.kills, out.blasts.len()), (1, 1));
+        assert!(enemy::killed(&g));
+        assert_eq!(out.blasts.len(), 1);
         assert_eq!(out.blasts[0].radius, BLAST_RADIUS);
     }
 

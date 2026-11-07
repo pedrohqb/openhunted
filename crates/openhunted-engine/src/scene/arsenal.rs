@@ -217,14 +217,10 @@ impl Scene {
         };
         self.entities[i].alive = false;
         if let Some(vi) = victim.filter(|_| !direct.is_empty()) {
+            // as mortes contam pela cena (`enemy::kills`), qualquer que seja a causa
             let v = &mut self.entities[vi];
-            let mine_alive = matches!(v.behaviour, Behaviour::Mine(_)) && v.health > 0;
-            // os inimigos da M7a creditam o jogador na própria morte (`enemy::hurt`)
-            let hit =
+            let _ =
                 behaviour::enemy::hurt(v, &direct, true) || behaviour::interact::hurt(v, &direct);
-            if hit && mine_alive && v.health <= 0 {
-                self.kills += 1;
-            }
         }
         match blast {
             Some((radius, push, damage)) => out.blasts.push(Blast {
@@ -276,11 +272,7 @@ impl Scene {
             {
                 continue;
             }
-            let mine_alive = matches!(e.behaviour, Behaviour::Mine(_)) && e.health > 0;
             if behaviour::enemy::hurt(e, &p, true) || behaviour::interact::hurt(e, &p) {
-                if mine_alive && e.health <= 0 {
-                    self.kills += 1;
-                }
                 self.events.push(Event::Sound(Cue::at(
                     SOUND_PUNCH,
                     PRIORITY_FRAME,
