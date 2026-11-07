@@ -563,10 +563,11 @@ impl App {
                     // com a dica aberta, a tecla só a fecha (não vira pulo nem CIMA)
                     Key::Space if v.modal().is_none() => v.tap(JUMP),
                     Key::Up if v.modal().is_none() => v.tap(UP),
-                    Key::PageUp => v.apply(Action::PageLeft),
-                    Key::PageDown => v.apply(Action::PageRight),
-                    Key::Home => v.apply(Action::Home),
-                    Key::End => v.apply(Action::End),
+                    // com o Jake, PageUp/PageDown trocam de arma (`set_held`): a câmera o segue
+                    Key::PageUp if !v.has_jake() => v.apply(Action::PageLeft),
+                    Key::PageDown if !v.has_jake() => v.apply(Action::PageRight),
+                    Key::Home if !v.has_jake() => v.apply(Action::Home),
+                    Key::End if !v.has_jake() => v.apply(Action::End),
                     // Esc com o Jake: nada (como o original)
                     _ => {}
                 }
@@ -980,6 +981,23 @@ mod tests {
         assert_eq!(a.mode(), Mode::Play);
         a.key_down(Key::Escape);
         assert_eq!(a.mode(), Mode::Play, "com personagem, Esc não faz nada");
+    }
+
+    #[test]
+    fn page_keys_do_not_scroll_the_camera_with_jake() {
+        let Some(mut a) = app() else { return };
+        enter(&mut a);
+        enter(&mut a); // GO
+        assert_eq!(a.mode(), Mode::Play);
+        let cam = a.viewer.as_ref().unwrap().camera();
+        for k in [Key::PageDown, Key::PageUp, Key::End, Key::Home] {
+            a.key_down(k);
+            assert_eq!(
+                a.viewer.as_ref().unwrap().camera(),
+                cam,
+                "{k:?} com o Jake troca de arma, não rola a tela"
+            );
+        }
     }
 
     #[test]

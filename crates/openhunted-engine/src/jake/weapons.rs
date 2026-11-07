@@ -206,11 +206,32 @@ pub const PISTOL_W: Weapon = Weapon {
     step: 1,
     shot: Some(ShotKind::Bullet),
     casing: Some(ShotKind::Casing),
+    // cápsula por mira: registros `0x47d9b4` (56), `0x47d9fc` (54), `0x47da44` (23),
+    // `0x47da8c` (55)
     states: [
-        pair(56, gun(P_BASE, (9, 12), -35, (0, -20))),
-        pair(54, gun(P_BASE, (-16, 24), -23, (20, -20))),
+        pair(
+            56,
+            shell(gun(P_BASE, (9, 12), -35, (0, -20)), (9, 12), -10, (-10, 0)),
+        ),
+        pair(
+            54,
+            shell(
+                gun(P_BASE, (-16, 24), -23, (20, -20)),
+                (40, -30),
+                0,
+                (-10, -10),
+            ),
+        ),
         pair(23, gun(P_BASE, (-25, 25), 2, (20, 0))),
-        pair(55, gun(P_BASE, (-23, 27), 33, (20, 20))),
+        pair(
+            55,
+            shell(
+                gun(P_BASE, (-23, 27), 33, (20, 20)),
+                (-7, 25),
+                20,
+                (10, -10),
+            ),
+        ),
     ],
     spread: true,
     sound: Some(3040),
@@ -554,4 +575,20 @@ pub fn labels_of(ch: Character) -> Vec<u16> {
     v.sort_unstable();
     v.dedup();
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Cápsulas da pistola por mira, dos registros `0x47d9b4…0x47da8c` (`+0x34..+0x44`).
+    #[test]
+    fn pistol_casing_follows_each_aim_register() {
+        let c = |i: usize| PISTOL_W.states[i][0].1.casing.unwrap();
+        let reg = |dx, dy, v| CasingReg { dx, dy, v };
+        assert_eq!(c(0), reg((9, 12), -10, (-10, 0)), "cima");
+        assert_eq!(c(1), reg((40, -30), 0, (-10, -10)), "diagonal para cima");
+        assert_eq!(c(2), reg((22, -4), 0, (-10, -10)), "frente");
+        assert_eq!(c(3), reg((-7, 25), 20, (10, -10)), "diagonal para baixo");
+    }
 }

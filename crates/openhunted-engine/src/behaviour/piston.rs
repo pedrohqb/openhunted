@@ -106,6 +106,92 @@ mod tests {
     use super::*;
     use crate::behaviour::test_support::{ctx, ctx_with_jake, logic};
 
+    /// Pistão em (0, 0) com 10 quadros no rótulo 1, cada um 10 px mais alto (desce).
+    fn piston_with_frames(wait: i32) -> Entity {
+        use std::rc::Rc;
+        let frame = |h| openhunted_formats::AnimFrame {
+            x: 0,
+            y: 0,
+            width: 30,
+            height: h,
+            script_offset: 0,
+            extra: 0,
+        };
+        let anim = Rc::new(openhunted_formats::Animation {
+            version: 1004,
+            width: 30,
+            height: 100,
+            extra: [0; 3],
+            table_a: vec![],
+            frames: (1..=10).map(|k| frame(10 * k)).collect(),
+            labels: vec![openhunted_formats::AnimLabel {
+                frame: 0,
+                id: LABEL,
+                name: None,
+            }],
+            script: vec![],
+            bitmaps: vec![],
+            palette: None,
+        });
+        let mut p = logic(crate::entity::PISTON, 0, 0, &[wait]);
+        p.sprite = Some(crate::Sprite {
+            layer: crate::Layer::Object,
+            player: crate::AnimPlayer::from_frame(&anim, 0),
+            anim,
+            x: 0,
+            y: 0,
+            frozen: true,
+            scale: (1, 1),
+            mirror: false,
+        });
+        p.triggers = vec![(7, Some(11))];
+        p.behaviour = Behaviour::Piston(PistonState::default());
+        p
+    }
+
+    /// Com o gatilho, anda os 10 quadros (sons 3058/3057 no começo do curso), espera
+    /// `values[0]` no fim e volta; andando, esmaga o Jake sob a caixa do quadro: 35,
+    /// derrubada, empurrão (48·sentido, −3). Longe, nada.
+    #[test]
+    fn piston_moves_waits_returns_and_crushes() {
+        let on = |_: i32| Some(true);
+        // Jake longe: o curso inteiro
+        let (j, w) = ctx_with_jake(5000, 0);
+        let mut p = piston_with_frames(3);
+        let mut frames = vec![];
+        let mut sounds = vec![];
+        for _ in 0..16 {
+            let mut out = Out::default();
+            tick(&mut p, &ctx(&j, &w, &on), &mut out);
+            assert!(out.jake_damage.is_empty());
+            sounds.extend(out.events.iter().filter_map(|e| e.sound_id()));
+            let Behaviour::Piston(st) = &p.behaviour else {
+                panic!()
+            };
+            frames.push(st.frame);
+        }
+        assert_eq!(
+            frames,
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 9, 8, 7, 6, 5],
+            "anda, espera 3 e volta"
+        );
+        // na volta o curso começa no quadro 8 (o 9 é o extremo): só o 3057
+        assert_eq!(sounds, vec![SOUND_A, SOUND_B, SOUND_B]);
+        // Jake sob o pistão (topo em y = 60): o quadro 6 (70 px + 2) o alcança
+        let (j, w) = ctx_with_jake(5, 57);
+        let mut p = piston_with_frames(3);
+        let mut hit = None;
+        for _ in 0..9 {
+            let mut out = Out::default();
+            tick(&mut p, &ctx(&j, &w, &on), &mut out);
+            if !out.jake_damage.is_empty() && hit.is_none() {
+                hit = Some(out.jake_damage);
+            }
+        }
+        let d = hit.expect("esmagou");
+        assert_eq!((d.amount, d.knockdown, d.push), (DAMAGE, true, (48, -3)));
+    }
+
     #[test]
     fn piston_needs_an_armed_trigger_and_waits_at_the_ends() {
         let (j, w) = ctx_with_jake(5000, 0);
