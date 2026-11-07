@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Os inimigos da M7a (tipos 7, 8, 10, 11 e 103) sobre os dados reais (OPENHUNTED_DATA):
-//! animações, percepção e ataques nas fases da campanha e um fuzz sem pânico.
+//! animações, percepção e ataques nas fases da campanha e um fuzz com invariantes.
 
 use openhunted_engine::behaviour::{
     bruiser, enemy, hop_mine, mine_generator, security_robot, sentinel,
@@ -202,8 +202,8 @@ fn generator_releases_mines_in_i_j_005() {
     );
 }
 
-/// I_J_002: diante de um robô de segurança (a ~130 px), ele vira e atira raios; escondido
-/// (CIMA contra a parede), um robô sem alvo não o vê.
+/// I_J_002: diante de um robô de segurança (a ~130 px), o Jake escondido (CIMA, 164–166) não
+/// é adquirido por 150 tiques; ao sair do esconderijo, o robô vira e atira raios.
 #[test]
 fn security_robot_shoots_at_jake() {
     let Some(mut s) = load("I_J_002.LEV") else {
@@ -216,6 +216,30 @@ fn security_robot_shoots_at_jake() {
         .unwrap();
     only(&mut s, i);
     stand_near(&mut s, i, 120);
+    let bolt = |s: &Scene| {
+        s.entities
+            .iter()
+            .any(|e| e.alive && matches!(e.behaviour, Behaviour::Laser(_)))
+    };
+    // escondido (CIMA parado, 164–166) diante do robô: não é adquirido nem leva tiros (o
+    // robô fica fora de jogo enquanto o Jake se esconde)
+    s.entities[i].alive = false;
+    for _ in 0..10 {
+        s.tick(UP);
+    }
+    s.entities[i].alive = true;
+    for t in 0..150 {
+        s.tick(UP);
+        let j = s.jake.as_ref().unwrap();
+        assert!(j.is_hidden(), "tique {t}: estado {:?}", j.state());
+        let Behaviour::SecurityRobot(r) = &s.entities[i].behaviour else {
+            panic!()
+        };
+        assert!(
+            !r.target && !bolt(&s),
+            "tique {t}: o robô viu o Jake escondido"
+        );
+    }
     let mut fired = false;
     for _ in 0..150 {
         s.tick(0);
@@ -228,6 +252,76 @@ fn security_robot_shoots_at_jake() {
         }
     }
     assert!(fired, "o robô não atirou");
+}
+
+/// H_J_013: o Bruiser 76 dorme até o alvo 14 do gatilho ligar; acordado, ataca o Jake na
+/// camada dele; a bala da pistola (2, metade no Bruiser) tira 1 por acerto: com 100 de vida
+/// morre no 100º e solta 30 explosões, e a morte conta.
+#[test]
+fn bruiser_wakes_attacks_and_dies_by_pistol() {
+    let Some(mut s) = load("H_J_013.LEV") else {
+        return;
+    };
+    let i = s
+        .entities
+        .iter()
+        .position(|e| e.kind == 7 && (e.x, e.y) == (1167, 415))
+        .unwrap();
+    assert_eq!(s.entities[i].triggers[0], (14, Some(11)));
+    only(&mut s, i);
+    let sw = s
+        .entities
+        .iter()
+        .position(|e| e.alive && e.id == 14)
+        .unwrap();
+    s.entities[sw].on = false;
+    stand_near(&mut s, i, 150);
+    let awake = |s: &Scene| matches!(&s.entities[i].behaviour, Behaviour::Bruiser(b) if b.awake);
+    for _ in 0..40 {
+        s.tick(0);
+        s.entities[sw].on = false;
+    }
+    assert!(!awake(&s), "acordou sem o gatilho");
+    s.entities[sw].on = true;
+    let hp = s.jake.as_ref().unwrap().health.hp;
+    let n0 = s.entities.len();
+    let mut attacked = false;
+    for _ in 0..300 {
+        s.tick(0);
+        attacked |= s.entities[n0..]
+            .iter()
+            .any(|e| e.alive && matches!(e.kind, 21 | 42 | 100))
+            || s.jake.as_ref().unwrap().health.hp < hp;
+        if attacked {
+            break;
+        }
+    }
+    assert!(awake(&s), "não acordou com o gatilho");
+    assert!(attacked, "não atacou o Jake");
+    // o Jake sai de cena (outra camada, longe); 100 acertos da pistola
+    let other = s.entities[i].layer + 1;
+    place_jake(&mut s, 0, 0, other);
+    let kills = s.kills;
+    let pistol = openhunted_engine::damage::Pending {
+        amount: openhunted_engine::behaviour::bullet::DAMAGE,
+        ..Default::default()
+    };
+    let dying = |s: &Scene| matches!(&s.entities[i].behaviour, Behaviour::Bruiser(b) if b.state == bruiser::DIE || b.dead);
+    let mut hits = 0;
+    while !dying(&s) {
+        assert!(hits < 200, "não morreu");
+        enemy::hurt(&mut s.entities[i], &pistol, true);
+        hits += 1;
+        s.tick(0);
+    }
+    assert_eq!(hits, 100);
+    let before = s.entities.len();
+    for _ in 0..40 {
+        s.tick(0);
+    }
+    let blasts = s.entities[before..].iter().filter(|e| e.kind == 86).count();
+    assert_eq!(blasts, bruiser::DEATH_BLASTS);
+    assert_eq!(s.kills, kills + 1);
 }
 
 /// T_J_007: o Bruiser (camada diferente da do Jake) fica no chão dele por 300 tiques, com o

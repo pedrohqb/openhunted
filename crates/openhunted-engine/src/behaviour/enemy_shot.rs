@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Projéteis dos inimigos (`docs/re/projeteis.md`): bala da Morte (99), bala do Bruiser
 //! (100), bala da sentinela (106, `0x40caf6`) e o foguete inimigo (21). Voam retos sem
-//! gravidade (`0x40c964`), param na parede e ferem o Jake pela linha do `DAMAGE.TBL`.
+//! gravidade (`0x40c964`), param na parede e nos objetos sólidos e ferem o Jake pela linha do
+//! `DAMAGE.TBL`.
 
-use super::{Blast, Ctx, Out};
+use super::{Blast, Ctx, Event, Out};
 use crate::damage::Pending;
 use crate::entity::{Behaviour, Entity};
 use crate::physics::{Body, Rect, SUB, step};
@@ -132,7 +133,7 @@ fn swept(e: &Entity, prev: Option<(i32, i32)>) -> Option<Rect> {
 }
 
 /// Impacto: efeito sorteado 1–4 e, com dano de área, a explosão (`0x0040d20c`).
-fn impact(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
+fn impact(e: &mut Entity, rng: &mut crate::rng::Rng, out: &mut Out) {
     let r = row(e.kind);
     let b = Blast {
         center: e.center(),
@@ -144,7 +145,7 @@ fn impact(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     if r.area_damage > 0 {
         out.blasts.push(b);
     } else {
-        out.effects.push((b, 1 + ctx.rng.below(4) as u16));
+        out.effects.push((b, 1 + rng.below(4) as u16));
     }
     e.alive = false;
 }
@@ -161,7 +162,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     if e.bounds()
         .is_some_and(|b| ctx.cells_for(e.layer).blocked(&b))
     {
-        impact(e, ctx, out);
+        impact(e, ctx.rng, out);
         return;
     }
     let mut body = Body::new(e.x, e.y, boxr);
@@ -190,9 +191,76 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             shove: r.shove,
             ..Default::default()
         });
-        impact(e, ctx, out);
+        impact(e, ctx.rng, out);
     } else if !moved {
-        impact(e, ctx, out);
+        impact(e, ctx.rng, out);
+    }
+}
+
+/// Linha `(106, 28)` do `DAMAGE.TBL`: a bala da sentinela no barril dá 5 de natureza 2
+/// (explosão: detona), derrubada, e toca 5056.
+pub const SENTINEL_ON_BARREL: i32 = 5;
+pub const SOUND_SENTINEL_ON_BARREL: u16 = 5056;
+
+/// Tiros inimigos contra os objetos sólidos da camada (portas `OH`, barris, peças…): o tiro
+/// para e a vítima leva a linha `(tipo, vítima)` do `DAMAGE.TBL` — a `(106, 28)` no barril,
+/// senão a `(tipo, 0)` (dano direto, sem natureza). Ruling: os inimigos da M7a não param
+/// nem são feridos pelos tiros (eles nascem nas bocas, dentro das caixas de quem atira).
+pub fn object_hits(entities: &mut [Entity], rng: &mut crate::rng::Rng, out: &mut Out) {
+    for si in 0..entities.len() {
+        let shot = &entities[si];
+        let Behaviour::EnemyShot(st) = &shot.behaviour else {
+            continue;
+        };
+        if !shot.alive {
+            continue;
+        }
+        let Some(sb) = swept(shot, st.prev) else {
+            continue;
+        };
+        let (layer, kind) = (shot.layer, shot.kind);
+        let victim = (0..entities.len()).find(|&i| {
+            let e = &entities[i];
+            i != si
+                && e.alive
+                && e.solid_shapes
+                && e.layer == layer
+                && e.flags & 0x80003 == 0x80001
+                && e.flags & 0x20 == 0
+                && !crate::entity::ENEMIES.contains(&e.kind)
+                && !matches!(
+                    e.behaviour,
+                    Behaviour::EnemyShot(_)
+                        | Behaviour::Bullet(_)
+                        | Behaviour::Casing(_)
+                        | Behaviour::Laser(_)
+                )
+                && e.bounds().is_some_and(|b| b.overlaps(&sb))
+        });
+        let Some(vi) = victim else { continue };
+        let p = if kind == SENTINEL_BULLET && entities[vi].kind == crate::entity::BARREL {
+            out.events.push(Event::Sound(crate::sound::Cue::at(
+                SOUND_SENTINEL_ON_BARREL,
+                crate::sound::PRIORITY_FRAME,
+                entities[si].center(),
+                layer,
+            )));
+            Pending {
+                amount: SENTINEL_ON_BARREL,
+                explosion: true,
+                knockdown: true,
+                ..Default::default()
+            }
+        } else {
+            let r = row(kind);
+            Pending {
+                amount: r.direct,
+                shove: r.shove,
+                ..Default::default()
+            }
+        };
+        super::interact::hurt(&mut entities[vi], &p);
+        impact(&mut entities[si], rng, out);
     }
 }
 
@@ -263,5 +331,51 @@ mod tests {
         tick(&mut gone, &mut c, &mut out);
         assert!(!gone.alive);
         assert_eq!(out.jake_damage.amount, 0);
+    }
+
+    #[test]
+    fn shots_stop_at_solid_objects_and_sentinel_bullets_blow_barrels() {
+        use crate::behaviour::barrel::BarrelState;
+        use crate::behaviour::test_support::logic;
+        let solid = |kind: u32, x: i32| {
+            let mut o = logic(kind, x, 0, &[]);
+            o.flags = 0x80181;
+            o.solid_shapes = true;
+            o.boxes = vec![Rect {
+                x: 0,
+                y: 0,
+                w: 20,
+                h: 40,
+            }];
+            o
+        };
+        let mut barrel = solid(crate::entity::BARREL, 100);
+        barrel.behaviour = Behaviour::Barrel(BarrelState::new(1, vec![]));
+        let door = solid(50, 100);
+        let sentinel = solid(crate::entity::SENTINEL, 100);
+        let mut rng = crate::rng::Rng::new(1);
+        // (106, 28): 5 de dano, natureza 2 (explosão) → o barril detona
+        let mut v = vec![entity(SENTINEL_BULLET, (98, 20), (20, 0), 0), barrel];
+        let mut out = Out::default();
+        object_hits(&mut v, &mut rng, &mut out);
+        assert!(!v[0].alive, "o tiro para no barril");
+        let Behaviour::Barrel(b) = &v[1].behaviour else {
+            panic!()
+        };
+        assert!(b.hurt.explosion && b.hurt.amount == 5, "{:?}", b.hurt);
+        assert!(out.events.iter().any(|e| e.sound_id() == Some(5056)));
+        // porta OH: para (efeito do impacto), sem dano
+        let mut v = vec![entity(BRUISER_BULLET, (98, 20), (20, 0), 0), door];
+        let mut out = Out::default();
+        object_hits(&mut v, &mut rng, &mut out);
+        assert!(!v[0].alive);
+        assert_eq!(out.blasts.len(), 1, "explosão do (100, 0)");
+        // outra camada ou um inimigo: passa
+        let mut v = vec![entity(BRUISER_BULLET, (98, 20), (20, 0), 1), solid(50, 100)];
+        object_hits(&mut v, &mut rng, &mut Out::default());
+        assert!(v[0].alive, "outra camada");
+        let mut v = vec![entity(SENTINEL_BULLET, (98, 20), (20, 0), 0), sentinel];
+        object_hits(&mut v, &mut rng, &mut Out::default());
+        assert!(v[0].alive, "os tiros não ferem nem param nos inimigos");
     }
 }

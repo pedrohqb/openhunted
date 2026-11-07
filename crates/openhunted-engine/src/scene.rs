@@ -1405,6 +1405,7 @@ impl Scene {
         }
         self.rng = rng;
         self.bullet_hits(&mut out);
+        behaviour::enemy_shot::object_hits(&mut self.entities, &mut self.rng, &mut out);
         self.weapon_hits(&mut out);
         self.resolve_impacts(&mut out);
         self.object_interactions(&mut out);

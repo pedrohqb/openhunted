@@ -144,7 +144,10 @@ impl MineGeneratorState {
 }
 
 /// Antes do tique: cada gerador ganha a sua marca e conta as minas vivas dela
-/// (`0x41e62d` esquece as vagas cujas minas morreram).
+/// (`0x41e62d` esquece as vagas cujas minas morreram). A marca é o índice + 1 na lista de
+/// entidades: vale porque a cena só acrescenta entidades no fim e nunca as remove nem
+/// reordena (as mortas ficam com `alive = false`); se isso mudar, a marca tem de virar um id
+/// estável guardado no gerador.
 pub fn sync(entities: &mut [Entity]) {
     let owners: Vec<u32> = entities
         .iter()
