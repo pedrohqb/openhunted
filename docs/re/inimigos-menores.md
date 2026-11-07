@@ -90,6 +90,10 @@ estado −1, vida 0 → 100.
 
 ## Em aberto
 
+Morte, Camaleão, natureza `0x10` e a zona da Entidade: ver
+[`inimigos-menores-2.md`](inimigos-menores-2.md).
+
+
 - Camaleão: máquina de estados, invisibilidade e o ataque (linha 4).
 - Morte: estados e o papel dos gatilhos (aparição?).
 - Entidade: `0x41299d`/`0x436635` (zona do alvo) e o vaguear exato.
