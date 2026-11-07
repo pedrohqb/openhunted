@@ -30,7 +30,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let mut body = Body::new(e.x, e.y, boxr);
     body.vx = st.vx;
     body.vy = st.vy;
-    step(&mut body, ctx.cells, true);
+    step(&mut body, ctx.cells_for(e.layer), true);
     e.x = body.x;
     e.y = body.y;
     st.vx = body.vx;

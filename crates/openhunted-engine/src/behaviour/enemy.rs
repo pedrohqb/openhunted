@@ -206,12 +206,30 @@ fn inside(r: &Rect, p: (i32, i32)) -> bool {
 /// sólidos do mundo do Jake (células e objetos sólidos da camada dele), ignorando as que
 /// caem nas caixas `skip` (quem olha e o alvo).
 pub fn line_of_sight(ctx: &Ctx, a: (i32, i32), b: (i32, i32), skip: &[Rect]) -> bool {
+    line_of_sight_on(ctx, ctx.jake_layer, a, b, skip)
+}
+
+/// A linha de visão na camada `layer`: a do Jake vê o mundo dele (células e objetos); outra
+/// camada (o OSR que segue a última posição vista depois que o Jake trocou de camada) vê só
+/// as células dela.
+pub fn line_of_sight_on(
+    ctx: &Ctx,
+    layer: i32,
+    a: (i32, i32),
+    b: (i32, i32),
+    skip: &[Rect],
+) -> bool {
+    let world = if layer == ctx.jake_layer {
+        ctx.world
+    } else {
+        ctx.cells_for(layer)
+    };
     (1..16).all(|i| {
         let p = (a.0 + (b.0 - a.0) * i / 16, a.1 + (b.1 - a.1) * i / 16);
         if skip.iter().any(|r| inside(r, p)) {
             return true;
         }
-        !ctx.world.blocked(&Rect {
+        !world.blocked(&Rect {
             x: p.0,
             y: p.1,
             w: 1,

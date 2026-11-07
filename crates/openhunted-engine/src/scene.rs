@@ -109,8 +109,11 @@ pub struct Scene {
     jake_flags: i32,
     /// Caixas sólidas das células da camada do Jake.
     cell_solids: Vec<Rect>,
-    /// Mundo só com as células (para as minas).
+    /// Mundo só com as células da camada do Jake.
     cell_world: World,
+    /// Mundo só com as células de cada camada (índice = camada), montado uma vez: cada
+    /// objeto que não é o Jake anda contra a própria camada.
+    layer_worlds: Vec<World>,
     /// `OEX.ANM`, se existir nos dados.
     explosion_anim: Option<Rc<Animation>>,
     /// Animações e BRDs dos projéteis, carregados na montagem.
@@ -300,6 +303,7 @@ impl Scene {
             jake_flags: 0,
             cell_solids: Vec::new(),
             cell_world: World::default(),
+            layer_worlds: Vec::new(),
             explosion_anim: None,
             projectile_anims: HashMap::new(),
             projectile_borders: HashMap::new(),
@@ -345,6 +349,7 @@ impl Scene {
             jake_flags: 0,
             cell_solids: Vec::new(),
             cell_world: World::default(),
+            layer_worlds: Vec::new(),
             explosion_anim: None,
             projectile_anims: HashMap::new(),
             projectile_borders: HashMap::new(),
@@ -557,6 +562,7 @@ impl Scene {
         s.sprites.sort_by_key(|p| p.layer);
         s.jake_flags = jake_flags;
         s.layers = i32::from(level.grid_z).max(1);
+        s.layer_worlds = (0..s.layers).map(|z| World::new(s.cell_rects(z))).collect();
         s.set_jake_layer(jake_layer);
         s.time_limit = i32::from(level.field_1004.max(0));
         s.timer = s.time_limit * TIMER_TICKS_PER_SECOND;
@@ -1164,12 +1170,20 @@ impl Scene {
         &self.cell_world
     }
 
-    /// Põe o Jake na camada `layer` (`+0x17c`): as caixas das células passam a ser as dessa
-    /// camada e o mundo é refeito.
-    pub fn set_jake_layer(&mut self, layer: i32) {
-        self.jake_layer = layer;
-        self.cell_solids = self
-            .borders
+    /// Mundo só com as caixas das células da camada `layer` (a do Jake, se não houver).
+    pub fn layer_cells(&self, layer: i32) -> &World {
+        if layer == self.jake_layer {
+            return &self.cell_world;
+        }
+        usize::try_from(layer)
+            .ok()
+            .and_then(|l| self.layer_worlds.get(l))
+            .unwrap_or(&self.cell_world)
+    }
+
+    /// Caixas sólidas das células da camada `layer`, em px da fase.
+    fn cell_rects(&self, layer: i32) -> Vec<Rect> {
+        self.borders
             .iter()
             .filter(|(_, _, z, b)| *z == layer && b.kind == BOX)
             .map(|(cx, cy, _, b)| Rect {
@@ -1178,7 +1192,14 @@ impl Scene {
                 w: i32::from(b.width),
                 h: i32::from(b.height),
             })
-            .collect();
+            .collect()
+    }
+
+    /// Põe o Jake na camada `layer` (`+0x17c`): as caixas das células passam a ser as dessa
+    /// camada e o mundo é refeito.
+    pub fn set_jake_layer(&mut self, layer: i32) {
+        self.jake_layer = layer;
+        self.cell_solids = self.cell_rects(layer);
         self.cell_world = World::new(self.cell_solids.clone());
         self.rebuild_world();
     }
@@ -1257,6 +1278,7 @@ impl Scene {
                 jake_layer: self.jake_layer,
                 world: &self.world,
                 cells: &self.cell_world,
+                layer_cells: &self.layer_worlds,
                 on: &on,
                 rng: &mut rng,
                 hints: &self.hints,

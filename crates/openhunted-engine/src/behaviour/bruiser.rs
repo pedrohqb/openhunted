@@ -211,7 +211,7 @@ fn can_walk(e: &Entity, st: &BruiserState, ctx: &Ctx) -> bool {
         x: me.x + STEP_AHEAD * st.dir(),
         ..me
     };
-    ctx.cells.floor_at(&ahead, FLOOR_PROBE)
+    ctx.cells_for(e.layer).floor_at(&ahead, FLOOR_PROBE)
 }
 
 /// Tiro (`0x417e47`): 35 % balas (uma em B e, com 48 %, outra em A), senão um foguete em C.
@@ -471,7 +471,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         body.vy = -16;
     }
     if !st.dead {
-        step(&mut body, ctx.cells, true);
+        step(&mut body, ctx.cells_for(e.layer), true);
         e.x = body.x;
         e.y = body.y;
         st.vy = body.vy;

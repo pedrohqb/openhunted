@@ -230,7 +230,84 @@ fn security_robot_shoots_at_jake() {
     assert!(fired, "o robô não atirou");
 }
 
-/// Em toda fase solo com estes inimigos, 2000 tiques de entrada aleatória não panicam.
+/// T_J_007: o Bruiser (camada diferente da do Jake) fica no chão dele por 300 tiques, com o
+/// Jake parado na camada dele.
+#[test]
+fn t_j_007_bruiser_stays_on_its_floor() {
+    let Some(mut s) = load("T_J_007.LEV") else {
+        return;
+    };
+    let i = s.entities.iter().position(|e| e.kind == 7).unwrap();
+    assert_ne!(
+        s.entities[i].layer, s.jake_layer,
+        "o teste quer camadas diferentes"
+    );
+    let y0 = s.entities[i].y;
+    for t in 0..300 {
+        s.tick(0);
+        let e = &s.entities[i];
+        assert!(
+            (e.y - y0).abs() < 64 && e.alive,
+            "tique {t}: Bruiser em y {} (começou em {y0})",
+            e.y
+        );
+    }
+}
+
+/// I_J_110: as minas saltadoras das outras camadas não caem para fora da fase enquanto o
+/// Jake fica parado na camada dele.
+#[test]
+fn i_j_110_hop_mines_on_other_layers_survive() {
+    let Some(mut s) = load("I_J_110.LEV") else {
+        return;
+    };
+    let mines: Vec<usize> = s
+        .entities
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.kind == 11 && e.layer != s.jake_layer)
+        .map(|(i, _)| i)
+        .collect();
+    assert!(mines.len() >= 4, "{} minas em outras camadas", mines.len());
+    for _ in 0..300 {
+        s.tick(0);
+    }
+    let alive = mines.iter().filter(|&&i| s.entities[i].alive).count();
+    assert_eq!(alive, mines.len(), "minas sumidas");
+}
+
+/// Inimigos vigiados pelo fuzz: os da M7a, as minas e os olhos-laser.
+fn watched(kind: u32) -> bool {
+    ENEMIES.contains(&kind) || kind == 102 || kind == 104
+}
+
+/// Invariantes de um inimigo vivo: dentro da fase e fora das células da própria camada (se
+/// começou fora delas).
+fn check_enemy(s: &Scene, i: usize, started_inside: bool, ctx: &str) {
+    let e = &s.entities[i];
+    let Some(b) = e.bounds() else {
+        return;
+    };
+    let c = (b.x + b.w / 2, b.y + b.h / 2);
+    assert!(
+        c.0 >= 0 && c.1 >= 0 && c.0 < s.width && c.1 < s.height,
+        "{ctx}: objeto {i} (tipo {}) saiu da fase em {c:?}",
+        e.kind
+    );
+    // o destroço do Bruiser e do OSR fica onde caiu
+    let wreck = matches!(&e.behaviour, Behaviour::Bruiser(st) if st.dead);
+    if !started_inside && !wreck {
+        assert!(
+            !s.layer_cells(e.layer).blocked(&b),
+            "{ctx}: objeto {i} (tipo {}, camada {}) dentro das células em {b:?}",
+            e.kind,
+            e.layer
+        );
+    }
+}
+
+/// Em toda fase solo com estes inimigos, 2000 tiques de entrada aleatória: sem pânico, nenhum
+/// inimigo sai da fase, entra nas células da própria camada ou some sem morrer.
 #[test]
 fn enemies_fuzz_without_panics() {
     let Some(gd) = data() else {
@@ -248,6 +325,19 @@ fn enemies_fuzz_without_panics() {
             continue;
         }
         tested += 1;
+        // os inimigos da fase (os criados depois, como as minas dos geradores, ficam de fora)
+        let start: Vec<(usize, bool)> = s
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.alive && watched(e.kind))
+            .map(|(i, e)| {
+                let inside = e
+                    .bounds()
+                    .is_some_and(|b| s.layer_cells(e.layer).blocked(&b));
+                (i, inside)
+            })
+            .collect();
         let mut seed: u32 = 0x5eed_0001 ^ tested;
         let mut input = 0;
         for t in 0..2000 {
@@ -257,6 +347,23 @@ fn enemies_fuzz_without_panics() {
                     [(seed >> 16) as usize % 8];
             }
             s.tick(input);
+            if t % 10 != 9 {
+                continue;
+            }
+            let ctx = format!("{} tique {t}", m.file);
+            for &(i, inside) in &start {
+                let e = &s.entities[i];
+                if e.alive {
+                    check_enemy(&s, i, inside, &ctx);
+                } else {
+                    assert!(
+                        e.health <= 0,
+                        "{ctx}: objeto {i} (tipo {}) sumiu com vida {}",
+                        e.kind,
+                        e.health
+                    );
+                }
+            }
         }
     }
     assert!(tested >= 30, "só {tested} fases com inimigos");

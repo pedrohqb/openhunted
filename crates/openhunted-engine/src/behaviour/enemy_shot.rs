@@ -158,14 +158,16 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     };
     let (vx, vy) = (st.vx, st.vy);
     st.prev = Some((e.x, e.y));
-    if e.bounds().is_some_and(|b| ctx.cells.blocked(&b)) {
+    if e.bounds()
+        .is_some_and(|b| ctx.cells_for(e.layer).blocked(&b))
+    {
         impact(e, ctx, out);
         return;
     }
     let mut body = Body::new(e.x, e.y, boxr);
     body.vx = vx;
     body.vy = vy;
-    step(&mut body, ctx.cells, false);
+    step(&mut body, ctx.cells_for(e.layer), false);
     let moved = (body.x - e.x, body.y - e.y) == (vx >> 3, vy >> 3);
     e.x = body.x;
     e.y = body.y;
