@@ -72,15 +72,19 @@ toca o jogador. Usos (todos):
 | `0x416979` | Morte (3), dano recebido | ×2 / ×1 / ÷2 |
 | `0x416696` | Morte, espalhamento do tiro | `max(10, (2 − d)·15/2)` |
 | `0x416753` | Morte, espera até o próximo ataque (`+0x264`) | `rand % 100 + (2 − d)·75` tiques |
-| `0x419fac` | Camaleão (4), dano recebido | ×2 / ×1 / ÷2 |
-| `0x417ae0` | Bruiser (7) | ×2 / ×1 / ÷2 |
-| `0x41c712` | Robô de segurança (8) | ×2 / ×1 / ÷2 |
+| `0x41a002` | Camaleão (4), dano recebido | ×2 / ×1 / ÷2 |
+| `0x417b31` | Bruiser (7) | ×2 / ×1 / ÷2 |
+| `0x41ca37` | Robô de segurança (8) | ×2 / ×1 / ÷2 |
 | `0x41dfaf` | Gerador de minas (103) | ×2 / ×1 / ÷2 |
-| `0x42231b` | Anticorpo (105) / Manta (89) | ×2 / ×1 / ÷2 |
+| `0x42231b` | **só a Manta** (89) | ×2 / ×1 / ÷2 |
 
 Ou seja: no fácil esses inimigos morrem com metade dos tiros e a munição rende mais; no
-difícil, o dobro de tiros e menos munição. Dano recebido negativo vira 1. No médio (padrão)
-nada muda, o que confirma a decisão da M7a.
+difícil, o dobro de tiros e menos munição. No médio (padrão) nada muda, o que confirma a
+decisão da M7a. Nos seis pontos de dano: **dano 0 não faz nada** (salta tudo, inclusive o
+tranco do Camaleão e do Bruiser); depois da escala **só um negativo vira 1** (`test ecx,ecx;
+jge`) — não há mínimo 1: no difícil um dano de 1 vira 0. O Anticorpo (`0x412189`) **não lê a
+dificuldade**: `vida −= dano·[0x472104 + 0x48·v]/100` (100 nas quatro variantes), também só
+com dano ≠ 0. O gerador de dardos (`0x420dc5`) e a formiga (`0x42077e`) idem, sem dificuldade.
 
 ## Jogo salvo (`*.hhg`) [confirmado]
 

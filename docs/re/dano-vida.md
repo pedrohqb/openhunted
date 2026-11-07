@@ -137,6 +137,6 @@ sai da armadura.
 
 - Tique em que `0x4231f9` vê o dano da explosão (ordem de atualização dos objetos).
 - Estado do Jake ao morrer em voo (81/82) e no estado 3.
-- Dificuldade: `0x487854` dobra/reduz o dano recebido por alguns inimigos (`0x42231b`);
-  não se viu efeito no Jake.
+- Dificuldade: `0x487854` dobra/reduz o dano recebido por alguns inimigos (lista em
+  `opcoes-salvamento.md`); não se viu efeito no Jake.
 - `0x4081ae` (efeito visual exato) e `0x436358` (eventos 4, 0xc, 0x20).

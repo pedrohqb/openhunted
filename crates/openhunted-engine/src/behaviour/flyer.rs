@@ -28,6 +28,9 @@ pub const VX_RANGE: (i32, i32) = (-32, 37);
 /// Varredura da Manta: além da borda, 75 px à direita, 60 à esquerda.
 pub const SWEEP: (i32, i32) = (75, 60);
 
+/// % do dano recebido pelo Anticorpo (`0x472104 + 0x48·v`: 100 nas quatro variantes).
+pub const ANTIBODY_APPLIED: i32 = 100;
+
 /// Variante (registros de 0x48: `0x4720c0` / `0x473180`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Variant {
@@ -230,10 +233,21 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     if c.0 < 0 || c.1 < 0 || c.0 >= ctx.level.0 || c.1 >= ctx.level.1 {
         e.health = 0;
     }
+    // dano: 0 não faz nada; a Manta (`0x42231b`) passa pela dificuldade (só o negativo vira
+    // 1) e pelo % da variante; o Anticorpo (`0x412189`) só pelo % (100 nas quatro)
     let w = st.wound.take();
-    if !w.is_empty() {
-        let applied = if st.manta { v.manta_applied } else { 100 };
-        e.health -= ctx.difficulty.damage(w.pending.amount).max(1) * applied / 100;
+    let hit = if st.manta {
+        ctx.difficulty.hit(w.pending.amount)
+    } else {
+        Some(w.pending.amount).filter(|&d| d != 0)
+    };
+    if let Some(d) = hit {
+        let applied = if st.manta {
+            v.manta_applied
+        } else {
+            ANTIBODY_APPLIED
+        };
+        e.health -= d * applied / 100;
     }
     if e.health <= 0 {
         out.effects.push((
@@ -498,6 +512,46 @@ mod tests {
         }
         assert_eq!(out.jake_damage.amount, 15);
         assert!(out.jake_damage.shove);
+    }
+
+    #[test]
+    fn blast_rim_spares_the_antibody_and_only_the_manta_reads_difficulty() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let mut a = flyer(ANTIBODY, 250, 200, 0, 1);
+        let rim = Pending {
+            amount: 0,
+            explosion: true,
+            ..Default::default()
+        };
+        enemy::hurt(&mut a, &rim, false);
+        tick(&mut a, &mut c, &mut Out::default());
+        assert!(
+            a.alive && a.health == HEALTH,
+            "dano 0 não mata (`0x412189`)"
+        );
+        // Anticorpo: sem dificuldade (`0x412189` não lê `0x487854`)
+        c.difficulty = crate::Difficulty::Easy;
+        a.health = 5;
+        let one = Pending {
+            amount: 1,
+            ..Default::default()
+        };
+        enemy::hurt(&mut a, &one, true);
+        tick(&mut a, &mut c, &mut Out::default());
+        assert_eq!(a.health, 4, "fácil não dobra o dano do Anticorpo");
+        // Manta: dificuldade (`0x42231b`), sem mínimo 1
+        c.difficulty = crate::Difficulty::Hard;
+        let mut m = flyer(MANTA, 250, 200, 0, 0);
+        m.health = 5;
+        enemy::hurt(&mut m, &one, true);
+        tick(&mut m, &mut c, &mut Out::default());
+        assert_eq!(m.health, 5, "difícil: 1 / 2 = 0");
+        c.difficulty = crate::Difficulty::Easy;
+        enemy::hurt(&mut m, &one, true);
+        tick(&mut m, &mut c, &mut Out::default());
+        assert_eq!(m.health, 3, "fácil: ×2, Alpha 100 %");
     }
 
     #[test]

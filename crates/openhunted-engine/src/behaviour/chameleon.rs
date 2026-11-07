@@ -322,9 +322,12 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             st.cloning = Some(n - 1);
         }
     }
-    // dano (`0x419f89`, `0x419fac`)
+    // dano (`0x419f89`, `0x41a002`): 0 não faz nada (nem o tranco); dificuldade, só o
+    // negativo vira 1
     let w = st.wound.take();
-    if !w.is_empty() && st.state != DYING {
+    if let Some(d) = ctx.difficulty.hit(w.pending.amount)
+        && st.state != DYING
+    {
         if !w.pending.poison && !w.pending.explosion {
             if matches!(st.state, 8 | 9 | 30..=33) {
                 st.set(10);
@@ -334,7 +337,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 st.recharge = FLINCH_RECHARGE;
             }
         }
-        e.health -= ctx.difficulty.damage(w.pending.amount).max(1);
+        e.health -= d;
     }
     if e.health <= 0 && st.state != DYING {
         st.set(DYING);
@@ -510,6 +513,42 @@ mod tests {
             }
         }
         assert!(!k.alive && enemy::killed(&k));
+    }
+
+    #[test]
+    fn zero_damage_neither_hurts_nor_flinches() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(3000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let mut k = chameleon(100, 1);
+        let hp = k.health;
+        let rim = Pending {
+            amount: 0,
+            explosion: true,
+            ..Default::default()
+        };
+        enemy::hurt(&mut k, &rim, false);
+        let push = Pending {
+            amount: 0,
+            shove: true,
+            ..Default::default()
+        };
+        tick(&mut k, &mut c, &mut Out::default());
+        enemy::hurt(&mut k, &push, false);
+        tick(&mut k, &mut c, &mut Out::default());
+        assert_eq!(k.health, hp);
+        assert_ne!(st(&k).state, FLINCH, "o tranco pede dano ≠ 0 (`0x419f89`)");
+        c.difficulty = crate::Difficulty::Hard;
+        enemy::hurt(
+            &mut k,
+            &Pending {
+                amount: 1,
+                ..Default::default()
+            },
+            true,
+        );
+        tick(&mut k, &mut c, &mut Out::default());
+        assert_eq!(k.health, hp, "difícil: 1 / 2 = 0");
     }
 
     #[test]

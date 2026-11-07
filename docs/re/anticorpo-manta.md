@@ -40,8 +40,9 @@ Anticorpo: tabela `0x4720c0`; Manta: `0x473180`. `+0x38` (50/30/50/20) não foi 
 ## Comportamento (`0x0041129d`, `0x00421475`) [confirmado na estrutura]
 
 1. Fora da fase ou sem célula → vida 0. Contato com parede (`+0x220 & 2`) → para.
-2. Dano: Anticorpo vida −= dano·`+0x44`/100; Manta igual, depois da dificuldade (fácil ×2,
-   difícil ÷2; `0x42231b`). Vida ≤ 0 → `0x43d629(obj, nulo, v)` (Anticorpo v = 4: efeito
+2. Dano (só com dano ≠ 0): Anticorpo vida −= dano·`+0x44`/100 (`0x412189`, **sem**
+   dificuldade); Manta igual, depois da dificuldade (fácil ×2, difícil ÷2, só o negativo vira
+   1; `0x42231b`). Vida ≤ 0 → `0x43d629(obj, nulo, v)` (Anticorpo v = 4: efeito
    `oex` raio 15 sem dano; Manta v = 10: efeito 14, raio 12), destruído, liga `0x40`. Uma bala
    (2) basta.
 3. Modos (`+0x270`):

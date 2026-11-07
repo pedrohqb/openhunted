@@ -13,7 +13,7 @@ Continua [`inimigos-menores.md`](inimigos-menores.md) e [`anticorpo-manta.md`](a
    3760–3763 tocando, com `rand%300 < 2` e `+0x264 > 30`, fala (40 % a 3763; senão uma sequência
    de 2–3 entre 3760/3761/3762, `0x43c868`). `+0x264 > 0` → −1 e sai. Zerado: **aparece**
    (`0x416251`); se não conseguir, rearma `+0x264` (`0x416753`).
-3. Fora do −1: no estado 1 limita `vy ≥ −10`; dano (`0x416979`: fácil ×2, difícil ÷2, mínimo 1);
+3. Fora do −1: no estado 1 limita `vy ≥ −10`; dano (`0x416979`: 0 não faz nada; fácil ×2, difícil ÷2, só o negativo vira 1);
    vida ≤ 0 → estado 11 (`ode10`), liga `0x40`, fala 3764. Queda rápida (`+0x160 > 150` ou
    `+0x168 ≥ 150`) fora do 11 → estado −2 e som 3051. Depois a **radiação** (`0x416a48`) e a
    animação do estado (1–11: rótulo = estado, uma vez; −2: rótulo 1 ao contrário).

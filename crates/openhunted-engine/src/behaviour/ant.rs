@@ -176,8 +176,11 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         _ => return,
     };
     let outside = c.0 < 0 || c.1 < 0 || c.0 >= ctx.level.0 || c.1 >= ctx.level.1;
-    // vida 1: qualquer dano mata (fumaça de raio 15)
-    if outside || !st.wound.take().is_empty() {
+    // dano (`0x42077e`): 0 não faz nada; vida 1, qualquer dano positivo mata (fumaça de
+    // raio 15)
+    let amount = st.wound.take().pending.amount;
+    e.health -= amount;
+    if outside || e.health <= 0 {
         e.health = 0;
         e.alive = false;
         e.on = true;
@@ -327,9 +330,18 @@ mod tests {
             amount: 1,
             ..Default::default()
         };
+        // dano 0 (borda de explosão) não mata (`0x42077e`)
+        let rim = Pending {
+            amount: 0,
+            explosion: true,
+            ..Default::default()
+        };
+        assert!(enemy::hurt(&mut a, &rim, false));
+        tick(&mut a, &mut c, &mut out);
+        assert!(a.alive && a.health == HEALTH);
         assert!(enemy::hurt(&mut a, &p, true));
         tick(&mut a, &mut c, &mut out);
-        assert!(!a.alive && a.health == 0);
+        assert!(!a.alive && a.health <= 0);
         assert!(
             !enemy::counted(&a),
             "criada pelo formigueiro: fora do placar"

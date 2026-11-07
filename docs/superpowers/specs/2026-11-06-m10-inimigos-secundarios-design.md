@@ -8,8 +8,8 @@ e `anticorpo-manta.md`, e a dificuldade (`opcoes-salvamento.md`, `0x487854`).
 - Morte (3), Camaleão (4) com clones, Anticorpo (105) e Manta (89), gerador de dardos (87) e
   dardo (29), catapulta (41), Entidade (107), formigueiro (88) e formiga (109).
 - `Difficulty {Easy, Normal, Hard}` na cena (padrão Normal, `Scene::difficulty` público para a
-  casca): dano recebido ×2/÷2 (mínimo 1) na Morte, Camaleão, Anticorpo/Manta, Bruiser, OSR e
-  gerador de minas (a sentinela, a mina saltadora e os dardos não usam); munição apanhada
+  casca): dano recebido ×2/÷2 na Morte, Camaleão, Manta, Bruiser, OSR e gerador de minas
+  (dano 0 não faz nada; só um negativo vira 1, sem mínimo 1; o Anticorpo não usa) (a sentinela, a mina saltadora e os dardos não usam); munição apanhada
   ×1,5/×0,75 (`0x40a36d`); espalhamento e espera da Morte.
 - Fora: dois jogadores, cores pulsantes, a transparência gradual do Camaleão.
 
@@ -69,6 +69,9 @@ e `anticorpo-manta.md`, e a dificuldade (`opcoes-salvamento.md`, `0x487854`).
   rótulo 1; caixa = retângulo do quadro.
 - Ruling: o dardo nasce com a faísca 14 e some ao tocar parede, objeto sólido ou o jogador
   (1 de dano com empurrão).
+- Ruling (revisão): dano 0 (a borda de uma explosão, `explosion::area_effect`) não fere nem
+  dá tranco em nenhum inimigo da M10, no Bruiser nem no robô; `Difficulty::hit` concentra a
+  regra dos seis pontos que leem a dificuldade (só a Manta entre os voadores).
 - Ruling: o estado "ferido" do Camaleão, os sons ambientes 5120–5122 e as falas da Morte
   seguem as notas; prioridades sem valor no `SOUND.TBL` usam a de quadro.
 
@@ -80,7 +83,7 @@ e `anticorpo-manta.md`, e a dificuldade (`opcoes-salvamento.md`, `0x487854`).
 
 ## Testes
 
-Sintéticos: escalas da dificuldade (dano ×2/÷2 mínimo 1; munição ×1,5/×0,75; espera e
+Sintéticos: escalas da dificuldade (dano ×2/÷2, 0 ignorado, só o negativo vira 1; munição ×1,5/×0,75; espera e
 espalhamento da Morte); máquina da Morte (aparece ao lado do alvo, radiação 4 a < 45 px,
 tiro 99, oculta sem colisão, morte com fala 3764); Camaleão (morde 30 a ≤ 50 px, recua com
 dano, clones ≤ 3 com metade da vida, morrem com ele, invisível continua presente); voadores
