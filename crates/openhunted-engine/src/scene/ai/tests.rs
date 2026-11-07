@@ -63,6 +63,8 @@ fn arena(hx: i32) -> Scene {
             .with_inventory(inv),
     );
     s.jake_sprite = Some(sprite(hx));
+    // grade aberta: a IA escolhe o humano como alvo (a busca o alcança)
+    s.ai_grid = CellGrid::new((16, 8, 1));
     s.rebuild_world();
     s
 }

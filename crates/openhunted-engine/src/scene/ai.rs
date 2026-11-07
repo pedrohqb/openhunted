@@ -136,21 +136,22 @@ pub(super) fn ai_entity(
     Some(e)
 }
 
-/// Grade da IA: bits de `célula+0x04` (`fields[0]`, células v ≥ 1006), índice, `+0x40`
-/// (espelhada) e as zonas PR.
+/// Grade da IA: as células do `.LEV` (as vazias ficam ausentes), bits de `célula+0x04`
+/// (`fields[0]`, células v ≥ 1006), índice, `+0x40` (espelhada) e as zonas PR.
 pub(super) fn cell_grid(level: &Level, zones: &[crate::jake::Zone]) -> CellGrid {
     let size = (
         i32::from(level.grid_x).max(1),
         i32::from(level.grid_y).max(1),
         i32::from(level.grid_z).max(1),
     );
-    let mut g = CellGrid::new(size);
+    let mut g = CellGrid::empty(size);
     for (i, cell) in level.cells.iter().enumerate() {
         let Some(cell) = cell else { continue };
         let i = i as i32;
         let c = (i % size.0, (i / size.0) % size.1, i / (size.0 * size.1));
         if let Some(ci) = g.get_mut(c) {
             *ci = CellInfo {
+                present: true,
                 bits: if cell.version >= 1006 {
                     cell.fields.first().copied().unwrap_or(0)
                 } else {
@@ -302,6 +303,7 @@ impl Scene {
         let ents = &self.entities;
         self.ai_shots.retain(|(s, _)| ents[*s].alive);
         self.sync_ai_doors();
+        // o candidato a alvo: o jogador humano vivo (o cérebro o escolhe e o guarda)
         let target = self.jake.as_ref().filter(|j| !j.is_dead()).map(View::of);
         for i in ais {
             let Behaviour::AiPlayer(mut ai) =
