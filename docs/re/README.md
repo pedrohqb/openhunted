@@ -64,3 +64,6 @@ em que o trabalho começou; usa-se o radare2 5.5 (pacote do Ubuntu) com o módul
 - [`armas-2.md`](armas-2.md): espingarda, foguetes, estrelas ninja e granadas do Jake: descritores, registros, projéteis e dano.
 - [`garathe.md`](garathe.md): Garathe/Minotauro (tipo 2): inicialização, quem o controla, missões, armas e registros, `DAMAGE.TBL` do atacante 2, especial, reações, morte, falas, HUD e itens só dele.
 - [`garathe-movimentos.md`](garathe-movimentos.md): tabela de 164 estados do Garathe, despacho, decisão em pé, correr/andar, pulos (com a investida), queda, agachar, empurrar, barra, corda, esconder (54–56) e velocidades do `MINOTAUR.SKE`.
+- [`videos-musica.md`](videos-musica.md): filmes AVI (Indeo 3.2) da abertura, meio e final; música (CD de áudio, `SX_3000.WAV` nos menus); vozes; grupos 0/1 do `SOUND.TBL`.
+- [`menus-restantes.md`](menus-restantes.md): as 16 `.ITF`, fluxo a partir do `SMAIN`, `SMULT`, `SINPU`, `SKEYB`/`SJOYS`, `SEGOC`, `SHVLD`, `SH2HS`, `SHERO`, `SHIGH`, `S_CAR`, `SABOUT`; campos do `ENGLEVEL.TXT`.
+- [`opcoes-salvamento.md`](opcoes-salvamento.md): `HUNTER.INI`, tela de opções, menu da janela, dificuldade, jogo salvo `.hhg`, progresso e `hunter.fam`.
