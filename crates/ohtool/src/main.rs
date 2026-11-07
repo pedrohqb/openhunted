@@ -123,6 +123,38 @@ fn input_tokens(letters: &str) -> Vec<u32> {
     out
 }
 
+/// Resumo do estado da cena para o `--trace` (comparar execuções): FNV-1a das posições,
+/// vidas e estados das entidades e dos eventos do tique (esvaziados aqui), mortos, total,
+/// cronômetro e resultado.
+fn scene_digest(scene: &mut openhunted_engine::Scene) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |v: i64| {
+        for b in v.to_le_bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+    };
+    for e in &scene.entities {
+        for v in [e.kind as i32, e.x, e.y, e.layer, e.health, e.armor] {
+            mix(i64::from(v));
+        }
+        mix(i64::from(e.alive) | i64::from(e.on) << 1);
+    }
+    let events: Vec<_> = scene.events.drain(..).collect();
+    for ev in &events {
+        mix(ev.sound_id().map_or(-1, i64::from));
+    }
+    format!(
+        "cena {h:016x} entidades {} eventos {} mortos {}/{} tempo {} {:?}",
+        scene.entities.len(),
+        events.len(),
+        scene.kills,
+        scene.kills_total,
+        scene.timer,
+        scene.outcome
+    )
+}
+
 /// A sequência de entradas por tique de `--input`.
 fn parse_input(input: &str) -> Vec<u32> {
     if input.contains(',') {
@@ -263,6 +295,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     seq.get(t).copied().unwrap_or(0)
                 };
                 scene.tick(b);
+                if trace {
+                    eprintln!("{t:4} {}", scene_digest(&mut scene));
+                }
                 if let (true, Some(j)) = (trace, scene.jake.as_ref()) {
                     eprintln!(
                         "{t:4} {b:#06x} ({}, {}) v=({}, {}) {:?} q{} camada {}",
