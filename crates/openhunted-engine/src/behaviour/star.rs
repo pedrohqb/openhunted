@@ -70,6 +70,23 @@ impl StarState {
     }
 }
 
+/// Sorteio do avanço do 1º tique: 0–39 em 1/8 px.
+pub const FIRST_ADVANCE_RAND: u32 = 40;
+
+/// Avanço do 1º tique (`0x40bc98`): `r`/8 px (`r` = `rand % 40`) na direção da velocidade
+/// `v`, em px inteiros (truncado). O port o aplica ao criar a estrela, onde há sorteio.
+pub fn first_advance(v: (i32, i32), r: u32) -> (i32, i32) {
+    let len = f64::from(v.0).hypot(f64::from(v.1));
+    if len == 0.0 {
+        return (0, 0);
+    }
+    let d = f64::from(r) / 8.0;
+    (
+        (f64::from(v.0) / len * d) as i32,
+        (f64::from(v.1) / len * d) as i32,
+    )
+}
+
 pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     let pos = (e.x, e.y);
     let Behaviour::Star(st) = &mut e.behaviour else {
@@ -118,6 +135,15 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_advance_is_a_fraction_along_the_flight() {
+        assert_eq!(first_advance((144, 0), 0), (0, 0));
+        assert_eq!(first_advance((144, 0), 39), (4, 0), "39/8 px");
+        assert_eq!(first_advance((-144, 0), 16), (-2, 0));
+        assert_eq!(first_advance((0, -80), 24), (0, -3));
+        assert_eq!(first_advance((0, 0), 30), (0, 0));
+    }
 
     #[test]
     fn wave_returns_to_the_line_after_a_period() {

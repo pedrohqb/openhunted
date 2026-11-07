@@ -140,7 +140,8 @@ fn d_j_009_cell_door_opens_with_its_key() {
             place(s, ox + dx, oy + 40, 3, 15);
             for _ in 0..40 {
                 s.tick(side);
-                heard |= s.events.drain(..).any(|e| e.sound_id() == Some(3715));
+                let ids: Vec<_> = s.events.drain(..).filter_map(|e| e.sound_id()).collect();
+                heard |= ids.windows(2).any(|w| w == [3715, 3714]);
             }
             if s.cell_doors[i].state != 1 {
                 break;

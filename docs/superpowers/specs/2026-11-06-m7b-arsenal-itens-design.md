@@ -33,10 +33,17 @@ bandeiras (objetivo "acionar"), pistão e interruptor.
   → 4 chumbos em −11,25°, 0°, 0°, +11,25°; 10 de dano cada; cápsula 23 (sem som).
 - **Foguete** (21, `0x40d678`): reto, 30 px/tique, "cima" é a diagonal; 20 diretos +
   explosão raio 64, empurrão 30, área 50 (fere o Jake).
-- **Estrela** (27, `0x40bc98`): onda perpendicular de período 32; parede → crava (item que
-  devolve 1 estrela por 100 tiques, som 3030); objeto → 5 diretos + área 20 (raio 30).
-- **Granada** (26, `0x40d7ab`): gravidade, pavio 35–44, parede → inverte vx e som 3042;
-  objeto fora das exceções → explode; explosão raio 55, empurrão 30, área 30.
+- **Estrela** (27, `0x40bc98`): no 1º tique avança `rand % 40` / 8 px na direção do voo (o
+  port aplica ao criar a estrela, onde há sorteio); onda perpendicular de período 32; parede
+  → crava (item que devolve 1 estrela por 100 tiques, som 3030); objeto → 5 diretos + área 20
+  (raio 30). Cravada e atingida por explosão (natureza 2) → some.
+- **Granada** (26, `0x40d7ab`): gravidade, pavio 35–44, parede (`0x40707c`: contato com a
+  normal mais horizontal que vertical) → inverte vx sem perder rapidez, espelha
+  (`0x434815`) e toca 3042; no chão, sem som; objeto fora das exceções → explode; dano de
+  explosão pendente (`0x40d819`) → explode no tique seguinte; explosão raio 55, empurrão 30,
+  área 30.
+- **Pistola**: cápsula com dx/dy/v do registro de cada mira (`0x47d9b4` cima, `0x47d9fc`
+  diagonal para cima, `0x47da44` frente, `0x47da8c` diagonal para baixo e baixo).
 - Sons por quadro: 3045 espingarda, 3035 foguete, 3110 estrela (no rótulo novo do tiro).
 
 Ruling: impacto direto dos projéteis novos só fere quem já trata dano
@@ -74,6 +81,8 @@ porta, a primeira caixa com largura ≤ altura, na altura toda da célula; os tr
 (fim do rótulo 100) numa zona PR `0x20`; fechada → abre se não pede chave, ou se alguma chave
 pedida está no inventário, **e** as entradas 3–4 dos gatilhos da célula dão verdadeiro;
 senão fala 3715/3714 (sem chave) ou 3715/3719 (gatilho); aberta → fecha. Chave não gasta.
+Ruling: as duas falas saem como dois eventos de som no mesmo tique, em ordem (sem a fila do
+locutor `0x43c868`, que as encadeia e não repete enquanto uma toca).
 
 ## Pistão (39) e interruptor (74)
 

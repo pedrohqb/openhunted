@@ -45,6 +45,7 @@ impl Scene {
         use crate::jake::ShotKind;
         let (vx, vy) = (s.vx * SUB, s.vy * SUB);
         let (dir_label, mirror) = behaviour::bullet::label_and_mirror(s.vx, s.vy);
+        let (mut x, mut y) = (s.x, s.y);
         let (kind, anim, label, mirror, brd, target, b) = match s.kind {
             ShotKind::Pellet => (
                 crate::entity::PELLET,
@@ -68,15 +69,21 @@ impl Scene {
                 25,
                 Behaviour::Rocket(rocket::RocketState::new(vx, vy)),
             ),
-            ShotKind::Star => (
-                crate::entity::STAR,
-                "ONS.ANM",
-                star::LABEL_FLY,
-                0,
-                "ONS2.BRD",
-                10,
-                Behaviour::Star(star::StarState::new(vx, vy)),
-            ),
+            ShotKind::Star => {
+                // 1º tique: avança 0–39/8 px na direção do voo
+                let r = self.rng.below(star::FIRST_ADVANCE_RAND);
+                let (dx, dy) = star::first_advance((vx, vy), r);
+                (x, y) = (x + dx, y + dy);
+                (
+                    crate::entity::STAR,
+                    "ONS.ANM",
+                    star::LABEL_FLY,
+                    0,
+                    "ONS2.BRD",
+                    10,
+                    Behaviour::Star(star::StarState::new(vx, vy)),
+                )
+            }
             ShotKind::Grenade => {
                 let fuse = grenade::FUSE_MIN + self.rng.below(grenade::FUSE_RAND);
                 (
@@ -113,8 +120,8 @@ impl Scene {
                 mirror,
                 brd,
                 target,
-                x: s.x,
-                y: s.y,
+                x,
+                y,
                 layer,
             },
             b,

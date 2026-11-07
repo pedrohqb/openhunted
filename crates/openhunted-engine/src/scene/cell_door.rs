@@ -16,8 +16,11 @@ pub const OPENING: u8 = 3;
 pub const OPEN: u8 = 4;
 /// `+0x4c = 0` → 55 tiques até fechar.
 pub const DEFAULT_CLOSE: i32 = 55;
-/// Falas do Jake: porta trancada (3715 com 3714 sem a chave, com 3719 com o gatilho falso).
+/// Falas do Jake: porta trancada (3715 com 3714 sem a chave, com 3719 com o gatilho falso),
+/// em sequência pela fila do locutor (`0x43c868`).
 pub const SPEECH_LOCKED: u16 = 3715;
+pub const SPEECH_NO_KEY: u16 = 3714;
+pub const SPEECH_TRIGGER: u16 = 3719;
 /// Pares do inventário das chaves 62–67 (13–18).
 const FIRST_KEY_SLOT: usize = 13;
 
@@ -149,15 +152,15 @@ impl CellDoor {
 
     /// O pedido de quem empurra (`0x0040f040`) com a máscara de chaves e os gatilhos 3–4:
     /// fechada → abrindo (sem chave pedida, ou com alguma) ou a fala; aberta → fechando.
-    /// Devolve a fala, se houver.
-    pub fn push(&mut self, keys: i32, triggers_ok: bool) -> Option<u16> {
+    /// Devolve as duas falas, se houver.
+    pub fn push(&mut self, keys: i32, triggers_ok: bool) -> Option<[u16; 2]> {
         match self.state {
             CLOSED => {
                 if self.keys != 0 && self.keys & keys == 0 {
-                    return Some(SPEECH_LOCKED);
+                    return Some([SPEECH_LOCKED, SPEECH_NO_KEY]);
                 }
                 if !triggers_ok {
-                    return Some(SPEECH_LOCKED);
+                    return Some([SPEECH_LOCKED, SPEECH_TRIGGER]);
                 }
                 self.state = OPENING;
             }
@@ -232,7 +235,8 @@ impl Scene {
             {
                 let ok = crate::triggers::satisfied(&d.door_triggers(), &on);
                 let before = d.state;
-                if let Some(id) = d.push(mask, ok) {
+                // as duas falas em ordem, no mesmo tique (sem a fila do locutor)
+                for id in d.push(mask, ok).into_iter().flatten() {
                     self.events.push(Event::Sound(Cue::ui(id, PRIORITY_PICKUP)));
                 }
                 changed |= before != d.state && d.state == CLOSING;
@@ -292,9 +296,14 @@ mod tests {
     #[test]
     fn a_key_opens_and_the_door_closes_by_itself() {
         let mut d = door(2);
-        assert_eq!(d.push(0, true), Some(SPEECH_LOCKED), "sem a chave");
-        assert_eq!(d.push(1, true), Some(SPEECH_LOCKED), "outra chave");
-        assert_eq!(d.push(3, false), Some(SPEECH_LOCKED), "gatilho falso");
+        let no_key = Some([SPEECH_LOCKED, SPEECH_NO_KEY]);
+        assert_eq!(d.push(0, true), no_key, "sem a chave");
+        assert_eq!(d.push(1, true), no_key, "outra chave");
+        assert_eq!(
+            d.push(3, false),
+            Some([3715, 3719]),
+            "gatilho falso: a segunda fala muda"
+        );
         assert_eq!(d.push(2, true), None);
         assert_eq!(d.state, OPENING);
         let mut frames = vec![];
@@ -372,6 +381,27 @@ mod tests {
             let st = s.cell_doors[0].state;
             assert_eq!(st == OPEN, stays, "barril em x = {x}: estado {st}");
         }
+    }
+
+    /// O overlay (Tab) desenha as caixas das portas no estado atual.
+    #[test]
+    fn overlay_draws_the_door_boxes() {
+        let mut s = Scene::empty(512, 256);
+        let mut d = open_door();
+        d.state = CLOSED;
+        s.cell_doors = vec![d];
+        let mut fb = crate::Framebuffer::new(256, 128);
+        s.draw(&mut super::super::tests::assets(), &mut fb, (128, 0), true);
+        // canto da coluna fechada (178, 12) → (50, 12) na tela
+        assert_ne!(fb.pixels[12 * 256 + 50], 0, "coluna da porta no overlay");
+        let mut plain = crate::Framebuffer::new(256, 128);
+        s.draw(
+            &mut super::super::tests::assets(),
+            &mut plain,
+            (128, 0),
+            false,
+        );
+        assert_eq!(plain.pixels[12 * 256 + 50], 0);
     }
 
     #[test]
