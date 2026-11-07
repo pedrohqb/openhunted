@@ -78,6 +78,9 @@ esconder 54/56/55 · barra 47, agarrar 50 → mão ante mão 49 (k 6), soltar 51
   `garathe.md`. SOCO (ou boca na parede) usa a clava se tem o par 2, senão as garras.
 - Golpes (`DAMAGE.TBL`, atacante 2, vítima "qualquer"): garras 15 com empurrão; clava 15
   com derrubada (20, 30) / (20, 10) / (20, −10); chicote 18 com derrubada; som 5062.
+  (Revisão: a linha sai por vítima — `damage::row` sobre a tabela transcrita; barril 28
+  explode com 5 e derrubada em todas as variantes; tipos 4, 11, 89, 105, 109 levam 8 com
+  empurrão e 3038; o mesmo vale para a faca 25 e o chicote 108, e o soco do Jake.)
 - **Chicote**: a linha até a boca só é testada até a metade. Projétil 108 (`owb.anm`): reto,
   20 de dano e derrubada; após 7 tiques (Ruling: o meio de 6–8) gera dois filhos a ±11,25°
   com a mesma velocidade, até a 4ª geração; some na parede.

@@ -579,7 +579,16 @@ mod tests {
         }
         let (t, b) = hit.expect("um golpe");
         assert_eq!(t, 3);
-        assert_eq!((b.amount, b.shove, b.push), (15, true, (-2, 0)));
+        assert_eq!((b.attacker, b.variant), (2, 0));
+        // contra um objeto qualquer à esquerda (olha para a esquerda)
+        let on = |b: crate::damage::Strike| {
+            b.row(7).unwrap().pending(crate::damage::Geometry {
+                vel: (0, 0),
+                toward: (-10, 0),
+            })
+        };
+        let p = on(b);
+        assert_eq!((p.amount, p.shove, p.push), (15, true, (-2, 0)));
         // com a clava (par 2): SOCO usa a clava, 114 na frente, derrubada (20, 10)
         let mut j = armed(&w, &[(2, (1, 1))]);
         j.tick(PUNCH, &w);
@@ -589,8 +598,8 @@ mod tests {
             j.tick(0, &w);
             blow = blow.or(j.blow);
         }
-        let b = blow.unwrap();
-        assert_eq!((b.amount, b.knockdown, b.push), (15, true, (-20, 10)));
+        let p = on(blow.unwrap());
+        assert_eq!((p.amount, p.knockdown, p.push), (15, true, (-20, 10)));
         // chicote (par 3): golpe 18 e o projétil 108 em t = 10 (passo 2)
         let mut j = armed(&w, &[(3, (1, 5))]);
         assert_eq!(
@@ -605,7 +614,7 @@ mod tests {
         for _ in 0..12 {
             j.tick(0, &w);
             shots.append(&mut j.shots);
-            blows += usize::from(j.blow.is_some_and(|b| b.amount == 18));
+            blows += usize::from(j.blow.is_some_and(|b| on(b).amount == 18));
         }
         assert_eq!(blows, 1);
         assert_eq!(shots.len(), 1);

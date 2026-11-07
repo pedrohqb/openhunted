@@ -16,11 +16,11 @@ pub const SPLIT_WAIT: u32 = 2;
 /// Última geração que ainda se divide.
 const LAST_SPLIT: u8 = 2;
 /// Golpe do chicote do Garathe (108, `0x40cb6c`): divide-se a ±11,25° (`0x800`) depois de
-/// 6–8 tiques (Ruling: 7) até a 4ª geração; 20 de dano com derrubada (módulo 20).
+/// 6–8 tiques até a 4ª geração; o dano sai das linhas `(108, …)` do `DAMAGE.TBL` (20,
+/// explosão e derrubada de módulo 20).
 pub const WHIP_SPLIT_ANGLE: i32 = 0x800;
 pub const WHIP_SPLIT_WAIT: u32 = 7;
 const WHIP_LAST_SPLIT: u8 = 3;
-pub const WHIP_DAMAGE: i32 = 20;
 
 #[derive(Debug, Clone)]
 pub struct PelletState {

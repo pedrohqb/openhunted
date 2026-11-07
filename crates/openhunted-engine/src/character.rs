@@ -152,6 +152,14 @@ impl Character {
         }
     }
 
+    /// Tipo do objeto (1 Jake, 2 Garathe).
+    pub fn kind(self) -> u32 {
+        match self {
+            Character::Jake => 1,
+            Character::Garathe => 2,
+        }
+    }
+
     /// Pelo tipo do objeto (1 Jake, 2 Garathe).
     pub fn from_kind(kind: u32) -> Option<Character> {
         match kind {

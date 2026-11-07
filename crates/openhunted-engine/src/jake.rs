@@ -14,7 +14,7 @@ pub use moves::{BAR_BOX, CRAWL_BOX, Env, Skel, SpecialBlast, SpecialEffect, Zone
 
 pub use crate::character::Character;
 use crate::character::Profile;
-use crate::damage::{Health, Pending, apply};
+use crate::damage::{Health, Pending, Strike, apply};
 use crate::input::{DOWN, JUMP, LEFT, NEXT_WEAPON, PREV_WEAPON, PUNCH, RIGHT, SHOOT, UP};
 use crate::physics::{Body, Rect, SUB, World, step};
 pub use weapons::{FISTS, GRENADES, PISTOL, ROCKETS, SHOTGUN, STARS, ShotKind, weapon};
@@ -480,8 +480,9 @@ pub struct Jake {
     pub special: Option<SpecialBlast>,
     /// Caixa do soco no primeiro tique da janela do golpe (a cena fere quem cruza).
     pub punch: Option<Rect>,
-    /// Dano desse golpe (linha do `DAMAGE.TBL` da arma e da mira).
-    pub blow: Option<Pending>,
+    /// Esse golpe (atacante e variante da arma e da mira; a linha do `DAMAGE.TBL` sai por
+    /// vítima).
+    pub blow: Option<Strike>,
     /// Trocou de arma neste tique (a cena toca 3090).
     pub switched: bool,
     /// Tiques restantes da pose "pronto" depois da troca (`+0x26c`).
@@ -710,17 +711,13 @@ impl Jake {
         }
     }
 
-    /// Dano do golpe corpo a corpo do estado de tiro corrente (linha do `DAMAGE.TBL` da
-    /// variante), com o empurrão pelo lado.
-    fn blow_damage(&self, w: u8, aim: Aim) -> Option<Pending> {
-        let b = self.weapon(w as usize).blow?[weapons::aim_slot(aim)];
-        let dir = self.dir();
-        Some(Pending {
-            amount: b.damage,
-            knockdown: b.knockdown,
-            shove: !b.knockdown,
-            push: (b.push.0 * dir, b.push.1),
-            ..Default::default()
+    /// Golpe corpo a corpo do estado de tiro corrente: o tipo do jogador e a variante da
+    /// arma e da mira.
+    fn blow_damage(&self, w: u8, aim: Aim) -> Option<Strike> {
+        let variant = self.weapon(w as usize).blow?[weapons::aim_slot(aim)];
+        Some(Strike {
+            attacker: self.character.kind(),
+            variant,
         })
     }
 
