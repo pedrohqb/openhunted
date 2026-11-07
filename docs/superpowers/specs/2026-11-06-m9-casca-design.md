@@ -42,6 +42,11 @@ Ruling: Help abre o `SABOUT` (não há arquivo de ajuda); 33002 mostra a versão
   (padrão `~/.config/...`), seção `[Hunter]`, chaves do `HUNTER.INI` (`Difficulty`,
   `MusicVolume`, `SfxVolume`, `Brightness`, `NoMusicStart`) e a do port `MusicDir`; chaves
   desconhecidas são mantidas; valores fora da faixa voltam ao padrão (1, 25, 75, 1402).
+  Ruling: um `hunter.ini` que não é UTF-8 (o `HUNTER.INI` do Windows é ANSI) é lido como
+  Latin-1 e regravado em Latin-1, sem perder byte das outras linhas; se o arquivo existe e
+  não dá para lê-lo, não é sobrescrito (aviso no terminal). Todas as gravações (opções,
+  heróis, jogo salvo) são atômicas (temporário na mesma pasta + `rename`); as leituras são
+  limitadas (`.hhg` a 1 961 bytes, `hunter.fam` a 64 KB, `hunter.ini` a 1 MB).
 - Volumes: < 10 = desligado; senão o volume mestre de cada saída é o valor (0–100).
 - Brilho: Ruling: a paleta `WORLD_G{b−1401}.PAL` vale para o briefing e a partida; as telas
   `.ITF` seguem com a `WORLD.PAL` (`interface-itf.md`).
@@ -69,17 +74,23 @@ começa em LOAD). SINGLE PLAYER fica marcado. Retrato 22010: rótulo 17 (Jake) o
   remontar a lista em `0x4406d3`); a leitura os ignora.
 - Ruling: pasta `$XDG_DATA_HOME/openhunted/saves/` (padrão `~/.local/share/...`); o nome
   vem do `SHIGH` (título 10042 "Save Game As:"), limpo para letras, dígitos, espaço, `-` e
-  `_` (até 32), com `.hhg`. Primeira gravação da campanha pergunta; depois grava direto no
+  `_` (até 31, o limite do campo), com `.hhg`. Ruling: nome vazio depois de limpo → caixa
+  "TYPE A NAME WITH LETTERS OR DIGITS." e o campo continua aberto. Primeira gravação da campanha pergunta; depois grava direto no
   mesmo arquivo (como o original). Ruling: arquivo existente é substituído sem a pergunta
   10040; Esc no nome = não grava; falha de escrita → aviso no terminal.
-- Carga: `SHIGH` "Load Game:" com o nome do jogo mais recente; inválido → caixa 10009. Depois:
+- Carga: `SHIGH` "Load Game:" com o nome do jogo mais recente (Ruling: entre os `.hhg` de
+  nome já limpo, para o nome voltar ao mesmo arquivo); inválido → caixa 10009. Sem pasta de
+  dados (sem `HOME`), Restore abre o campo com a caixa "SAVED GAMES ARE NOT AVAILABLE: NO
+  HOME FOLDER." (texto do port). Depois:
   missão corrente (fora da lista → 0); se já tem recorde, a próxima sem recorde
   (`next_mission`); briefing; Cancel volta ao menu.
 - `hunter.fam` (`openhunted-formats::save::HeroList`), Ruling: na pasta de dados. Até 14,
   decrescente; XOR com chave sorteada a cada gravação. Na contagem a 100 (uma vez): se a
   soma entra (`0x445036`), `SHIGH` pede o nome e grava (atualiza a linha do id da
   campanha ou cria uma). Ruling: só se o recorde subiu nesta vitória; com nome já dado na
-  campanha, atualiza sem perguntar.
+  campanha, atualiza sem perguntar. Ruling: uma escolha do resultado (REPLAY, NEXT, MAIN)
+  antes da contagem chegar a 100 acaba a contagem antes (nome e gravação) e é seguida
+  quando o resultado volta.
 - `SHERO`: uma linha por quadro com o som 3093, nome à esquerda e pontos à direita, cor 209,
   14 linhas de 21 px na área 31002.
 - Sem a gravação ligada (testes antigos, `App::new`), nada disso acontece (sessão só).
@@ -103,6 +114,9 @@ começa em LOAD). SINGLE PLAYER fica marcado. Retrato 22010: rótulo 17 (Jake) o
 - Ruling: decodificação pelo `ffmpeg` do PATH (`-f avi -i pipe:0`, vídeo `rgb24` a 15 qps,
   áudio `s16le` estéreo 22 050 Hz), o AVI lido da pasta `Movies/` dos dados; quadro 320×240
   ampliado 2× (ocupa 640×480). Sem `ffmpeg` ou com erro: o filme é pulado em silêncio.
+  Ruling: o relógio do vídeo e o áudio começam com o primeiro quadro desenhado (a abertura
+  é criada antes da janela), e o avanço seguinte, que traz o tempo de abrir o filme
+  (~0,4 s), é descartado; o vídeo fica no máximo um quadro da janela atrás do áudio.
   Qualquer tecla ou clique pula. O tocador é testado com um decodificador falso.
 
 ## Música
@@ -113,7 +127,10 @@ começa em LOAD). SINGLE PLAYER fica marcado. Retrato 22010: rótulo 17 (Jake) o
   ordem de nome tocados em sequência com volta ao início, durante a partida; `.wav` lido
   direto, outros pelo `ffmpeg`. Nome da faixa: dígitos do nome do arquivo (`track02.wav` →
   faixa 2) → `SYSTEM.RES` 10010 + n ("Shock Wave"…), senão o nome do arquivo; aparece no
-  título da janela (não há menu da janela).
+  título da janela (não há menu da janela). Ruling: a faixa é decodificada numa thread (o
+  jogo não para) e começa quando fica pronta; até 15 min por faixa (`ffmpeg -t`, `.wav`
+  acima de 64 MB também pelo `ffmpeg`); "a faixa acabou?" é conferido a cada 1 s; faixa
+  ilegível ou sem quadros é pulada de vez.
 - O mixer ganha laço por som, `stop`, `is_playing` e volume mestre. Ruling: duas saídas SDL
   (efeitos e música); filmes e vozes saem pela de música a volume 100.
 
