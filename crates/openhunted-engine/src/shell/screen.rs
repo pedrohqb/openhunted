@@ -100,7 +100,7 @@ fn logical_len(anim: &Animation) -> usize {
 }
 
 /// Quadro físico de um quadro lógico (fora da tabela: nenhum).
-fn physical(anim: &Animation, frame: usize) -> Option<usize> {
+pub(crate) fn physical(anim: &Animation, frame: usize) -> Option<usize> {
     if anim.table_a.is_empty() {
         Some(frame)
     } else {
@@ -558,6 +558,19 @@ impl Screen {
     /// Desenha o quadro `frame` da animação da tela deslocado por `(dx, dy)` (relativo à
     /// tela): uso das telas para peças com posição própria (alça da barra de rolagem).
     pub fn draw_anim_frame(&self, fb: &mut Framebuffer, frame: usize, dx: i32, dy: i32) {
+        self.draw_frame_mapped(fb, frame, dx, dy, None);
+    }
+
+    /// Como `draw_anim_frame`, com cada pixel opaco passado pela tabela `map` (sem
+    /// framebuffer intermediário).
+    fn draw_frame_mapped(
+        &self,
+        fb: &mut Framebuffer,
+        frame: usize,
+        dx: i32,
+        dy: i32,
+        map: Option<&[u8; 256]>,
+    ) {
         let Some(frame) = physical(&self.anim, frame) else {
             return;
         };
@@ -568,12 +581,11 @@ impl Screen {
             let Some(f) = bmp.frames.get(op.frame as usize) else {
                 continue;
             };
-            fb.blit(
-                f,
-                self.offset.0 + dx + op.x,
-                self.offset.1 + dy + op.y,
-                true,
-            );
+            let (x, y) = (self.offset.0 + dx + op.x, self.offset.1 + dy + op.y);
+            match map {
+                None => fb.blit(f, x, y, true),
+                Some(t) => blit_mapped(fb, f, x, y, t),
+            }
         }
     }
 
@@ -601,24 +613,38 @@ impl Screen {
                 c.rect.x + c.origin.0,
                 c.rect.y + c.origin.1,
             );
-            match &c.remap {
-                None => self.draw_anim_frame(fb, f, x, y),
-                Some(t) => {
-                    let mut tmp = Framebuffer::new(fb.width, fb.height);
-                    self.draw_anim_frame(&mut tmp, f, x, y);
-                    for (o, &p) in fb.pixels.iter_mut().zip(&tmp.pixels) {
-                        if p != 0 {
-                            *o = t[usize::from(p)];
-                        }
-                    }
-                }
-            }
+            self.draw_frame_mapped(fb, f, x, y, c.remap.as_deref());
         }
         for t in &self.texts {
             if let Some(r) = self.rect(t.id) {
                 if self.ctl(t.id).is_some_and(|c| c.flags & flags::HIDDEN == 0) {
                     draw_text_in(fb, &t.font, r, &t.text, t.color, true);
                 }
+            }
+        }
+    }
+}
+
+/// `Framebuffer::blit` transparente com a tabela de cor `t` nos pixels opacos.
+fn blit_mapped(fb: &mut Framebuffer, f: &openhunted_formats::Frame, x: i32, y: i32, t: &[u8; 256]) {
+    let (fw, fh) = (i64::from(f.width), i64::from(f.height));
+    let (x, y) = (i64::from(x), i64::from(y));
+    let (w, h) = (fb.width as i64, fb.height as i64);
+    let (x0, y0) = (x.max(0), y.max(0));
+    let (x1, y1) = ((x + fw).min(w), (y + fh).min(h));
+    if x0 >= x1 || y0 >= y1 || f.pixels.len() < (fw * fh) as usize {
+        return;
+    }
+    let n = (x1 - x0) as usize;
+    for dy in y0..y1 {
+        let src = ((dy - y) * fw + (x0 - x)) as usize;
+        let dst = (dy * w + x0) as usize;
+        for (o, &p) in fb.pixels[dst..dst + n]
+            .iter_mut()
+            .zip(&f.pixels[src..src + n])
+        {
+            if p != 0 {
+                *o = t[usize::from(p)];
             }
         }
     }

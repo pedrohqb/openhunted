@@ -191,15 +191,21 @@ impl Page for NameEntry {
         } else {
             inner
         };
-        let mut clip = crate::render::Framebuffer::new(fb.width, fb.height);
-        clip.pixels.copy_from_slice(&fb.pixels);
-        draw_text_in(&mut clip, &self.font, area, &shown, name_ids::COLOR, false);
-        // recorta no campo
-        for y in inner.y.max(0)..(inner.y + inner.h).min(fb.height as i32) {
-            for x in inner.x.max(0)..(inner.x + inner.w).min(fb.width as i32) {
-                let i = y as usize * fb.width + x as usize;
-                fb.pixels[i] = clip.pixels[i];
-            }
+        // recorta no campo: o texto vai para um quadro do tamanho do campo (não da tela)
+        if inner.w > 0 && inner.h > 0 {
+            let mut clip = crate::render::Framebuffer::new(inner.w as usize, inner.h as usize);
+            let local = Rect {
+                x: area.x - inner.x,
+                y: 0,
+                ..area
+            };
+            draw_text_in(&mut clip, &self.font, local, &shown, name_ids::COLOR, false);
+            let frame = openhunted_formats::Frame {
+                width: inner.w as u16,
+                height: inner.h as u16,
+                pixels: clip.pixels,
+            };
+            fb.blit(&frame, inner.x, inner.y, true);
         }
         if let Some(t) = &self.title {
             let b = self.screen.bounds();

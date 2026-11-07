@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use openhunted_formats::{Animation, Bitmap, Font, Result};
 
+use super::screen::physical;
 use crate::anim::draw_ops;
 use crate::assets::Assets;
 use crate::render::{Framebuffer, SCREEN_H, SCREEN_W, draw_text, measure_text};
@@ -84,12 +85,16 @@ impl Credits {
     pub fn draw(&self, fb: &mut Framebuffer) {
         fb.clear(0);
         if let Some(a) = &self.anim {
+            // o rótulo conta quadros lógicos: a tabela A dá o físico (como `Screen`)
             let start = a
                 .labels
                 .iter()
                 .find(|l| l.id == BACKGROUND)
                 .map_or(0, |l| usize::from(l.frame));
-            for op in draw_ops(a, start) {
+            for op in physical(a, start)
+                .map(|f| draw_ops(a, f))
+                .unwrap_or_default()
+            {
                 if let Some(f) = self
                     .bitmaps
                     .get(&op.bitmap.to_uppercase())
@@ -115,6 +120,23 @@ impl Credits {
 mod tests {
     use super::*;
     use openhunted_formats::test_support::mkpft;
+
+    #[test]
+    fn the_background_label_counts_logical_frames() {
+        let (anim, bmps) = crate::shell::screen::tests::synth_anim();
+        let font = Rc::new(Font::parse(&mkpft('a' as u32, &[(2, vec![7; 4])])).unwrap());
+        let mut fb = Framebuffer::new(SCREEN_W, SCREEN_H);
+        let plain = Credits::new(Some(anim.clone()), bmps.clone(), font.clone(), vec![]);
+        plain.draw(&mut fb);
+        assert!(fb.pixels.contains(&1), "sem a tabela A, o quadro 0");
+        // com a tabela A, o rótulo 1 (lógico 0) aponta o quadro físico 4 (cor 5)
+        let mut a = (*anim).clone();
+        a.table_a = vec![4; a.frames.len()];
+        let c = Credits::new(Some(Rc::new(a)), bmps, font, vec![]);
+        c.draw(&mut fb);
+        assert!(fb.pixels.contains(&5));
+        assert!(!fb.pixels.contains(&1));
+    }
 
     #[test]
     fn scrolls_up_and_ends_after_the_last_line() {
