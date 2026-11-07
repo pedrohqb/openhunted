@@ -489,6 +489,8 @@ pub struct Jake {
     switch_pose: u32,
     /// Veneno (`+0x270`): quanto perde a cada 20 tiques.
     pub poison: i32,
+    /// Piscar da cor (`+0x28c/+0x290`, `docs/re/cores-sprites.md`).
+    pub flash: crate::tint::Flash,
     /// Chegou ao fim do rótulo 100 empurrando neste tique (`0x00425d04`: a cena tenta a
     /// porta da célula numa zona PR 0x20).
     pub door_push: bool,
@@ -539,6 +541,7 @@ impl Jake {
             switched: false,
             switch_pose: 0,
             poison: 0,
+            flash: crate::tint::Flash::default(),
             door_push: false,
             push_loop: false,
             clock: 0,
@@ -884,6 +887,11 @@ impl Jake {
     }
 
     /// Desenhado (fica invisível durante o teletransporte).
+    /// Tabela de cor do desenho (`0x42315f`/`0x4282d3`): a do piscar ou a do personagem.
+    pub fn tint(&self) -> crate::tint::Tint {
+        crate::tint::player(self.is_garathe(), &self.flash)
+    }
+
     pub fn is_visible(&self) -> bool {
         !matches!(self.state, State::Teleporting(_))
     }
@@ -956,6 +964,9 @@ impl Jake {
         {
             return false;
         }
+        if p.amount != 0 && (p.knockdown || p.shove || p.jolt || p.explosion) {
+            self.flash.start(crate::tint::FLASH_HIT, 0);
+        }
         let g = self.is_garathe();
         let layering = matches!(self.state, State::LayerUp(_) | State::LayerDown(_));
         // empurrão: Jake em 1/10/101; Garathe em 1, 54–56 e 58 (`0x428531`)
@@ -985,6 +996,7 @@ impl Jake {
             }
         } else if p.electric && !matches!(self.state, State::Shocked(_)) && !(g && layering) {
             self.body.vx = 0;
+            self.flash.start(crate::tint::FLASH_SHOCK, 0);
             self.set(State::Shocked(SHOCK_TICKS));
             if g {
                 self.frame = garathe::SHOCK_FRAME.min(self.len_of(121) - 1);
@@ -1251,6 +1263,12 @@ impl Jake {
             });
         }
         self.take_damage(self.ticks);
+        // piscar: envenenado (`0x42328e`), e o passo do fim da atualização (`0x408129`)
+        // adiantado para cá (o do especial, posto depois, conta a partir do próximo tique)
+        if self.poison > 0 {
+            self.flash.start(crate::tint::FLASH_POISON, 0);
+        }
+        self.flash.tick(self.poison > 0);
         if !self.controllable() {
             self.tick_passive(input, env);
             return;
@@ -1825,6 +1843,59 @@ mod tests {
         assert_eq!((j.body.x, j.body.y, j.body.vy), (100, 53, 0));
         assert_eq!(j.state(), State::Idle);
         assert!(!j.respawn_if_outside((2000, 300)));
+    }
+
+    #[test]
+    fn color_flashes_on_hits_poison_and_shock() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0).with_health(100, 0);
+        assert_eq!(j.tint().table, crate::tint::JAKE);
+        // dano comum, sem reação: não pisca
+        j.hurt(Pending {
+            amount: 1,
+            ..Default::default()
+        });
+        j.tick(0, &w);
+        assert!(!j.flash.active());
+        // explosão: 0x2e em tiques alternados (4)
+        j.hurt(Pending {
+            amount: 1,
+            explosion: true,
+            ..Default::default()
+        });
+        let seen: Vec<i32> = (0..5)
+            .map(|_| {
+                let t = j.tint().table;
+                j.tick(0, &w);
+                t
+            })
+            .collect();
+        assert_eq!(seen[1..], [0x2e, 0x23, 0x2e, 0x23]);
+        // choque: 0x25 por 10
+        j.hurt(Pending {
+            amount: 1,
+            electric: true,
+            ..Default::default()
+        });
+        j.tick(0, &w);
+        assert_eq!(j.tint().table, 0x25);
+        for _ in 0..10 {
+            j.tick(0, &w);
+        }
+        // veneno: 0x2f rearmado a cada tique enquanto envenenado
+        j.poison = 1;
+        let poisoned = (0..12)
+            .filter(|_| {
+                j.tick(0, &w);
+                j.tint().table == 0x2f
+            })
+            .count();
+        assert!((5..=7).contains(&poisoned), "{poisoned}");
+        j.poison = 0;
+        for _ in 0..5 {
+            j.tick(0, &w);
+        }
+        assert_eq!(j.tint().table, crate::tint::JAKE);
     }
 
     #[test]
