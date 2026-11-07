@@ -407,6 +407,43 @@ mod tests {
         );
     }
 
+    /// 22/25 (`0x429e46`): chão, parede e contato só são vistos quando a animação acaba;
+    /// encostar na parede no meio do pulo não o encerra.
+    #[test]
+    fn mid_air_wall_brush_does_not_end_the_jump() {
+        let w = World::new(vec![
+            Rect {
+                x: -1000,
+                y: 100,
+                w: 3000,
+                h: 20,
+            },
+            Rect {
+                x: 60,
+                y: -200,
+                w: 20,
+                h: 240,
+            },
+        ]);
+        let mut j = garathe(&w, 0);
+        j.tick(RIGHT, &w);
+        j.tick(RIGHT | JUMP, &w);
+        assert_eq!(j.state(), State::Jump(JumpKind::Medium));
+        let mut brushed = false;
+        let mut n = 0;
+        while j.state() == State::Jump(JumpKind::Medium) && n < 60 {
+            j.tick(0, &w);
+            brushed |= j.body.hit_wall;
+            if j.state() == State::Jump(JumpKind::Medium) {
+                assert_eq!(j.sound, None);
+            }
+            n += 1;
+        }
+        assert!(brushed, "encostou na parede no ar");
+        // 22 com 6 quadros e atraso 1: ao menos 10 tiques no ar antes de decidir
+        assert!(n >= 10, "o pulo durou {n} tiques");
+    }
+
     #[test]
     fn standing_and_up_jumps_use_their_skeleton_factors() {
         let w = floor_world();

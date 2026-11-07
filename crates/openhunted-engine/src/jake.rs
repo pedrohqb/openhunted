@@ -1289,6 +1289,8 @@ impl Jake {
             && can_fire
             && shooting
             && self.start_fire(input, world);
+        // Garathe: a animação do pulo 22/25 acabou neste tique
+        let mut jump_over = false;
         match self.state {
             _ if fired => {}
             State::Fire { aim, t, w, alt } => self.tick_fire(input, world, (aim, t, w, alt)),
@@ -1337,8 +1339,10 @@ impl Jake {
                     self.set(State::WildFall);
                 } else {
                     if self.is_garathe() && self.anim_done() {
-                        // 22/25: a animação toca uma vez e para no último quadro
+                        // 22/25: a animação toca uma vez e para no último quadro; só então
+                        // vê chão, parede e contato (`0x429e46`, `0x429c6c`)
                         self.anim_mode = AnimMode::Hold;
+                        jump_over = true;
                     }
                     self.air_reverse(side);
                 }
@@ -1382,8 +1386,13 @@ impl Jake {
         let gravity = self.gravity_on();
         step(&mut self.body, world, gravity);
         match self.state {
-            State::Jump(kind) if self.is_garathe() && self.body.hit_wall => {
-                // 22/25 contra a parede: fala e queda (`0x429e46`, `0x429c6c`)
+            // Garathe no meio do pulo: nada decide até a animação acabar
+            State::Jump(_) if self.is_garathe() && !jump_over => {}
+            State::Jump(kind)
+                if self.is_garathe() && self.body.hit_wall && !self.body.on_ground =>
+            {
+                // 22/25 contra a parede (o chão vem antes): fala e queda (`0x429e46`,
+                // `0x429c6c`)
                 self.sound = Some(if kind == JumpKind::Long {
                     garathe::SPEECH_WALL_LONG
                 } else {

@@ -52,7 +52,8 @@ esconder 54/56/55 · barra 47, agarrar 50 → mão ante mão 49 (k 6), soltar 51
 - Correr: vx ±15 px/tique; FURTIVO + lado → andar 3 (pose de luta).
 - Escolha do pulo: chão a 156 px → médio (13, −12); senão a 350 → preparo 24 e longo
   (25, −14); senão médio. Correndo, PULAR+CIMA+lado → longo direto. **Não há estendido.** No
-  ar a animação toca uma vez e para no último quadro.
+  ar a animação toca uma vez e para no último quadro; chão, parede e contato só contam
+  quando ela acaba (revisão: encostar na parede no meio do pulo não o encerra).
 - **Investida** no pulo longo (`0x429bda`): cada objeto sólido tocado leva 7, tranco e
   empurrão pelo lado (uma vez por objeto por pulo).
 - Agachado: tiro e pulo exigem 20 px livres acima.
