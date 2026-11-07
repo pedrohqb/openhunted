@@ -37,7 +37,7 @@ Jakes de `H_J_010/033` e de `H_M_*`. Inventário pelo `points` (armas 2–6); vi
 | `+0x4c/+0x50` | dx, dy até o alvo; `+0x54` = vê |
 | `+0x58` | cópia de `+0x220…+0x23f` (contato), restaurada no fim |
 | `+0x78` | última entrada; `+0x7c` tique da última visão |
-| `+0x80/84/88` | célula-alvo do caminho (x, y, camada; −1 = nenhuma); `+0x8c` direção; `+0x90` entrada do passo; `+0x94` espera |
+| `+0x80/84/88` | célula-alvo do caminho (x, y, camada; −1 = nenhuma); `+0x8c` direção; `+0x90` entrada do passo; `+0x94` espera, em pensamentos (−1 por pensamento) |
 | `+0x98` | modo: 1 caçar, 2 recuar, 3 vagar (0 vale 1) |
 | `+0xdc` | **período de pensamento = 2**: nos tiques ímpares repete `+0x78` |
 
@@ -45,13 +45,22 @@ Jakes de `H_J_010/033` e de `H_M_*`. Inventário pelo `points` (armas 2–6); vi
 
 ## Percepção (`0x42d520`) [confirmado]
 
-- **Alvo** (`0x42c5cc`, se não há ou morreu, `+0x178 & 0x8000`): os dois primeiros jogadores
-  presentes; fica o mais próximo se estiver na mesma célula (`0x435224`) ou se a busca de
-  caminho (`0x42f88c`, profundidade 10) o alcançar; senão o outro. **Sem limite de distância nem
-  esconderijo.**
-- **Vê** (`+0x54`): distância < **400** px, mesma camada e linha livre centro a centro
-  (`0x42d475`: `0x433aa3`/`0x43735d`), ou tocando o alvo. No modo 3, alvo escondido (classe 10) ou
-  morrendo (14) = não vê. Ao ver: `+0x7c` = tique e apaga o caminho.
+A entrada global `0x487a2c` começa cada pensamento em 0 (`0x407e2d` sem vaga de jogador,
+`0x422a39`/`0x427c65`); as funções abaixo a escrevem e devolvem "conseguiu" (1/0).
+
+- **Alvo** (`0x42c5cc`, só quando não há ou ele morreu, `+0x178 & 0x8000`): os dois primeiros
+  jogadores humanos (`+0x19c ≠ 0`) presentes e vivos; fica o mais próximo se estiver na mesma
+  célula (`0x435224`) ou se a busca de caminho (`0x42f88c`, profundidade 10) o alcançar; senão o
+  outro, nas mesmas condições; senão **nenhum**. **Sem limite de distância nem esconderijo**,
+  e o alvo escolhido **fica** (não é revisto enquanto vive). Sem alvo o pensamento vai direto
+  ao modo 3, que sem alvo só chama os perigos (`0x42f4f0` → `0x42f86e`): a IA fica parada.
+  Sem alvo também não se refazem a lista de perigos nem as células (`+0x0c`, `+0x10…`; ficam
+  as do último pensamento com alvo — o port usa as atuais).
+- **Vê** (`+0x54`): mesma camada, distância < **400** px e linha livre centro a centro
+  (`0x42d475`: `0x433aa3`/`0x43735d`) ou contato com o alvo (`+0x220 = 1`, `+0x224` = alvo).
+  No modo 3, alvo escondido (classe 10) ou morrendo (14) **no pensamento anterior** (`+0x04`
+  ainda não atualizado) = não vê. Ao ver: `+0x7c` = tique e apaga o passo e a espera
+  (`0x42d6e3`).
 
 Classes (`0x42c7b6`, estados Jake / Garathe): 1 parado (0,1,3,6–8,15,79 / 0–2,4,5,121); 2 pose
 (4 / 76); 0xf especial (9 / 127); 3 andar/correr (2,10 / 3,10–12); 4 camada (11,12 / —); 5 subir
@@ -66,85 +75,134 @@ Sem alvo → modo 3. **Modo 1** (`0x42ed64`):
 
 1. Dano pendente > 10, ou dano com vida < 30 → modo 2 (`0x42f35b`).
 2. Própria classe 2, 6 ou 0xf → entrada 0 (espera).
-3. Vê: alvo escondido/morrendo → modo 3. Por classe própria: 5/7 → no ar, CIMA se o alvo
-   está acima e `vy > −16` (`0x42e0f9`); 11 → barra (`0x42e05d`: alvo logo abaixo → PULAR+BAIXO;
-   à altura → lado; senão BAIXO); 12 → escada/corda (`0x42e129`); 16 → só ataque; demais → ataque
-   (`0x42e659`), senão aproximação (`0x42dd8f`).
-4. Não vê, ou a aproximação falha → **caminho**: logo após perder de vista (2 pensamentos),
-   50 % de pose (entrada 0xf, `0x42e8f3`); depois segue a busca de caminho até a célula do alvo;
-   sem caminho espera `5·+0xdc` = 10 tiques, com 1/50 de pose e 1/1000 de passar ao modo 3.
-5. Sempre por fim os perigos (`0x42e1a9`).
+3. Vê: alvo escondido/morrendo → modo 3 (entrada 0). Por classe própria (tabela `0x42ee23`):
+   5/7 → no ar (`0x42e0f9`: CIMA se o ângulo ≥ 0x8000 e `+0x168 > −16`); 11 → barra
+   (`0x42e05d`: alvo logo abaixo, ângulo 0x3800–0x4800 → PULAR+BAIXO; célula própria fechada
+   embaixo (ou vazia) e `|dy| ≥ 10` → BAIXO; Jake nos estados 104–106 → BAIXO; senão o lado do
+   alvo); 12 → escada/corda (`0x42e129`: `dy > 20` com `|dx| < 10` ou `dy > 20` → ATIRAR
+   (solta); `dy < 5` → CIMA; `|dx| > 20` → lado; nada → ATIRAR); 14 → 0; 16 → só o ataque;
+   demais → ataque (`0x42e659`), senão aproximação (`0x42dd8f`). **Ataque e os casos no ar,
+   barra e escada voltam sem os perigos**; a aproximação bem-sucedida passa por eles. Os três
+   casos sempre conseguem (o desvio para o caminho quando falham nunca é tomado).
+4. Não vê, ou a aproximação falha → **caminho** (`0x42ef48`):
+   - no primeiro pensamento após perder de vista (`tique − 2·+0xdc < +0x7c < tique`), pose
+     (`0x42e8f3`: parado ou andando, 501/1000; nas outras classes sempre) — e volta sem perigos;
+   - sem passo e sem espera: busca até a célula do alvo e passo (`0x42d721`); sem caminho
+     espera `+0x94 = 5·+0xdc = 10` **pensamentos (20 tiques)**: a cada um, `+0x94 −1`; na
+     classe 1, 1/50 de pose; senão entrada 0 e 1/1000 de passar ao modo 3;
+   - na célula-alvo do passo: centrado (`0x42db71`: `|ox| < 15/25`, `|oy| < 50/40` com
+     `o = c mod 128 − 64`) → nova busca e passo; se a entrada nova difere da última, pose
+     (`0x42e8f3`, como acima) e volta sem perigos. Sem centrar: espera no fim → nova busca;
+     senão repete a direção do passo e `+0x94 −1`;
+   - fora da célula-alvo: a mais de 1 célula (Manhattan) → apaga o passo e **entrada 0** neste
+     pensamento; a 1, como "sem centrar".
+5. Por fim os perigos (`0x42e1a9`), salvo nos retornos acima.
 
-**Modo 2** (`0x42df9f`): corre para o lado contrário ao alvo; parede a 20 px ou buraco sem
-pouso → volta ao modo 1. Sem ver → modo 1. **Modo 3** (`0x42f434`): com dano e alvo → modo 2;
-alvo não escondido → modo 0 (= caçar; ver "Em aberto"). Senão vaga: direções de caminho
-sorteadas 3/4 (esquerda/direita), sempre com **FURTIVO** (`0x400`, andar), 1/20 de pose;
-na barra/escada solta (PULAR).
+**Modo 2** (`0x42f35b`): sem ver → modo 1 (entrada 0). Vendo: classe própria 6 → 0; senão
+`0x42df9f`: corre para o lado contrário ao alvo; parede a 20 px ou buraco sem pouso → volta
+ao modo 1 sem perigos (a entrada de lado fica neste pensamento); escalando com o alvo bem
+acima, +BAIXO; conseguiu → perigos. (`0x42e938`, fuga por zonas, só com `+0x9c ≠ 0`: morto.)
+
+**Modo 3** (`0x42f434`): com dano e alvo → modo 2; alvo não escondido → modo 0 (= caçar),
+entrada 0. Por classe própria: 2, 4–7, 15, 16 → 0; 8, 9, 13 → modo 1, 0; 11, 12 → PULAR
+(solta). Senão: sem alvo, só os perigos. Com alvo: sem passo e sem espera, passo para o lado
+sorteado (`rand & 1` → esquerda, senão direita), sem consultar a grade; com espera, `−1` e,
+na classe 1, 1/20 de pose; na célula do passo e centrado, segue a mesma direção (parede da
+célula própria → inverte) e 1/20 de pose sem perigos; sem centrar ou ao lado, segue o passo.
+Passo com PULAR (buraco) é apagado e fica só **FURTIVO**; toda entrada de passo leva FURTIVO.
 
 ## Aproximação (`0x42dd8f`) [confirmado]
 
-Só contra alvo de classe 1, 3–5, 7–9, 11–13, 15, 16. `|dy| < 64` (alvo pulando) vale 0.
+Só contra alvo de classe 1, 3–5, 7–9, 11–13, 15, 16. `|dy| < 64` com o alvo na classe 5
+(pulando) vale 0.
 
-- Mesma altura (`|dy| < 20`): perto (< 30 Jake, < 50 Garathe) e alvo andando (exceto
-  empurrando) → segue o `vx` do alvo; parado → **recua andando** (FURTIVO, lado oposto) para ganhar
-  espaço; parede a 20 px → inverte. Longe: `|dx| > 10` → corre para ele.
-- Alvo bem acima (ângulo 0xbc00–0xc400) → PULAR+CIMA. Escalando: lado e CIMA/BAIXO pelo ângulo.
-- Correndo para um lado, `0x42cf70` sonda o chão: chão à frente → segue; buraco com pouso a
-  110/150/255 px (Jake, `0x478910…`) ou 156/350/225 px (Garathe, `0x47d128…`; `vx·(−2vy/g)`, g =
-  2) → +PULAR (agachado: CIMA); sem pouso → PULAR+CIMA no lugar (não cai).
+- Mesma altura (`−20 < dy < 20`): perto (**`d`** < 30 Jake, < 50 Garathe): alvo com `vx ≠ 0`
+  (qualquer classe, salvo empurrando) → segue o `vx`; senão, fora da barra/escada, **recua
+  andando** (FURTIVO, lado oposto); parede a 20 px do lado escolhido → inverte (nos dois
+  casos). Longe: `|dx| > 10` → corre para ele; senão nenhuma entrada. Depois `0x42cf70` e
+  **consegue sempre**.
+- Alvo bem acima (ângulo 0xbc00–0xc400) → PULAR+CIMA. Escalando: esquerda (0x4800–0xbc00)
+  ou direita (fora de 0x3800–0xc400); CIMA em 0x9000–0xf000, senão sempre BAIXO (o teste de
+  `0x42df7a` aceita todo ângulo). Senão falha.
+- `0x42cf70` (só com a entrada exatamente ESQ ou DIR) sonda o chão: chão à frente → segue;
+  buraco com pouso a 110/150/255 px (Jake, `0x478910…`) ou 156/350/225 px (Garathe,
+  `0x47d128…`; `vx·(−2vy/g)`, g = 2) → +PULAR (agachado: a entrada vira CIMA, `0x42e8d0`);
+  sem pouso → falha (quem chama põe PULAR+CIMA no lugar).
 
 ## Ataque (`0x42e659`) [confirmado]
 
-Exige ver. `m` = 7/12 px (Jake/Garathe), `p` = 30/50 px.
+Exige alvo e ver. `m` = 7/12 px (Jake/Garathe), `p` = 30/50 px.
 
 | Distância | Ação |
 |---|---|
 | < `m` | nada |
 | `m` … `(p−m)/2+m` (18/31) | repete a última entrada se tinha ATIRAR |
-| até `p` | não bate em alvo que foge (sinal de dx = sinal do vx), salvo empurrando. Jake: arma 1 (soco). Garathe: **clava** se tem o par 2, senão garras |
-| `p` … 200 | Garathe correndo (estado 10), d > 90, mesmo sentido do alvo, ângulo ±22,5° da horizontal e alvo correndo → **pulo longo** (lado+PULAR+CIMA, investida de 7). Senão melhor arma; Jake só com arma ≠ 1, Garathe só com arma ≥ 3 (facas, granadas, estrelas, chicote) |
+| até `p` | não bate em alvo que foge (sinal de dx = sinal do vx), salvo empurrando. Arma 1 (soco; Garathe: **clava** se tem o par 2). `0x42cdef` dá a mira **ou 0**, e o ataque **conta como feito mesmo com 0** |
+| `p` … 200 | Jake: só com arma ≠ 1. Garathe: correndo (estado 10), d > 90, `vx` dele e do alvo com o mesmo sinal (0 = +), ângulo em 0xf000–0x1000 ou 0x7000–0x9000 e **alvo no estado 10** → **pulo longo** (lado+PULAR+CIMA, investida de 7); senão só com arma ∉ {1, 2}. Atira se `0x42cdef ≠ 0` |
 | ≥ 200 | nada |
 
-Mira (`0x42cca4`): perto (< `p`), setores largos sem "só BAIXO": direita, baixo-dir.
-(0x800–0x4000), baixo-esq., esquerda, cima-esq., cima, cima-dir.; longe, só dispara alinhado a
-±0x200 de 0, 0x2000, 0x6000, 0x8000, 0xa000, 0xc000 ou 0xe000. Logo **nunca usa o especial**.
-Não atira nos estados (Jake) 9, 11, 12, 15, 25, 26, 76–78, 81–84, 87, 102, 162, 163, 166, 168,
-169, 171, 173, 177, 179, 181; (Garathe) 11, 12, 26–33, 35, 38, 45, 55, 58, 59, 61, 63, 65, 67,
-69, 80, 127.
+`0x42cdef(alvo, ângulo, d)`: mira `0x42cca4` e, pelo **tipo e estado do alvo**, 0 nos estados
+(Jake) 9, 11, 12, 15, 25, 26, 76–78, 81–84, 87, 102, 162, 163, 166, 168, 169, 171, 173,
+177, 179, 181; (Garathe) 11, 12, 26–33, 35, 38, 45, 55, 58, 59, 61, 63, 65, 67, 69, 80, 127 —
+alvo em especial, troca de camada, choque (Jake), queda, pouso duro, derrubada, levantando,
+saindo do esconderijo, empurrado/tranco ou morrendo não é atacado. Senão mira | ATIRAR.
+
+Mira (`0x42cca4`): perto (< `p`), setores direita [0xf800, 0x800), baixo-dir. [0x800,
+0x4000), baixo-esq. [0x4000, 0x7800), esquerda [0x7800, 0x9000), cima-esq. [0x9000, 0xb000),
+cima [0xb000, 0xd000), cima-dir. [0xd000, 0xf800) — sem "só BAIXO"; longe, só alinhado em
+`[c − 0x200, c + 0x200)` de 0, 0x2000, 0x6000, 0x8000, 0xa000, 0xc000 ou 0xe000. Logo **nunca
+usa o especial**.
 
 ## Perigos (`0x42e1a9`) [confirmado]
 
-Célula própria com código `(c/10) % 100` ∈ {29, 30, 36, 37, 39} e bit 1 em `+0x40`: andando
-para a borda → BAIXO [inferido: buraco/escada]. Depois, o objeto mais próximo da lista
-`0x47d14c` a < 100 px (tipos 1–4, 7, 8, 10, 11, 39–42, 102–107, 109, 89, 19–21, 29, 36, 25–27,
-99, 100, 108, 86, 68–72, 110):
+Célula própria vazia → nada. Código `k = (c/10) % 100` da célula, `x = centro mod 128`,
+`m = +0x40 & 1`:
+
+1. `k = 30`, ou `k` ∈ {29, 36, 37, 39} com (`m`, entrada **exatamente** DIR, `x > 64`) ou
+   (não `m`, exatamente ESQ, `x < 64`) → BAIXO (agachado: +BAIXO).
+2. `k` ∈ {29, 36, 37, 39} com (não `m`, exatamente DIR, `x < 64`) ou (`m`, exatamente ESQ,
+   `x > 64`) → +BAIXO. [inferido: buraco/escada na borda da célula]
+3. A lista `0x47d14c` a < 100 px (sem o próprio nem o alvo, mesma camada; tipos 1–4, 7, 8,
+   10, 11, 39–42, 102–107, 109, 89, 19–21, 29, 36, 25–27, 99, 100, 108, 86, 68–72, 110),
+   **ordenada pela distância**: o primeiro objeto cuja condição vale decide.
 
 | Tipo | Distância | Reação |
 |---|---|---|
-| 19–21, 25, 27, 29, 99, 100, 106, 108 (projéteis) | < 100, vindo para ele | BAIXO (agacha), se não rastejando |
-| 26 granada, 42 fogo, 68–72 | < 100 | indo para ele → pula por cima; senão pula para um lado ao acaso |
-| 39 pistão | < 95 | mantém PULAR/ATIRAR/SOCO; < 75 e abaixo dele → BAIXO |
-| 40 cerca, 41 catapulta | < 50 | indo para ele → +PULAR+CIMA |
-| 11 mina saltadora, 89 Manta, 109 formiga | < 50 | ATIRAR (+BAIXO se acima) virado para ele |
+| 19–21, 25, 27, 29, 99, 100, 106, 108 (projéteis) | < 100 | vindo para ele (só o sinal do `vx` do objeto em relação ao x dele) e não rastejando (86/36) → BAIXO |
+| 26 granada, 42 fogo, 68–72 | < 100 | a entrada aponta para o objeto → +PULAR+CIMA; senão lado ao acaso + PULAR+CIMA |
+| 39 pistão | < 95 | entrada com PULAR ou ATIRAR/SOCO → fica; < 75 e abaixo dele, não rastejando → BAIXO; senão a entrada (agachado: +BAIXO) |
+| 40 cerca, 41 catapulta | < 50 | a entrada aponta para o objeto → +PULAR+CIMA |
+| 11 mina saltadora, 89 Manta, 105, 109 formiga | < 50 | ATIRAR (+BAIXO se acima) virado para ele |
+
+4. Nenhum: agachado (classe 8) → CIMA (`0x42e8d0`).
+
+O port compara os centros (o original, `+0x14c/+0x150` com as distâncias de `0x435951`).
 
 ## Caminho (`0x42f88c`, `0x42f9a4`, `0x42d721`) [confirmado]
 
-Busca em profundidade (≤ 10 passos, só se a distância Manhattan x+y+camada ≤ 10) a partir de
-cada uma das 6 direções; devolve a primeira direção do menor caminho. Direção → célula:
-1 y−1, 2 y+1, 3 x−1, 4 x+1, 5 camada−1, 6 camada+1. Permissões na **célula de origem**:
+Busca em profundidade (≤ 10 passos, só se a distância Manhattan x+y+camada ≤ 10, sem voltar
+pela direção oposta, `0x47d1ec`) a partir de cada uma das 6 direções; devolve a primeira
+direção do menor caminho. Direção → célula: 1 y−1, 2 y+1, 3 x−1, 4 x+1, 5 camada−1,
+6 camada+1. Permissões na **célula de origem**, que precisa existir (`0x4317db` é NULL fora da
+grade **ou na célula vazia**; o destino pode ser vazio, mas não se sai dele):
 
 | Dir. | Teste | Bits (`célula+0x04`) |
 |---|---|---|
 | 1 subir | sem `0x40` e zona PR com bit 4 (corda/escada) | **`0x40` = fechada em cima** |
 | 2 descer | sem `0x2` | **`0x2` = fechada embaixo** |
-| 3 esquerda | sem `0x10`; destino sem portão (`célula+0x54` 1/2, `0x40f1f0`) | **`0x10` = parede à esquerda** |
-| 4 direita | sem `0x8`; idem | **`0x8` = parede à direita** |
+| 3 esquerda | sem `0x10`; destino sem portão (`célula+0x54` 1/2, `0x40f1f0`); na célula do pensante com portão e o centro em `x mod 128 > 64` → não (`0x42fc70`) | **`0x10` = parede à esquerda** |
+| 4 direita | sem `0x8`; idem, com `x mod 128 < 64` (`0x42fd0a`) | **`0x8` = parede à direita** |
 | 5/6 camada | zona PR bit 1 / bit 2 (portas) | — |
 
-Passo (`0x42d721`): fixa a célula-alvo e `+0x94 = 10`; offset no centro da célula `o = c mod 128
-− 64`. 1: centra (|ox| ≤ 15 Jake/25 Garathe) e CIMA; 2: centra e PULAR+BAIXO; 3/4: lado (+BAIXO
-se `oy < −50/−40` fora da barra; +CIMA escalando) e a sonda de buraco; 5: CIMA; 6: BAIXO
-(PULAR escalando). Passa da célula-alvo por mais de 1 → recomeça.
+As portas `OH` (tipos 50–52) ficam de fora: `0x42f96a` as lista em `0x4888cc`, que nunca é
+lida (código morto).
+
+Passo (`0x42d721`): direção 0 → apaga e espera 10 pensamentos. Senão fixa a célula-alvo e
+`+0x94 = 5·+0xdc = 10` (pensamentos) e a entrada, com `o = c mod 128 − 64` e as folgas
+`cx` 15/25, `cy` 50/40: 1 → centra (`ox < −cx` DIR, `> cx` ESQ) senão CIMA; 2 → centra senão
+PULAR+BAIXO; 3/4 → lado, +BAIXO se `oy < −cy` fora da barra, senão +CIMA se `oy > 0`
+escalando ou subindo no pulo, e `0x42cf70` (falha → PULAR+CIMA); 5 → CIMA (0 se `oy < −cy`),
+centrando por cima; 6 → BAIXO (PULAR escalando; 0 se `oy < −cy`), centrando por cima.
 
 ## Movimento, dano, morte e sons [confirmado]
 
@@ -156,6 +214,5 @@ jogador.
 ## Em aberto
 
 - Modo 3 com alvo visível põe `+0x98 = 0` (ramo sem desvio após `sub eax,4`, `0x42f479`) e
-  devolve a entrada antiga nesse tique: erro do original? Efeito: volta a caçar.
+  volta com a entrada 0: erro do original? Efeito: volta a caçar no pensamento seguinte.
 - Significado dos códigos de célula 29/30/36/37/39 e de `célula+0x40`.
-- `0x42f96a` lista as portas 50–52 (`0x4888cc`) para a busca, mas o uso não foi seguido.
