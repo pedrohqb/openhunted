@@ -107,7 +107,15 @@ bit 1 (`0x42334f`/`0x42851a` só o fazem com natureza 0).
 "Alpha…Delta Ant" (`0x472fb8`, registros 0x1c: alcance 60, vida 1). Nenhuma posta nas fases solo
 (só em `C_*`, `M_M_027`); o formigueiro 88 (`0x4149a0`, em `D_M_030` ×2, `T_M_008`) cria
 tipos 109 (`0x41fe70`). Vida 1: qualquer dano → `0x43d629(f, nulo, 4)` (fumaça raio 15) e some.
-Anda e vira na parede [inferido: estados 2/3]; alvo = jogador a ≤ 60 px, mesma camada, linha livre → morde:
+Estados (tique `0x41ffe4`, fins de rótulo `0x420313`): 2 anda (`0x4207c3` refaz vx = ±0x40
+a cada tique, vy = −8); andando, **3 tiques no mesmo x** (`+0x274`/`+0x27a`) → 3 (vira,
+parada); no fim de cada passo, `0x42081d` desloca a caixa 0x40 à frente e vira se não há chão
+(`0x420979`: sonda vy 0x78) ou se toca um objeto que não é formigueiro nem jogador (outra
+formiga: 50 %); o fim do 3 troca o lado (`+0x194 ^= 1`). Ao tocar um tipo 88 (fora de 1, −1
+e 6) → 6; o fim do 6 desloca x ±0x14 e passa a −1 (oculta, `0x2`) por `0x55 + rand%50 − 25`
+tiques; daí 1, com o lado trocado. 4/5 alternam na mordida (o fim do 4 morde). Criada pelo
+formigueiro (`0x414bd4`) na posição dele, olha para o lado contrário ao bit 0 do `+0x194`
+dele. Alvo = jogador a ≤ 60 px, mesma camada, linha livre → morde:
 `0x43d629(f, alvo, 0)` → linha `(109, 0)`: **5**; sons 3151 (10 % ao andar) e 3153 (mordida).
 Ao tocar um tipo 88 → estado 6. Derrubada: vx = ⅔ do empurrão. Contra ela: soco/garras 8.
 

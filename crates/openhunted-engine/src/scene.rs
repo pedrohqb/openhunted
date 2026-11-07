@@ -145,6 +145,9 @@ pub struct Scene {
     pub kills: i32,
     /// Inimigos dos tipos contados presentes no início da partida (`enemy::kills_total`).
     pub mines_at_start: i32,
+    /// Total do placar agora (`0x497330`, `enemy::kills_total` a cada tique): os da montagem
+    /// mais os criados em jogo (`0x10`) ainda vivos.
+    pub kills_total: i32,
     /// Cronômetro em tiques (`0x4972fc` = campo 1004 × 20; decrementado a cada tique).
     pub timer: i32,
     /// Limite de tempo da fase em segundos (campo 1004; 0 = sem limite).
@@ -356,6 +359,7 @@ impl Scene {
             rng: Rng::new(0x4a4b_4531),
             kills: 0,
             mines_at_start: 0,
+            kills_total: 0,
             timer: 0,
             time_limit: 0,
             cell_doors: Vec::new(),
@@ -406,6 +410,7 @@ impl Scene {
             rng: Rng::new(0x4a4b_4531),
             kills: 0,
             mines_at_start: 0,
+            kills_total: 0,
             timer: 0,
             time_limit: 0,
             cell_doors: Vec::new(),
@@ -712,6 +717,7 @@ impl Scene {
             }
         }
         s.mines_at_start = behaviour::enemy::kills_total(&s.entities);
+        s.kills_total = s.mines_at_start;
         Ok(s)
     }
 
@@ -872,6 +878,7 @@ impl Scene {
         }
         self.prev_input = input;
         self.kills = behaviour::enemy::kills(&self.entities);
+        self.kills_total = behaviour::enemy::kills_total(&self.entities);
         if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
             // deslocamento do desenho pelo esqueleto (`+0x16c/+0x170`)
             let (ox, oy) = j.draw_offset();
@@ -1658,7 +1665,7 @@ impl Scene {
                     mirror,
                 } => {
                     let mut e = behaviour::ant::spawned(at, variant, layer, mirror);
-                    self.attach_sprite(&mut e, "OAN.ANM", 2, mirror, 40, Some("OAN.BRD"));
+                    self.attach_sprite(&mut e, "OAN.ANM", 2, !mirror, 40, Some("OAN.BRD"));
                     if let Some(sp) = e.sprite.as_mut() {
                         sp.frozen = true;
                     }

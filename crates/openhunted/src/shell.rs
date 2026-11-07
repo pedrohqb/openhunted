@@ -436,7 +436,7 @@ impl App {
         });
         let stats = Stats {
             kills: scene.kills,
-            kills_total: scene.mines_at_start,
+            kills_total: scene.kills_total,
             ..Default::default()
         };
         let remains = match scene.jake.as_ref() {

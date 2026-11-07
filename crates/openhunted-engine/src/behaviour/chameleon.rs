@@ -572,13 +572,17 @@ mod tests {
         );
         v.extend(out.spawn);
         assert_eq!(v[1].health, 40, "metade da vida do Alpha");
-        assert!(!enemy::counted(&v[1]), "o clone não entra no placar");
+        assert!(enemy::counted(&v[1]), "o clone vivo entra no total");
         sync(&mut v);
         assert_eq!(st(&v[0]).clones, 1);
         v[0].health = 0;
         sync(&mut v);
         assert_eq!(v[1].health, 0, "morre com o original");
-        assert!(!enemy::killed(&v[1]));
+        v[1].alive = false;
+        assert!(
+            !enemy::killed(&v[1]) && !enemy::counted(&v[1]),
+            "destruído, sai do placar"
+        );
     }
 
     #[test]

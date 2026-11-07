@@ -680,8 +680,14 @@ fn anthill_spawns_ants_in_t_m_008() {
         let c = a.center();
         assert!(c.0 >= 0 && c.1 >= 0 && c.0 < s.width && c.1 < s.height);
         assert_eq!(a.layer, s.entities[hill].layer);
-        assert!(!enemy::counted(a), "formigas criadas não contam");
+        assert!(enemy::counted(a), "formigas criadas vivas entram no total");
     }
+    let alive = ants.iter().filter(|a| a.alive).count() as i32;
+    assert_eq!(
+        s.kills_total,
+        s.mines_at_start + alive,
+        "total = os da montagem + formigas vivas (`0x43cfcf`)"
+    );
     // com o Garathe jogável (M8): ao lado de uma formiga, ele leva a mordida
     assert!(s.jake.is_some(), "a T_M_008 tem o Garathe");
     let a = (n0..s.entities.len())
@@ -696,6 +702,42 @@ fn anthill_spawns_ants_in_t_m_008() {
         }
     }
     panic!("a formiga não mordeu");
+}
+
+/// T_M_008: a formiga nasce no formigueiro, junto à parede, e se afasta dele (não fica
+/// presa virando a cada tique dentro da parede).
+#[test]
+fn t_m_008_ant_walks_away_from_its_hill() {
+    let Some(mut s) = load("T_M_008.LEV") else {
+        return;
+    };
+    let hill = find(&s, 88, |_| true);
+    let (hx, hy) = (s.entities[hill].x, s.entities[hill].y);
+    // o Jake longe, em outra camada, para a formiga só andar
+    let other = s.entities[hill].layer + 1;
+    place_jake(&mut s, 0, 0, other);
+    let n0 = s.entities.len();
+    let mut born = None;
+    let mut far = 0;
+    for t in 0..600 {
+        s.tick(0);
+        let Some(a) = (n0..s.entities.len()).find(|&k| s.entities[k].kind == 109) else {
+            continue;
+        };
+        let b = *born.get_or_insert(t);
+        let e = &s.entities[a];
+        if e.alive {
+            far = far.max((e.x - hx).abs().max((e.y - hy).abs()));
+        }
+        if t - b >= 200 {
+            break;
+        }
+    }
+    assert!(born.is_some(), "nenhuma formiga");
+    assert!(
+        far >= 50,
+        "a formiga só se afastou {far} px do formigueiro em 200 tiques"
+    );
 }
 
 /// Dificuldade: no fácil a pistola tira o dobro do Bruiser; no difícil, nada passa de metade.

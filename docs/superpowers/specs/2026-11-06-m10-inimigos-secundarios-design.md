@@ -50,8 +50,10 @@ e `anticorpo-manta.md`, e a dificuldade (`opcoes-salvamento.md`, `0x487854`).
   caminho está livre, senão vira; 25 % vira; 25 % fica. A troca de camada (39/40) não é portada.
 - Ruling: a invisibilidade do Camaleão esconde o desenho depois de 15 tiques (o limiar desce
   7 por quadro de 0xf7 a 0x91); ele continua presente, sólido e ferível.
-- Ruling: clones e formigas criadas não entram no total nem nos mortos (como as minas de
-  gerador: o original os libera ao morrer); a morte do original zera a vida dos clones.
+- Ruling (revisão): clones e formigas criadas, como as minas de gerador, entram no total
+  enquanto vivos e saem dele (e nunca contam nos mortos) quando destruídos — o original os
+  libera ao destruir (`0x435b63`) e o `0x43cfcf` só percorre as listas; a morte do original
+  zera a vida dos clones.
 - Ruling: o Anticorpo com `values[6] & 0xff = 0` dorme (o tique `0x41129d` sai sem fazer nada);
   a Manta usa a vida no lugar desse byte. Nenhum dos dois sente gravidade (a velocidade pedida
   a compensa); as velocidades do passeio e do mergulho estão em 1/8 px.
@@ -68,8 +70,14 @@ e `anticorpo-manta.md`, e a dificuldade (`opcoes-salvamento.md`, `0x487854`).
   incluídas (`abs(v < 10)`). O byte dormente do Anticorpo é com sinal (≤ 0 dorme).
 - Ruling: o formigueiro espera os gatilhos; a cada `values[2]` tiques (0 → tabela: 100/50/55)
   cria uma formiga na sua posição enquanto `values[1]` (0 → 9/5/3; −1 = sem fim) não zera
-  (`0x414aed`); variante da formiga = campo 5 − 1. A formiga anda 2 px/tique e vira na
-  parede ou na beira; com o jogador a ≤ 60 px, à vista, para e morde 5 a cada 10 tiques.
+  (`0x414aed`); variante da formiga = campo 5 − 1; ela nasce olhando para o lado contrário
+  ao espelho do formigueiro (`0x414c13`). A formiga anda 2 px/tique [velocidade inferida];
+  vira (rótulo 3, parada) depois de 3 tiques no mesmo x (`0x420153`) e, no fim de cada passo,
+  se 0x40 px à frente não há chão até 15 px abaixo ou há um sólido que ela ainda não toca
+  (`0x42081d`; a física já deixa sair do sólido em que nasceu); com o jogador a ≤ 60 px, à
+  vista, para e morde 5 a cada 10 tiques. Entrar no formigueiro (estados 6/−1), o desvio de
+  outra formiga e a alternância 4/5 da mordida não são portados. No tique em que os gatilhos
+  se cumprem o formigueiro só liga (`0x414b1b` → `0x414bb8`, sai).
 - Ruling: a catapulta lança o jogador (derrubada com empurrão `values[0..1]`, x espelhado
   quando ela se vira) e o primeiro barril ou formiga a ≤ 30 px (centros), no quadro 2 do
   rótulo 1; caixa = retângulo do quadro.

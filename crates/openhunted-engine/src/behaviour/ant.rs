@@ -21,6 +21,12 @@ pub const BITE: i32 = 5;
 /// Tiques entre mordidas e velocidade do andar (inferidos).
 pub const BITE_TICKS: i32 = 10;
 pub const SPEED: i32 = 2;
+/// Andando, parada no mesmo x por 3 tiques → vira (`0x420153`: `+0x274`/`+0x27a`).
+pub const STUCK_TICKS: i32 = 3;
+/// No fim de cada passo (`0x42081d`): olha 0x40 à frente; sem chão até 15 px abaixo
+/// (`0x420979`: sonda de vy = 0x78, 1/8 px) ou com obstáculo novo → vira.
+pub const LOOK_AHEAD: i32 = 0x40;
+pub const FLOOR_PROBE: i32 = 15;
 /// Sons: 3151 (10 % ao andar, por volta do rótulo) e 3153 (mordida).
 pub const SOUND_WALK: u16 = 3151;
 pub const SOUND_BITE: u16 = 3153;
@@ -36,6 +42,7 @@ pub const LABELS: [Label; 6] = [
     (6, 44, 5),
 ];
 const WALK: u16 = 2;
+const TURN: u16 = 3;
 const BITE_LABEL: u16 = 4;
 const KNOCKED: u16 = 5;
 
@@ -108,6 +115,11 @@ pub struct AntState {
     pub vy: i32,
     pub bite_wait: i32,
     pub knocked: bool,
+    /// Virando (estado 3): parada; no fim do rótulo troca o lado (`0x420394`).
+    pub turning: bool,
+    /// Último x andando e tiques nele (`+0x274`, `+0x27a`).
+    pub last_x: i32,
+    pub stuck: i32,
     pub wound: Wound,
 }
 
@@ -122,6 +134,9 @@ impl AntState {
             vy: 0,
             bite_wait: 0,
             knocked: false,
+            turning: false,
+            last_x: i32::MIN,
+            stuck: 0,
             wound: Wound::default(),
         }
     }
@@ -131,14 +146,25 @@ impl AntState {
         self.vx = vel.0 * 2 * SUB / 3;
         self.vy = vel.1 * SUB;
         self.knocked = true;
+        self.turning = false;
         self.clip = Clip::new(KNOCKED, false);
+    }
+
+    /// Começa a virar (estado 3, velocidade zero).
+    fn turn(&mut self) {
+        self.turning = true;
+        self.stuck = 0;
+        self.vx = 0;
+        self.clip = Clip::new(TURN, false);
     }
 }
 
-/// Formiga nova de um formigueiro (`0x414bd4`): sinalizadores da formiga da fase, vida 1.
-pub fn spawned(at: (i32, i32), variant: i32, layer: i32, mirror: bool) -> Entity {
+/// Formiga nova de um formigueiro (`0x414bd4`): na posição dele, sinalizadores da formiga da
+/// fase, vida 1, olhando para o lado **contrário** ao espelho do formigueiro (`0x414c13`:
+/// `+0x194` da formiga = 1 só se o bit 0 do `+0x194` do formigueiro é 0).
+pub fn spawned(at: (i32, i32), variant: i32, layer: i32, hill_mirror: bool) -> Entity {
     let mut st = AntState::new(variant, true);
-    st.right = mirror;
+    st.right = !hill_mirror;
     Entity {
         kind: ANT,
         x: at.0,
@@ -234,7 +260,16 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 e.layer,
             )));
         }
+    } else if st.turning {
+        st.vx = 0;
+        if ended {
+            st.turning = false;
+            st.right = !st.right;
+            st.last_x = i32::MIN;
+            st.clip = Clip::new(WALK, false);
+        }
     } else {
+        let side = if st.right { 1 } else { -1 };
         if ended {
             st.clip = Clip::new(WALK, false);
             if walk_sound {
@@ -245,14 +280,29 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                     e.layer,
                 )));
             }
-        }
-        if on_floor {
-            let side = if st.right { 1 } else { -1 };
-            let ahead = me.moved(side * (SPEED + 1), 0);
-            if cells.blocked(&ahead) || !cells.standing_on(&ahead, 16) {
-                st.right = !st.right;
+            // `0x42081d`: só o que a formiga ainda não toca conta como obstáculo (nascida
+            // sobreposta à parede, sai dela em vez de virar a cada tique)
+            let ahead = me.moved(side * LOOK_AHEAD, 0);
+            if on_floor
+                && (cells.blocked_from(&me, &ahead) || !cells.standing_on(&ahead, FLOOR_PROBE))
+            {
+                st.turn();
             }
-            st.vx = if st.right { SPEED } else { -SPEED } * SUB;
+        }
+        // `0x420153`: 3 tiques no mesmo x → vira
+        if !st.turning {
+            if e.x == st.last_x {
+                st.stuck += 1;
+                if st.stuck >= STUCK_TICKS {
+                    st.turn();
+                }
+            } else {
+                st.last_x = e.x;
+                st.stuck = 0;
+            }
+        }
+        if !st.turning && on_floor {
+            st.vx = side * SPEED * SUB;
         }
     }
     let boxr = e.boxes.first().copied().unwrap_or(Rect {
@@ -311,6 +361,61 @@ mod tests {
     }
 
     #[test]
+    fn ant_born_in_a_wall_walks_out_and_turns_when_stuck() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(3000, 0);
+        let with_wall = |x: i32| {
+            crate::World::new(
+                w.solids()
+                    .iter()
+                    .copied()
+                    .chain([Rect {
+                        x,
+                        y: -100,
+                        w: 15,
+                        h: 200,
+                    }])
+                    .collect(),
+            )
+        };
+        let run = |world: &crate::World, hill_mirror: bool| {
+            let mut c = ctx(&j, world, &on);
+            let mut a = spawned((100, 32), 0, 0, hill_mirror);
+            let mut turned = false;
+            for _ in 0..80 {
+                tick(&mut a, &mut c, &mut Out::default());
+                if let Behaviour::Ant(s) = &a.behaviour {
+                    turned |= s.turning;
+                }
+            }
+            (a, turned)
+        };
+        let a = spawned((100, 32), 0, 0, false);
+        let Behaviour::Ant(s) = &a.behaviour else {
+            panic!()
+        };
+        assert!(
+            s.right,
+            "lado contrário ao espelho do formigueiro (`0x414c13`)"
+        );
+        // chão em y 47; a parede x 90..105 já cruza a formiga (x 100..113) ao nascer
+        let inside = with_wall(90);
+        for hill_mirror in [false, true] {
+            let (a, _) = run(&inside, hill_mirror);
+            let b = a.bounds().unwrap();
+            assert!(
+                !inside.blocked(&b),
+                "saiu da parede (espelho {hill_mirror}): {b:?}"
+            );
+            assert!((a.x - 100).abs() >= 20, "andou: x {}", a.x);
+        }
+        // encostada (parede x 85..100) e olhando para ela: 3 tiques parada → vira
+        let touching = with_wall(85);
+        let (a, turned) = run(&touching, true);
+        assert!(turned && a.x > 120, "virou e foi para a direita: x {}", a.x);
+    }
+
+    #[test]
     fn ant_bites_for_5_and_dies_to_any_hit() {
         let on = |_: i32| None;
         let (j, w) = ctx_with_jake(140, 0);
@@ -343,8 +448,8 @@ mod tests {
         tick(&mut a, &mut c, &mut out);
         assert!(!a.alive && a.health <= 0);
         assert!(
-            !enemy::counted(&a),
-            "criada pelo formigueiro: fora do placar"
+            !enemy::counted(&a) && !enemy::killed(&a),
+            "criada pelo formigueiro e destruída: liberada, fora do placar"
         );
     }
 }
