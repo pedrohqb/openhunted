@@ -816,7 +816,7 @@ impl App {
         } else {
             self.advance_inner(ms);
         }
-        self.update_music();
+        self.update_music(ms);
         self.flush_sounds();
     }
 

@@ -627,7 +627,7 @@ impl App {
 
     // ---- música ----
 
-    pub(super) fn update_music(&mut self) {
+    pub(super) fn update_music(&mut self, ms: u32) {
         let mode = self.mode();
         let Some(m) = self.m9.music.as_mut() else {
             return;
@@ -636,7 +636,7 @@ impl App {
         match mode {
             Mode::Menu | Mode::Results | Mode::Page => m.menu(),
             Mode::Play | Mode::Paused => {
-                if let Some(p) = m.game() {
+                if let Some(p) = m.game(ms) {
                     self.m9.track_title = Some(track_name(&p, &self.system));
                 }
             }
