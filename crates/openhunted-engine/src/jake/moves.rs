@@ -238,8 +238,8 @@ pub fn gravity(s: State) -> bool {
     )
 }
 
-/// Estados em que o Garathe sente o tranco (`0x42859e`): 1, 10, 28, 31, 35–37, 44–46, 58,
-/// os de arma e a corda (52/53, que viram queda).
+/// Estados em que o Garathe sente o tranco (`0x42859e`): 1, 10, 28, 31, 35–38, 44–46, 58,
+/// os de arma e a escalada (52/53, que viram queda). A barra (47, 49–51) não reage.
 pub fn joltable(s: State) -> bool {
     matches!(
         s,
@@ -250,6 +250,7 @@ pub fn joltable(s: State) -> bool {
             | State::Rise
             | State::Crawl
             | State::Crouch
+            | State::StandUp
             | State::Push
             | State::Pushed
             | State::Fire { .. }

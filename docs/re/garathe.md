@@ -128,7 +128,7 @@ Por tique (`0x004283b7`, ignorado no estado 80): pisca com reação ou explosão
 | Reação | Estados em que vale | Vai para |
 |---|---|---|
 | empurrão (2) | 1, 54–56, 58 | 58 `MNDAMAGE` (gravidade ligada; volta ao 1) |
-| tranco (1) | 1, 10, 28, 31, 35–37, 44–46, 58, 76, 81, 82, 85, 95–98, 100, 101, 103–111, 113, 114, 116, 118, 128–130, 135–138, 140–142, 147–150, 152–154, 159–162 | 59 (rótulo 63, desliza k=2 em x), depois 35; nos 49, 50, 52, 53 → queda 27 |
+| tranco (1) | 1, 10, 28, 31, 35–38, 44–46, 58, 76, 81, 82, 85, 95–98, 100, 101, 103–111, 113, 114, 116, 118, 128–130, 135–138, 140–142, 147–150, 152–154, 159–162 | 59 (rótulo 63, desliza k=2 em x), depois 35; nos 52, 53 → queda 27 (a barra 47, 49–51 não reage: `0x428609…0x42861e`) |
 | derrubada (4) | fora de 11/12 | 32 `BLASTFWD` (marca 8) ou 33 `BLASTBK0` (0x10) pelo lado × sinal de `+0x244`; v = 8·empurrão |
 | elétrico | fora de 11/12, `+0x284 = 0` | 121 no quadro +17, 10 tiques parado, pisca 0x25; depois 1 |
 

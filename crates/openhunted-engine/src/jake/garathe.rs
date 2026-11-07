@@ -314,6 +314,23 @@ mod tests {
         }
     }
 
+    /// Tranco (`0x42859e`): o 38 (levantar) também o sente; na barra (47, 49, 50, 51) nada
+    /// acontece; só a escalada 52/53 vira queda.
+    #[test]
+    fn jolt_reaches_the_stand_up_but_not_the_bar() {
+        use super::super::moves::joltable;
+        assert!(joltable(State::StandUp));
+        for s in [
+            State::BarHang,
+            State::BarMove,
+            State::BarPull,
+            State::BarDown,
+        ] {
+            assert!(!joltable(s), "{s:?}");
+        }
+        assert!(joltable(State::Climb(Climb::Vertical)));
+    }
+
     #[test]
     fn runs_at_fifteen_and_walks_in_fighting_stance() {
         let w = floor_world();
