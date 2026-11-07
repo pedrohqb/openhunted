@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Os inimigos da M7a (tipos 7, 8, 10, 11 e 103) sobre os dados reais (OPENHUNTED_DATA):
-//! animações, percepção e ataques nas fases da campanha e um fuzz sem pânico.
+//! animações, percepção e ataques nas fases da campanha e um fuzz com invariantes.
 
 use openhunted_engine::behaviour::{
     bruiser, enemy, hop_mine, mine_generator, security_robot, sentinel,
@@ -202,8 +202,8 @@ fn generator_releases_mines_in_i_j_005() {
     );
 }
 
-/// I_J_002: diante de um robô de segurança (a ~130 px), ele vira e atira raios; escondido
-/// (CIMA contra a parede), um robô sem alvo não o vê.
+/// I_J_002: diante de um robô de segurança (a ~130 px), o Jake escondido (CIMA, 164–166) não
+/// é adquirido por 150 tiques; ao sair do esconderijo, o robô vira e atira raios.
 #[test]
 fn security_robot_shoots_at_jake() {
     let Some(mut s) = load("I_J_002.LEV") else {
@@ -216,6 +216,30 @@ fn security_robot_shoots_at_jake() {
         .unwrap();
     only(&mut s, i);
     stand_near(&mut s, i, 120);
+    let bolt = |s: &Scene| {
+        s.entities
+            .iter()
+            .any(|e| e.alive && matches!(e.behaviour, Behaviour::Laser(_)))
+    };
+    // escondido (CIMA parado, 164–166) diante do robô: não é adquirido nem leva tiros (o
+    // robô fica fora de jogo enquanto o Jake se esconde)
+    s.entities[i].alive = false;
+    for _ in 0..10 {
+        s.tick(UP);
+    }
+    s.entities[i].alive = true;
+    for t in 0..150 {
+        s.tick(UP);
+        let j = s.jake.as_ref().unwrap();
+        assert!(j.is_hidden(), "tique {t}: estado {:?}", j.state());
+        let Behaviour::SecurityRobot(r) = &s.entities[i].behaviour else {
+            panic!()
+        };
+        assert!(
+            !r.target && !bolt(&s),
+            "tique {t}: o robô viu o Jake escondido"
+        );
+    }
     let mut fired = false;
     for _ in 0..150 {
         s.tick(0);
@@ -230,7 +254,154 @@ fn security_robot_shoots_at_jake() {
     assert!(fired, "o robô não atirou");
 }
 
-/// Em toda fase solo com estes inimigos, 2000 tiques de entrada aleatória não panicam.
+/// H_J_013: o Bruiser 76 dorme até o alvo 14 do gatilho ligar; acordado, ataca o Jake na
+/// camada dele; a bala da pistola (2, metade no Bruiser) tira 1 por acerto: com 100 de vida
+/// morre no 100º e solta 30 explosões, e a morte conta.
+#[test]
+fn bruiser_wakes_attacks_and_dies_by_pistol() {
+    let Some(mut s) = load("H_J_013.LEV") else {
+        return;
+    };
+    let i = s
+        .entities
+        .iter()
+        .position(|e| e.kind == 7 && (e.x, e.y) == (1167, 415))
+        .unwrap();
+    assert_eq!(s.entities[i].triggers[0], (14, Some(11)));
+    only(&mut s, i);
+    let sw = s
+        .entities
+        .iter()
+        .position(|e| e.alive && e.id == 14)
+        .unwrap();
+    s.entities[sw].on = false;
+    stand_near(&mut s, i, 150);
+    let awake = |s: &Scene| matches!(&s.entities[i].behaviour, Behaviour::Bruiser(b) if b.awake);
+    for _ in 0..40 {
+        s.tick(0);
+        s.entities[sw].on = false;
+    }
+    assert!(!awake(&s), "acordou sem o gatilho");
+    s.entities[sw].on = true;
+    let hp = s.jake.as_ref().unwrap().health.hp;
+    let n0 = s.entities.len();
+    let mut attacked = false;
+    for _ in 0..300 {
+        s.tick(0);
+        attacked |= s.entities[n0..]
+            .iter()
+            .any(|e| e.alive && matches!(e.kind, 21 | 42 | 100))
+            || s.jake.as_ref().unwrap().health.hp < hp;
+        if attacked {
+            break;
+        }
+    }
+    assert!(awake(&s), "não acordou com o gatilho");
+    assert!(attacked, "não atacou o Jake");
+    // o Jake sai de cena (outra camada, longe); 100 acertos da pistola
+    let other = s.entities[i].layer + 1;
+    place_jake(&mut s, 0, 0, other);
+    let kills = s.kills;
+    let pistol = openhunted_engine::damage::Pending {
+        amount: openhunted_engine::behaviour::bullet::DAMAGE,
+        ..Default::default()
+    };
+    let dying = |s: &Scene| matches!(&s.entities[i].behaviour, Behaviour::Bruiser(b) if b.state == bruiser::DIE || b.dead);
+    let mut hits = 0;
+    while !dying(&s) {
+        assert!(hits < 200, "não morreu");
+        enemy::hurt(&mut s.entities[i], &pistol, true);
+        hits += 1;
+        s.tick(0);
+    }
+    assert_eq!(hits, 100);
+    let before = s.entities.len();
+    for _ in 0..40 {
+        s.tick(0);
+    }
+    let blasts = s.entities[before..].iter().filter(|e| e.kind == 86).count();
+    assert_eq!(blasts, bruiser::DEATH_BLASTS);
+    assert_eq!(s.kills, kills + 1);
+}
+
+/// T_J_007: o Bruiser (camada diferente da do Jake) fica no chão dele por 300 tiques, com o
+/// Jake parado na camada dele.
+#[test]
+fn t_j_007_bruiser_stays_on_its_floor() {
+    let Some(mut s) = load("T_J_007.LEV") else {
+        return;
+    };
+    let i = s.entities.iter().position(|e| e.kind == 7).unwrap();
+    assert_ne!(
+        s.entities[i].layer, s.jake_layer,
+        "o teste quer camadas diferentes"
+    );
+    let y0 = s.entities[i].y;
+    for t in 0..300 {
+        s.tick(0);
+        let e = &s.entities[i];
+        assert!(
+            (e.y - y0).abs() < 64 && e.alive,
+            "tique {t}: Bruiser em y {} (começou em {y0})",
+            e.y
+        );
+    }
+}
+
+/// I_J_110: as minas saltadoras das outras camadas não caem para fora da fase enquanto o
+/// Jake fica parado na camada dele.
+#[test]
+fn i_j_110_hop_mines_on_other_layers_survive() {
+    let Some(mut s) = load("I_J_110.LEV") else {
+        return;
+    };
+    let mines: Vec<usize> = s
+        .entities
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.kind == 11 && e.layer != s.jake_layer)
+        .map(|(i, _)| i)
+        .collect();
+    assert!(mines.len() >= 4, "{} minas em outras camadas", mines.len());
+    for _ in 0..300 {
+        s.tick(0);
+    }
+    let alive = mines.iter().filter(|&&i| s.entities[i].alive).count();
+    assert_eq!(alive, mines.len(), "minas sumidas");
+}
+
+/// Inimigos vigiados pelo fuzz: os da M7a, as minas e os olhos-laser.
+fn watched(kind: u32) -> bool {
+    ENEMIES.contains(&kind) || kind == 102 || kind == 104
+}
+
+/// Invariantes de um inimigo vivo: dentro da fase e fora das células da própria camada (se
+/// começou fora delas).
+fn check_enemy(s: &Scene, i: usize, started_inside: bool, ctx: &str) {
+    let e = &s.entities[i];
+    let Some(b) = e.bounds() else {
+        return;
+    };
+    let c = (b.x + b.w / 2, b.y + b.h / 2);
+    assert!(
+        c.0 >= 0 && c.1 >= 0 && c.0 < s.width && c.1 < s.height,
+        "{ctx}: objeto {i} (tipo {}) saiu da fase em {c:?}",
+        e.kind
+    );
+    // o destroço do Bruiser e do OSR fica onde caiu
+    let wreck = matches!(&e.behaviour, Behaviour::Bruiser(st) if st.dead);
+    if !started_inside && !wreck {
+        assert!(
+            !s.layer_cells(e.layer).blocked(&b),
+            "{ctx}: objeto {i} (tipo {}, camada {}) dentro das células em {b:?}",
+            e.kind,
+            e.layer
+        );
+    }
+}
+
+/// Em toda fase solo com estes inimigos, 2000 tiques de entrada aleatória: sem pânico, nenhum
+/// inimigo sai da fase, entra nas células da própria camada ou some sem morrer.
 #[test]
 fn enemies_fuzz_without_panics() {
     let Some(gd) = data() else {
@@ -248,6 +419,19 @@ fn enemies_fuzz_without_panics() {
             continue;
         }
         tested += 1;
+        // os inimigos da fase (os criados depois, como as minas dos geradores, ficam de fora)
+        let start: Vec<(usize, bool)> = s
+            .entities
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.alive && watched(e.kind))
+            .map(|(i, e)| {
+                let inside = e
+                    .bounds()
+                    .is_some_and(|b| s.layer_cells(e.layer).blocked(&b));
+                (i, inside)
+            })
+            .collect();
         let mut seed: u32 = 0x5eed_0001 ^ tested;
         let mut input = 0;
         for t in 0..2000 {
@@ -257,6 +441,29 @@ fn enemies_fuzz_without_panics() {
                     [(seed >> 16) as usize % 8];
             }
             s.tick(input);
+            if t % 10 != 9 {
+                continue;
+            }
+            let ctx = format!("{} tique {t}", m.file);
+            assert!(
+                (0..=s.mines_at_start).contains(&s.kills),
+                "{ctx}: {} mortos de {}",
+                s.kills,
+                s.mines_at_start
+            );
+            for &(i, inside) in &start {
+                let e = &s.entities[i];
+                if e.alive {
+                    check_enemy(&s, i, inside, &ctx);
+                } else {
+                    assert!(
+                        e.health <= 0,
+                        "{ctx}: objeto {i} (tipo {}) sumiu com vida {}",
+                        e.kind,
+                        e.health
+                    );
+                }
+            }
         }
     }
     assert!(tested >= 30, "só {tested} fases com inimigos");

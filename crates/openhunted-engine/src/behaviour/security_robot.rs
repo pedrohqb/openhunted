@@ -258,7 +258,7 @@ fn can_move(e: &Entity, ctx: &Ctx, dx: i32, dy: i32) -> bool {
     let mut probe = Body::new(e.x, e.y, boxr);
     probe.vx = dx;
     probe.vy = dy;
-    step(&mut probe, ctx.cells, false);
+    step(&mut probe, ctx.cells_for(e.layer), false);
     (probe.x - e.x, probe.y - e.y) == (dx >> 3, dy >> 3)
 }
 
@@ -287,7 +287,7 @@ fn chase(e: &Entity, me: Rect, st: &mut SecurityRobotState, ctx: &mut Ctx) -> (i
         return (0, 0);
     };
     let skip: Vec<Rect> = std::iter::once(me).chain(jake).collect();
-    if !enemy::line_of_sight(ctx, c, p, &skip) {
+    if !enemy::line_of_sight_on(ctx, e.layer, c, p, &skip) {
         st.forget();
         return (0, 0);
     }
@@ -524,14 +524,17 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             let len = super::mine::distance((0, 0), (px, py)).max(1);
             vel = (KNOCK * SUB * px / len, KNOCK * SUB * py / len);
         }
-        e.health = e.health.min(HEALTH_CAP) - w.pending.amount.max(0);
+        // dano negativo → 1 (`robo-seguranca.md`, passo 6)
+        let amount = if w.pending.amount < 0 {
+            1
+        } else {
+            w.pending.amount
+        };
+        e.health = e.health.min(HEALTH_CAP) - amount;
         if e.health < 0 {
             st.orient = DYING;
             st.fall = (0, 0);
             st.forget();
-            if w.by_player {
-                out.kills += 1;
-            }
         }
     }
     if st.orient == DYING {
@@ -554,7 +557,8 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         let target_y = v.hover_base + v.hover_amp * sin_frac(n, v.hover_period) / 16384;
         let local = e.y.rem_euclid(128);
         let mut vy = (target_y - local).clamp(-64, 64);
-        if local + vy < 0 {
+        // `local` em px, `vy` em 1/8 px
+        if local * SUB + vy < 0 {
             vy = 0;
         }
         vel.1 = vy;
@@ -562,7 +566,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let mut body = Body::new(e.x, e.y, e.boxes.first().copied().unwrap_or(me));
     body.vx = vel.0;
     body.vy = vel.1;
-    step(&mut body, ctx.cells, false);
+    step(&mut body, ctx.cells_for(e.layer), false);
     e.x = body.x;
     e.y = body.y;
     // pulso (`0x41da5a`): com p > 30, o zumbido
@@ -586,7 +590,7 @@ fn fall(e: &mut Entity, st: &mut SecurityRobotState, ctx: &mut Ctx, out: &mut Ou
     let mut body = Body::new(e.x, e.y, boxr);
     body.vx = st.fall.0;
     body.vy = st.fall.1;
-    step(&mut body, ctx.cells, true);
+    step(&mut body, ctx.cells_for(e.layer), true);
     e.x = body.x;
     e.y = body.y;
     st.fall = (body.vx, body.vy);
@@ -730,13 +734,22 @@ mod tests {
         enemy::hurt(&mut r, &p, true);
         tick(&mut r, &mut c, &mut out);
         assert_eq!(r.health, 43);
+        // dano negativo vira 1 (`0x41c7fc` passo 6)
+        let neg = crate::damage::Pending {
+            amount: -3,
+            ..Default::default()
+        };
+        enemy::hurt(&mut r, &neg, false);
+        tick(&mut r, &mut c, &mut out);
+        assert_eq!(r.health, 42);
+        r.health = 43;
         for _ in 0..22 {
             enemy::hurt(&mut r, &p, true);
             tick(&mut r, &mut c, &mut out);
         }
         assert_eq!(r.health, -1, "23 tiros: vida abaixo de 0");
         assert_eq!(st(&r).orient, DYING);
-        assert_eq!(out.kills, 1);
+        assert!(enemy::killed(&r));
         // cai até o chão (y + 47 do Jake → chão em y 47) e explode dez vezes
         let mut n = 0;
         while !st(&r).dead && n < 200 {

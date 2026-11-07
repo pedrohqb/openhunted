@@ -52,6 +52,17 @@ Estatísticas (zeradas no início da partida): achados `0x497344` segredos, `0x4
 inimigos mortos, `0x497354` tesouros; totais da fase `0x49732c` segredos, `0x497330`
 inimigos, `0x49733c` tesouros.
 
+### Contagem de mortos (`0x43cfcf`) [confirmado]
+
+No fim da partida, `0x43cfcf` zera os contadores e percorre as listas de objetos ativos e
+mortos (`0x488e7c`, `0x488e80`…). Para os tipos **3, 4, 7, 8, 10, 11, 89, 102, 103, 104,
+105 e 109** (`0x43d0f2`): total `0x497330 += 1`; se o crédito `+0x1b0 = 0` e o modo é solo
+(`0x497300 = 1`), `+0x1b0 = 1`; com crédito e vida `+0x258 ≤ 0`, mortos do jogador `+= 1`.
+No solo, portanto, **toda morte conta**, explosões, contato e cadeia incluídos. Objetos com
+`0x10` são liberados ao serem destruídos (`0x435b63` → `0x433e2c`) e saem das listas: as
+minas dos geradores (que ligam `0x10`) mortas não entram nem nos mortos nem no total. Tipos
+1–2 (jogadores) vão a `0x43d140`; 9 e 80–85 alimentam outros contadores (`0x49733c`).
+
 | Controle | Retângulo | Valor |
 |---|---|---|
 | 25021 `SMM_MISSION_TITLE` | 186, 56, 405×22 | título da missão |
@@ -111,7 +122,6 @@ outra", não "sair" (ver `pausa.md`).
 ## Em aberto
 
 - Regras das peças do carro (`0x48059c`, `0x480598`, `0x47f858`) e a tela `S_CAR.ITF`.
-- Como os contadores de mortos/tesouros/segredos e os totais são incrementados (quem escreve
-  em `0x497344…0x497354`).
+- Como os contadores de tesouros e segredos são incrementados (os mortos estão acima).
 - Texto pretendido para o id 10050 e o que a caixa genérica faz com texto nulo.
 - `0x445036`/`0x44530c`/`0x445098` (recordes, `hunter.fam`) e a gravação `0x440ce4`.
