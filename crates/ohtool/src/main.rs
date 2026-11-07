@@ -65,14 +65,65 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         ticks: u32,
         /// Entrada do Jake durante os ticks: letras L (esquerda), R (direita), U, D, J (pular),
-        /// S (atirar), X (furtivo); uma por tique ou uma só para todos (ex.: "L" ou "LLLJ").
-        /// Com vírgulas, um grupo de letras por tique, `N*` repete (ex.: "UL,UL,20*R,J").
+        /// S (atirar), X (furtivo), P (soco), N/M (arma anterior/seguinte, PgUp/PgDn) e
+        /// W1…W6 (escolhe a arma); uma por tique ou uma só para todos (ex.: "L" ou "LLLJ").
+        /// Com vírgulas, um grupo de letras por tique, `N*` repete (ex.: "UL,UL,20*R,J,W3").
         #[arg(long, default_value = "")]
         input: String,
         /// Mostra o estado do Jake a cada tique.
         #[arg(long)]
         trace: bool,
     },
+}
+
+/// Bits de um grupo de letras de `--input` (W seguido de 1–6 escolhe a arma), um item por
+/// letra ou W+dígito.
+fn input_tokens(letters: &str) -> Vec<u32> {
+    use openhunted_engine::input::*;
+    let mut out = Vec::new();
+    let mut it = letters.chars().peekable();
+    while let Some(c) = it.next() {
+        out.push(match c {
+            'L' => LEFT,
+            'R' => RIGHT,
+            'U' => UP,
+            'D' => DOWN,
+            'J' => JUMP,
+            'S' => SHOOT,
+            'X' => STEALTH,
+            'P' => PUNCH,
+            'N' => PREV_WEAPON,
+            'M' => NEXT_WEAPON,
+            'W' => match it.peek().and_then(|d| d.to_digit(10)) {
+                Some(d @ 1..=6) => {
+                    it.next();
+                    (d << SELECT_SHIFT) & SELECT_MASK
+                }
+                _ => 0,
+            },
+            _ => 0,
+        });
+    }
+    out
+}
+
+/// A sequência de entradas por tique de `--input`.
+fn parse_input(input: &str) -> Vec<u32> {
+    if input.contains(',') {
+        input
+            .split(',')
+            .flat_map(|tok| {
+                let (n, letters) = match tok.split_once('*') {
+                    Some((n, l)) => (n.trim().parse().unwrap_or(1), l),
+                    None => (1, tok),
+                };
+                let b = input_tokens(letters).into_iter().fold(0, |a, x| a | x);
+                std::iter::repeat_n(b, n)
+            })
+            .collect()
+    } else {
+        input_tokens(input)
+    }
 }
 
 fn parse_xy(s: &str) -> Result<(i32, i32), String> {
@@ -180,31 +231,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             for w in &scene.warnings {
                 eprintln!("aviso: {w}");
             }
-            let bits = |c: char| match c {
-                'L' => openhunted_engine::input::LEFT,
-                'R' => openhunted_engine::input::RIGHT,
-                'U' => openhunted_engine::input::UP,
-                'D' => openhunted_engine::input::DOWN,
-                'J' => openhunted_engine::input::JUMP,
-                'S' => openhunted_engine::input::SHOOT,
-                'X' => openhunted_engine::input::STEALTH,
-                _ => 0,
-            };
-            let seq: Vec<u32> = if input.contains(',') {
-                input
-                    .split(',')
-                    .flat_map(|tok| {
-                        let (n, letters) = match tok.split_once('*') {
-                            Some((n, l)) => (n.trim().parse().unwrap_or(1), l),
-                            None => (1, tok),
-                        };
-                        let b = letters.chars().map(bits).fold(0, |a, x| a | x);
-                        std::iter::repeat_n(b, n)
-                    })
-                    .collect()
-            } else {
-                input.chars().map(bits).collect()
-            };
+            let seq = parse_input(&input);
             for t in 0..ticks as usize {
                 let b = if seq.len() == 1 {
                     seq[0]
@@ -258,4 +285,28 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openhunted_engine::input::*;
+
+    #[test]
+    fn input_letters_cover_punch_weapon_cycle_and_select() {
+        assert_eq!(
+            parse_input("PNMW3R"),
+            vec![PUNCH, PREV_WEAPON, NEXT_WEAPON, 3 << SELECT_SHIFT, RIGHT]
+        );
+        assert_eq!(
+            parse_input("2*RW6,P,W1S"),
+            vec![
+                RIGHT | 6 << SELECT_SHIFT,
+                RIGHT | 6 << SELECT_SHIFT,
+                PUNCH,
+                1 << SELECT_SHIFT | SHOOT
+            ]
+        );
+        assert_eq!(parse_input("W7"), vec![0, 0], "só 1–6");
+    }
 }

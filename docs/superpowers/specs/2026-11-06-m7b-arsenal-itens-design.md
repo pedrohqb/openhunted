@@ -55,7 +55,9 @@ Ruling: a estrela cravada é um item comum (`Pickup` tipo 27, v = 1) com prazo d
 ## Teclas
 
 Ruling: ANTERIOR/PRÓXIMA = PgUp/PgDn (como o padrão do jogador 1, `tiro-jake.md`); 1–6
-escolhem a arma direto (extensão do port, bits `SELECT` = arma << 24 lidos só pelo Jake). Tab
+escolhem a arma direto (extensão do port, bits `SELECT` = arma << 24 lidos só pelo Jake; 7
+e 0 são ignorados). Com o Jake, PgUp/PgDn/Home/End não rolam a câmera. `ohtool render
+--input`: P soco, N/M anterior/próxima, W1…W6 escolhe. Tab
 segue como overlay. HUD: a barra mostra a arma corrente; o título mostra nome e munição.
 
 ## Itens (coleta genérica)
@@ -100,6 +102,15 @@ locutor `0x43c868`, que as encadeia e não repete enquanto uma toca).
 - Especial BAIXO+ATIRAR igual para todas as armas (como no original, registro único).
 - Sem tiro no ar; projéteis do Jake não acertam o próprio Jake diretamente (só as áreas).
 - Dano por dificuldade e tipos do Garathe fora.
+
+## Em aberto
+
+- Compactação das entidades mortas de `Scene::entities`: o `mine_generator::sync` (M7a)
+  marca as minas pelo índice; exige uma mudança coordenada.
+- Crédito das mortes por área (explosões de foguete, granada e estrela): a regra fica com a
+  M7a (crédito recalculado por tique).
+- Sons do pistão na volta: o curso de volta começa no quadro 8, então o arm `(−1, 9)` nunca
+  toca; só 3057 na volta (ruling atual).
 
 ## Testes
 

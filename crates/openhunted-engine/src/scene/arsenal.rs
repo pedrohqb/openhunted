@@ -662,6 +662,51 @@ mod tests {
         }
     }
 
+    /// De ponta a ponta: SOCO (Z) com os punhos na cena fere a mina dentro da caixa do golpe
+    /// (frente do Jake, terço do meio) e poupa a de fora.
+    #[test]
+    fn punch_in_the_scene_hurts_the_mine_in_the_box_only() {
+        use crate::behaviour::mine::MineState;
+        let mut s = range(100, crate::jake::FISTS);
+        let mine = |x| {
+            let mut m = logic(crate::entity::MINE, x, 66, &[0]);
+            m.flags = 0x80801;
+            m.boxes = vec![Rect {
+                x: 0,
+                y: 0,
+                w: 16,
+                h: 16,
+            }];
+            m.health = 100;
+            m.behaviour = Behaviour::Mine(MineState::new(0));
+            m
+        };
+        for _ in 0..10 {
+            s.tick(0); // o Jake para de deslizar
+        }
+        // à frente do corpo: a mina vem ao Jake ~4 px por tique e entra na caixa do golpe
+        // (5 px além do corpo) no tique do acerto
+        let jb = s.jake.as_ref().unwrap().body.bounds();
+        s.entities.push(mine(jb.x + jb.w + 9));
+        s.entities.push(mine(600));
+        let n = s.entities.len();
+        // a vida da mina no tique do som do soco (depois ela pode chegar ao Jake e explodir)
+        let mut hit = None;
+        for _ in 0..12 {
+            s.tick(crate::input::PUNCH);
+            if hit.is_none() && s.events.iter().any(|e| e.sound_id() == Some(SOUND_PUNCH)) {
+                hit = Some(s.entities[n - 2].health);
+            }
+        }
+        assert_eq!(
+            hit,
+            Some(100 - PUNCH_DAMAGE),
+            "a mina na caixa levou o soco"
+        );
+        let outside = &s.entities[n - 1];
+        assert_eq!(outside.health, 100, "a de fora, não");
+    }
+
     /// O soco fere quem cruza a caixa do golpe, com o som 5062; os de fora não.
     #[test]
     fn punch_hurts_what_the_blow_box_touches() {
