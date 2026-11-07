@@ -373,6 +373,10 @@ impl App {
         let lv = Level::parse(&self.levels.get(file)?).map_err(|e| e.in_resource(file))?;
         let mut viewer = Viewer::from_level(&lv, self.assets.clone())?;
         viewer.follow();
+        // a dificuldade gravada nas opções (`0x487854`)
+        viewer.set_difficulty(openhunted_engine::Difficulty::from_index(
+            self.config().difficulty,
+        ));
         // o título e a descrição vêm da lista de missões; fase fora dela, do cabeçalho
         let (title, desc) = match self
             .missions

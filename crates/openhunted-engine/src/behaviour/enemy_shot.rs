@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Projéteis dos inimigos (`docs/re/projeteis.md`): bala da Morte (99), bala do Bruiser
-//! (100), bala da sentinela (106, `0x40caf6`) e o foguete inimigo (21). Voam retos sem
-//! gravidade (`0x40c964`), param na parede e nos objetos sólidos e ferem o Jake pela linha do
-//! `DAMAGE.TBL`.
+//! (100), bala da sentinela (106, `0x40caf6`), o foguete inimigo (21) e o dardo (29,
+//! `0x421154`). Voam retos sem gravidade (`0x40c964`; o dardo cai), param na parede e nos
+//! objetos sólidos e ferem o Jake pela linha do `DAMAGE.TBL`.
 
 use super::{Blast, Ctx, Event, Out};
 use crate::damage::Pending;
@@ -13,6 +13,9 @@ pub const ROCKET: u32 = 21;
 pub const DEATH_BULLET: u32 = 99;
 pub const BRUISER_BULLET: u32 = 100;
 pub const SENTINEL_BULLET: u32 = 106;
+pub const DART: u32 = crate::entity::DART;
+/// Faísca do nascimento do dardo (`0x43d629(dardo, nulo, 1)`: efeito 14).
+pub const DART_SPARK: u16 = 14;
 
 /// Linha `(atacante, 0)` do `DAMAGE.TBL`: dano direto, empurrão (reação 2), raio do efeito
 /// (sorteado 1–4 no `oex.anm`), empurrão e dano de área.
@@ -51,6 +54,14 @@ pub fn row(kind: u32) -> Row {
             area_push: 0,
             area_damage: 0,
         },
+        // (29, …): 1 com empurrão, sem efeito
+        DART => Row {
+            direct: 1,
+            shove: true,
+            radius: 0,
+            area_push: 0,
+            area_damage: 0,
+        },
         // (99, 0): 15 com empurrão, raio 28
         _ => Row {
             direct: 15,
@@ -68,6 +79,7 @@ pub fn art(kind: u32) -> (&'static str, &'static str, i32) {
         ROCKET => ("ORO.ANM", "ORO00.BRD", 25),
         BRUISER_BULLET => ("OBB00.ANM", "OBB.BRD", 15),
         SENTINEL_BULLET => ("OSB00.ANM", "OSB00.BRD", 5),
+        DART => ("ODA.ANM", "ODA.BRD", 12),
         _ => ("ODS00.ANM", "ODS.BRD", 20),
     }
 }
@@ -79,6 +91,8 @@ pub struct EnemyShotState {
     pub vy: i32,
     /// Posição antes do último passo (acerto varrido).
     pub prev: Option<(i32, i32)>,
+    /// Já passou o primeiro tique (o dardo solta a faísca ao nascer).
+    pub started: bool,
 }
 
 /// Caixa de reserva (sem BRD).
@@ -112,6 +126,7 @@ pub fn entity(kind: u32, at: (i32, i32), vel: (i32, i32), layer: i32) -> Entity 
             vx: vel.0 * SUB,
             vy: vel.1 * SUB,
             prev: None,
+            started: false,
         }),
     }
 }
@@ -135,6 +150,10 @@ fn swept(e: &Entity, prev: Option<(i32, i32)>) -> Option<Rect> {
 /// Impacto: efeito sorteado 1–4 e, com dano de área, a explosão (`0x0040d20c`).
 fn impact(e: &mut Entity, rng: &mut crate::rng::Rng, out: &mut Out) {
     let r = row(e.kind);
+    if e.kind == DART {
+        e.alive = false;
+        return;
+    }
     let b = Blast {
         center: e.center(),
         layer: e.layer,
@@ -158,7 +177,22 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         return;
     };
     let (vx, vy) = (st.vx, st.vy);
+    let gravity = e.kind == DART;
+    let spark = gravity && !st.started;
+    st.started = true;
     st.prev = Some((e.x, e.y));
+    if spark {
+        out.effects.push((
+            Blast {
+                center: e.center(),
+                layer: e.layer,
+                radius: 12,
+                push: 0,
+                damage: 0,
+            },
+            DART_SPARK,
+        ));
+    }
     if e.bounds()
         .is_some_and(|b| ctx.cells_for(e.layer).blocked(&b))
     {
@@ -168,8 +202,12 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let mut body = Body::new(e.x, e.y, boxr);
     body.vx = vx;
     body.vy = vy;
-    step(&mut body, ctx.cells_for(e.layer), false);
-    let moved = (body.x - e.x, body.y - e.y) == (vx >> 3, vy >> 3);
+    step(&mut body, ctx.cells_for(e.layer), gravity);
+    let fall = if gravity { crate::physics::GRAVITY } else { 0 };
+    let moved = (body.x - e.x, body.y - e.y) == (vx >> 3, (vy + fall) >> 3);
+    if let Behaviour::EnemyShot(st) = &mut e.behaviour {
+        st.vy = vy + fall;
+    }
     e.x = body.x;
     e.y = body.y;
     let c = e.center();
@@ -377,5 +415,23 @@ mod tests {
         let mut v = vec![entity(SENTINEL_BULLET, (98, 20), (20, 0), 0), sentinel];
         object_hits(&mut v, &mut rng, &mut Out::default());
         assert!(v[0].alive, "os tiros não ferem nem param nos inimigos");
+    }
+
+    #[test]
+    fn dart_falls_and_hurts_one_with_a_shove() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(100, 0);
+        let mut c = ctx(&j, &w, &on);
+        let mut d = entity(DART, (40, 10), (20, 0), 0);
+        let mut out = Out::default();
+        tick(&mut d, &mut c, &mut out);
+        assert_eq!(out.effects[0].1, DART_SPARK, "faísca ao nascer");
+        assert!(d.y > 10, "a gravidade puxa o dardo");
+        while d.alive {
+            tick(&mut d, &mut c, &mut out);
+        }
+        assert_eq!(out.jake_damage.amount, 1);
+        assert!(out.jake_damage.shove);
+        assert_eq!(out.effects.len(), 1, "sem efeito no acerto");
     }
 }

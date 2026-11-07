@@ -2,11 +2,16 @@
 //! Comportamentos por tipo de objeto (`docs/re/logica-fase.md`, `dicas.md`, `itens.md`,
 //! `minas.md`, `dano-vida.md`).
 
+pub mod ant;
 pub mod barrel;
 pub mod bruiser;
 pub mod bullet;
 pub mod car_piece;
 pub mod casing;
+pub mod catapult;
+pub mod chameleon;
+pub mod dart_generator;
+pub mod death;
 pub mod door;
 pub mod enemy;
 pub mod enemy_shot;
@@ -14,6 +19,7 @@ pub mod exit;
 pub mod explosion;
 pub mod fence;
 pub mod fire;
+pub mod flyer;
 pub mod graffiti;
 pub mod grenade;
 pub mod hint;
@@ -33,6 +39,7 @@ pub mod sentinel;
 pub mod star;
 pub mod switch;
 pub mod teleporter;
+pub mod the_entity;
 pub mod zone;
 
 use crate::damage::Pending;
@@ -98,6 +105,8 @@ pub struct Ctx<'a> {
     pub hints: &'a [String],
     /// Tamanho da fase em px.
     pub level: (i32, i32),
+    /// Dificuldade (`0x487854`).
+    pub difficulty: crate::Difficulty,
 }
 
 impl Ctx<'_> {
@@ -143,6 +152,10 @@ pub struct Out {
     pub enemy_spawns: Vec<enemy::Spawn>,
     /// Terremoto do Bruiser (`0x418229`): tiques de cambaleio para o Jake, se perto.
     pub quake: Option<u32>,
+    /// Uma Entidade (107) confunde o jogador neste tique (`+0x264 = 3`).
+    pub confuse: bool,
+    /// Lançamentos da catapulta sobre barris e formigas (a cena aplica).
+    pub launches: Vec<catapult::Launch>,
 }
 
 /// Área que fere quem a cruza na mesma camada (`0x43d629` de fogo e cerca sobre os objetos).
@@ -304,6 +317,7 @@ pub(crate) mod test_support {
             rng,
             hints: &[],
             level: (10_000, 10_000),
+            difficulty: crate::Difficulty::Normal,
         }
     }
 }

@@ -140,6 +140,11 @@ impl Viewer {
         }
     }
 
+    /// Dificuldade da partida (`0x487854`), pela opção gravada.
+    pub fn set_difficulty(&mut self, d: openhunted_engine::Difficulty) {
+        self.scene.difficulty = d;
+    }
+
     #[cfg(test)]
     pub fn scene_mut(&mut self) -> &mut Scene {
         &mut self.scene

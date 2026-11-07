@@ -215,10 +215,10 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let Behaviour::MineGenerator(st) = &mut e.behaviour else {
         return;
     };
-    // dano (`0x41dfaf`): vezes o % da variante
+    // dano (`0x41dfaf`): dificuldade, mínimo 1, vezes o % da variante
     let w = st.wound.take();
     if !w.is_empty() {
-        e.health -= w.pending.amount.max(1) * st.variant().applied / 100;
+        e.health -= ctx.difficulty.damage(w.pending.amount).max(1) * st.variant().applied / 100;
         if e.health <= 0 {
             out.blasts.push(Blast {
                 center,

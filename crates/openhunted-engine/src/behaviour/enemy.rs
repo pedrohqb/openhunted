@@ -11,22 +11,26 @@ use crate::physics::Rect;
 use crate::sound::{Cue, PRIORITY_FRAME};
 
 /// Animações e BRDs que a cena carrega para os objetos criados pelos inimigos (projéteis
-/// 21/99/100/106, minas do gerador, fogo do Bruiser).
-pub const ANIMS: [&str; 6] = [
+/// 21/99/100/106, minas do gerador, fogo do Bruiser, dardos e formigas).
+pub const ANIMS: [&str; 8] = [
     "OSB00.ANM",
     "OBB00.ANM",
     "ORO.ANM",
     "ODS00.ANM",
     "OHM00.ANM",
     "OFI.ANM",
+    "ODA.ANM",
+    "OAN.ANM",
 ];
-pub const BORDERS: [&str; 6] = [
+pub const BORDERS: [&str; 8] = [
     "OSB00.BRD",
     "OBB.BRD",
     "ORO00.BRD",
     "ORO01.BRD",
     "ODS.BRD",
     "OHM00.BRD",
+    "ODA.BRD",
+    "OAN.BRD",
 ];
 
 /// Intervalo mínimo em tiques entre duas vezes o mesmo som, entre todos os objetos: 3061
@@ -37,6 +41,9 @@ pub fn throttle(id: u16) -> Option<u32> {
         super::sentinel::SOUND_IDLE => Some(super::sentinel::SOUND_IDLE_TICKS),
         super::security_robot::SOUND_HOVER => Some(super::security_robot::SOUND_HOVER_TICKS),
         super::bruiser::SOUND_QUAKE => Some(super::bruiser::SOUND_QUAKE_TICKS),
+        super::flyer::SOUND_REST_A | super::flyer::SOUND_REST_B => {
+            Some(super::flyer::SOUND_REST_TICKS)
+        }
         _ => None,
     }
 }
@@ -175,6 +182,20 @@ pub enum Spawn {
         height: i32,
         layer: i32,
     },
+    /// Dardo (tipo 29) de um gerador, velocidade em px/tique; rótulo 2 na vertical.
+    Dart {
+        at: (i32, i32),
+        vel: (i32, i32),
+        layer: i32,
+        vertical: bool,
+    },
+    /// Formiga (109) de um formigueiro (`0x414bd4`).
+    Ant {
+        at: (i32, i32),
+        variant: i32,
+        layer: i32,
+        mirror: bool,
+    },
 }
 
 /// Soma o dano a um inimigo desta fatia; `false` se não é um deles.
@@ -185,6 +206,12 @@ pub fn hurt(e: &mut Entity, p: &Pending, by_player: bool) -> bool {
         Behaviour::MineGenerator(s) => &mut s.wound,
         Behaviour::SecurityRobot(s) => &mut s.wound,
         Behaviour::Bruiser(s) => &mut s.wound,
+        Behaviour::Death(s) => &mut s.wound,
+        Behaviour::Chameleon(s) => &mut s.wound,
+        Behaviour::Flyer(s) => &mut s.wound,
+        Behaviour::DartGenerator(s) => &mut s.wound,
+        Behaviour::TheEntity(s) => &mut s.wound,
+        Behaviour::Ant(s) => &mut s.wound,
         _ => return false,
     };
     w.add(p, by_player);
@@ -195,10 +222,17 @@ pub fn hurt(e: &mut Entity, p: &Pending, by_player: bool) -> bool {
 /// 3, 4, 7, 8, 10, 11, 89, 102–105 e 109.
 pub const COUNTED: [u32; 12] = [3, 4, 7, 8, 10, 11, 89, 102, 103, 104, 105, 109];
 
-/// Entra no total: tipo contado e não é mina de gerador (as minas soltas ligam `0x10` e são
-/// liberadas ao morrer, `0x435b63` → `0x433e2c`: não ficam nas listas que o placar percorre).
+/// Entra no total: tipo contado e não é criado em jogo — mina de gerador, clone do Camaleão
+/// ou formiga de formigueiro (ligam `0x10` e são liberados ao morrer, `0x435b63` →
+/// `0x433e2c`: não ficam nas listas que o placar percorre).
 pub fn counted(e: &Entity) -> bool {
-    COUNTED.contains(&e.kind) && !matches!(&e.behaviour, Behaviour::Mine(m) if m.owner != 0)
+    COUNTED.contains(&e.kind)
+        && !match &e.behaviour {
+            Behaviour::Mine(m) => m.owner != 0,
+            Behaviour::Chameleon(c) => c.clone_of != 0,
+            Behaviour::Ant(a) => a.spawned,
+            _ => false,
+        }
 }
 
 /// Morte que conta para o jogador: no solo (`0x497300 = 1`) quem não tem dono do golpe
@@ -214,7 +248,11 @@ pub fn killed(e: &Entity) -> bool {
             | Behaviour::HopMine(_)
             | Behaviour::MineGenerator(_)
             | Behaviour::SecurityRobot(_)
-            | Behaviour::Bruiser(_) => e.health <= 0,
+            | Behaviour::Bruiser(_)
+            | Behaviour::Death(_)
+            | Behaviour::Chameleon(_)
+            | Behaviour::Flyer(_)
+            | Behaviour::Ant(_) => e.health <= 0,
             _ => false,
         }
 }
@@ -359,10 +397,14 @@ mod tests {
         let mut hop = logic(crate::entity::HOP_MINE, 0, 0, &[]);
         hop.behaviour = Behaviour::HopMine(Default::default());
         hop.health = 10;
-        let unported = logic(89, 0, 0, &[]);
+        let unported = logic(102, 0, 0, &[]);
         let barrel = logic(crate::entity::BARREL, 0, 0, &[]);
         let mut all = vec![level_mine, freed, hop, unported, barrel];
-        assert_eq!(kills_total(&all), 3, "mina da fase, saltadora e o tipo 89");
+        assert_eq!(
+            kills_total(&all),
+            3,
+            "mina da fase, saltadora e o 102 sem comportamento"
+        );
         assert_eq!(kills(&all), 0);
         for e in all.iter_mut() {
             e.health = 0;
