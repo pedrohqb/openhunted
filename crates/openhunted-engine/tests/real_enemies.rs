@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Os inimigos da M7a (tipos 7, 8, 10, 11 e 103) sobre os dados reais (OPENHUNTED_DATA):
-//! animações, percepção e ataques nas fases da campanha e um fuzz com invariantes.
+//! Os inimigos da M7a (tipos 7, 8, 10, 11 e 103) e da M10 (3, 4, 41, 87, 88, 89, 105, 107,
+//! 109) sobre os dados reais (OPENHUNTED_DATA): animações, percepção e ataques nas fases da
+//! campanha e um fuzz com invariantes.
 
 use openhunted_engine::behaviour::{
-    bruiser, enemy, hop_mine, mine_generator, security_robot, sentinel,
+    ant, bruiser, chameleon, death, enemy, flyer, hop_mine, mine_generator, security_robot,
+    sentinel, the_entity,
 };
 use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
 use openhunted_engine::{AnimPlayer, Assets, Behaviour, Body, Scene};
@@ -24,7 +26,7 @@ fn load(level: &str) -> Option<Scene> {
     Some(Scene::build(&l, &mut a).unwrap())
 }
 
-const ENEMIES: [u32; 5] = [7, 8, 10, 11, 103];
+const ENEMIES: [u32; 12] = [7, 8, 10, 11, 103, 3, 4, 87, 89, 105, 107, 109];
 
 /// Põe o Jake em (x, y) na camada `layer`, parado.
 fn place_jake(s: &mut Scene, x: i32, y: i32, layer: i32) {
@@ -65,7 +67,7 @@ fn stand_near(s: &mut Scene, i: usize, near: i32) -> (i32, i32) {
 /// Afasta da fase os inimigos que não são o do teste (para o Jake não morrer antes).
 fn only(s: &mut Scene, keep: usize) {
     for (i, e) in s.entities.iter_mut().enumerate() {
-        if i != keep && (ENEMIES.contains(&e.kind) || e.kind == 102 || e.kind == 104) {
+        if i != keep && (watched(e.kind) || matches!(e.kind, 41 | 88)) {
             e.alive = false;
         }
     }
@@ -78,12 +80,18 @@ fn enemy_labels_match_the_real_animations() {
         return;
     };
     let mut a = Assets::new(gd.resources().unwrap());
-    let tables: [(&str, &[enemy::Label]); 5] = [
+    let tables: [(&str, &[enemy::Label]); 11] = [
         ("OSR.ANM", &security_robot::LABELS),
         ("OSE.ANM", &sentinel::LABELS),
         ("OHS.ANM", &hop_mine::LABELS),
         ("OHG.ANM", &mine_generator::LABELS),
         ("OBR.ANM", &bruiser::LABELS),
+        ("ODE.ANM", &death::LABELS),
+        ("OCH.ANM", &chameleon::LABELS),
+        ("OAB.ANM", &flyer::ANTIBODY_LABELS),
+        ("OMR.ANM", &flyer::MANTA_LABELS),
+        ("OES.ANM", &the_entity::LABELS),
+        ("OAN.ANM", &ant::LABELS),
     ];
     for (name, table) in tables {
         let anim = a.animation(name).unwrap();
@@ -467,4 +475,250 @@ fn enemies_fuzz_without_panics() {
         }
     }
     assert!(tested >= 30, "só {tested} fases com inimigos");
+}
+
+/// Índice do primeiro objeto do tipo `kind` que passa em `f`.
+fn find(s: &Scene, kind: u32, f: impl Fn(&openhunted_engine::Entity) -> bool) -> usize {
+    s.entities
+        .iter()
+        .position(|e| e.kind == kind && f(e))
+        .unwrap_or_else(|| panic!("sem objeto do tipo {kind}"))
+}
+
+/// D_J_012: a Morte (sem gatilhos) aparece ao lado do Jake e o fere (radiação ou bala 99).
+#[test]
+fn death_appears_and_hurts_in_d_j_012() {
+    let Some(mut s) = load("D_J_012.LEV") else {
+        return;
+    };
+    let i = find(&s, 3, |_| true);
+    only(&mut s, i);
+    stand_near(&mut s, i, 100);
+    let hp = s.jake.as_ref().unwrap().health.hp;
+    let (mut seen, mut shot) = (false, false);
+    for _ in 0..600 {
+        s.tick(0);
+        let Behaviour::Death(d) = &s.entities[i].behaviour else {
+            panic!()
+        };
+        seen |= !d.hidden();
+        shot |= s.entities.iter().any(|e| e.alive && e.kind == 99);
+        if seen && s.jake.as_ref().unwrap().health.hp < hp {
+            break;
+        }
+    }
+    assert!(seen, "a Morte não apareceu");
+    assert!(
+        shot || s.jake.as_ref().unwrap().health.hp < hp,
+        "a Morte não feriu nem atirou"
+    );
+}
+
+/// H_J_013: diante de um Camaleão, o Jake parado leva a mordida (30).
+#[test]
+fn chameleon_bites_in_h_j_013() {
+    let Some(mut s) = load("H_J_013.LEV") else {
+        return;
+    };
+    let i = find(&s, 4, |e| (e.x, e.y) == (612, 185));
+    only(&mut s, i);
+    stand_near(&mut s, i, 40);
+    let hp = s.jake.as_ref().unwrap().health.hp;
+    for _ in 0..400 {
+        s.tick(0);
+        if s.jake.as_ref().unwrap().health.hp < hp {
+            return;
+        }
+    }
+    panic!("o Camaleão não mordeu");
+}
+
+/// Um voador do tipo `kind` em `level` se move e dá o bote no Jake parado perto.
+fn flyer_attacks(level: &str, kind: u32, drop: bool) {
+    let Some(mut s) = load(level) else {
+        return;
+    };
+    let i = find(
+        &s,
+        kind,
+        |e| matches!(&e.behaviour, Behaviour::Flyer(f) if !f.dormant),
+    );
+    only(&mut s, i);
+    if drop {
+        // o Jake cai de 40 px ao lado do voador (no ar livre em volta dele)
+        let b = s.entities[i].bounds().unwrap();
+        let layer = s.entities[i].layer;
+        let boxr = s.jake.as_ref().unwrap().body.boxr;
+        place_jake(&mut s, b.x + 40 - boxr.x, b.y - boxr.y, layer);
+    } else {
+        stand_near(&mut s, i, 60);
+    }
+    let (x0, hp) = (s.entities[i].center(), s.jake.as_ref().unwrap().health.hp);
+    let mut moved = false;
+    for _ in 0..1500 {
+        s.tick(0);
+        moved |= s.entities[i].center() != x0;
+        if s.jake.as_ref().unwrap().health.hp < hp {
+            break;
+        }
+    }
+    assert!(moved, "{level}: o voador não se moveu");
+    assert!(
+        s.jake.as_ref().unwrap().health.hp < hp,
+        "{level}: o voador não atacou"
+    );
+}
+
+#[test]
+fn antibody_attacks_in_h_j_009() {
+    flyer_attacks("H_J_009.LEV", 105, true);
+}
+
+#[test]
+fn manta_attacks_in_h_j_027() {
+    flyer_attacks("H_J_027.LEV", 89, false);
+}
+
+/// D_J_007: o Jake embaixo de um gerador vertical recebe dardos que caem.
+#[test]
+fn dart_generator_fires_in_d_j_007() {
+    let Some(mut s) = load("D_J_007.LEV") else {
+        return;
+    };
+    let i = find(&s, 87, |e| (e.x, e.y) == (936, 146));
+    only(&mut s, i);
+    let b = s.entities[i].bounds().unwrap();
+    let layer = s.entities[i].layer;
+    place_jake(&mut s, 0, 0, layer);
+    let boxr = s.jake.as_ref().unwrap().body.boxr;
+    let cx = b.x + b.w / 2;
+    let x = cx - boxr.x - boxr.w / 2;
+    let y = (b.y + b.h + 20..b.y + 340)
+        .find(|&feet| {
+            let r = openhunted_engine::Rect {
+                x: x + boxr.x,
+                y: feet - boxr.h,
+                ..boxr
+            };
+            s.world.floor_at(&r, 2)
+        })
+        .expect("sem chão embaixo do gerador")
+        - boxr.y
+        - boxr.h;
+    place_jake(&mut s, x, y, layer);
+    let mut darts = 0;
+    for _ in 0..30 {
+        s.tick(0);
+        darts = darts.max(
+            s.entities
+                .iter()
+                .filter(|e| e.alive && e.kind == 29)
+                .count(),
+        );
+    }
+    assert!(darts > 0, "nenhum dardo");
+}
+
+/// H_J_012: a catapulta sem gatilhos lança o Jake parado sobre ela.
+#[test]
+fn catapult_launches_jake_in_h_j_012() {
+    let Some(mut s) = load("H_J_012.LEV") else {
+        return;
+    };
+    let i = find(&s, 41, |e| (e.x, e.y) == (365, 1007));
+    only(&mut s, i);
+    stand_near(&mut s, i, 0);
+    let y0 = s.jake.as_ref().unwrap().body.y;
+    let mut rose = 0;
+    for _ in 0..20 {
+        s.tick(0);
+        rose = rose.max(y0 - s.jake.as_ref().unwrap().body.y);
+    }
+    assert!(rose > 10, "a catapulta não lançou o Jake ({rose} px)");
+}
+
+/// D_J_009: perto da Entidade, na tela, os controles do Jake se invertem; ela não morre.
+#[test]
+fn entity_confuses_jake_in_d_j_009() {
+    let Some(mut s) = load("D_J_009.LEV") else {
+        return;
+    };
+    let i = find(&s, 107, |e| (e.x, e.y) == (289, 198));
+    only(&mut s, i);
+    stand_near(&mut s, i, 100);
+    let mut confused = false;
+    for _ in 0..100 {
+        s.tick(0);
+        confused |= s.confusion > 0;
+        enemy::hurt(
+            &mut s.entities[i],
+            &openhunted_engine::damage::Pending {
+                amount: 50,
+                ..Default::default()
+            },
+            true,
+        );
+    }
+    assert!(confused, "a Entidade não confundiu o Jake");
+    assert!(s.entities[i].alive, "a Entidade é invulnerável");
+}
+
+/// T_M_008 (fase do Garathe): o formigueiro solta formigas que ficam na fase.
+#[test]
+fn anthill_spawns_ants_in_t_m_008() {
+    let Some(mut s) = load("T_M_008.LEV") else {
+        return;
+    };
+    let hill = find(&s, 88, |_| true);
+    let n0 = s.entities.len();
+    for _ in 0..260 {
+        s.tick(0);
+    }
+    let ants: Vec<_> = s.entities[n0..].iter().filter(|e| e.kind == 109).collect();
+    assert!(ants.len() >= 2, "{} formigas", ants.len());
+    for a in ants.iter().filter(|a| a.alive) {
+        let c = a.center();
+        assert!(c.0 >= 0 && c.1 >= 0 && c.0 < s.width && c.1 < s.height);
+        assert_eq!(a.layer, s.entities[hill].layer);
+        assert!(!enemy::counted(a), "formigas criadas não contam");
+    }
+    // com o Garathe jogável (M8): ao lado de uma formiga, ele leva a mordida
+    assert!(s.jake.is_some(), "a T_M_008 tem o Garathe");
+    let a = (n0..s.entities.len())
+        .find(|&k| s.entities[k].alive && s.entities[k].kind == 109)
+        .expect("nenhuma formiga viva");
+    stand_near(&mut s, a, 20);
+    let hp = s.jake.as_ref().unwrap().health.hp;
+    for _ in 0..60 {
+        s.tick(0);
+        if s.jake.as_ref().unwrap().health.hp < hp {
+            return;
+        }
+    }
+    panic!("a formiga não mordeu");
+}
+
+/// Dificuldade: no fácil a pistola tira o dobro do Bruiser; no difícil, nada passa de metade.
+#[test]
+fn difficulty_scales_enemy_damage_on_real_data() {
+    let Some(mut s) = load("H_J_013.LEV") else {
+        return;
+    };
+    let i = find(&s, 7, |_| true);
+    only(&mut s, i);
+    let other = s.entities[i].layer + 1;
+    place_jake(&mut s, 0, 0, other);
+    s.difficulty = openhunted_engine::Difficulty::Easy;
+    let pistol = openhunted_engine::damage::Pending {
+        amount: openhunted_engine::behaviour::bullet::DAMAGE,
+        ..Default::default()
+    };
+    // o Bruiser só trata o dano acordado: força o gatilho
+    if let Behaviour::Bruiser(b) = &mut s.entities[i].behaviour {
+        b.awake = true;
+    }
+    let hp = s.entities[i].health;
+    enemy::hurt(&mut s.entities[i], &pistol, true);
+    s.tick(0);
+    assert_eq!(s.entities[i].health, hp - 2, "fácil: (2 × 2) / 2");
 }

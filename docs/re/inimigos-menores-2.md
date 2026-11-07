@@ -111,6 +111,19 @@ Anda e vira na parede [inferido: estados 2/3]; alvo = jogador a ≤ 60 px, mesma
 `0x43d629(f, alvo, 0)` → linha `(109, 0)`: **5**; sons 3151 (10 % ao andar) e 3153 (mordida).
 Ao tocar um tipo 88 → estado 6. Derrubada: vx = ⅔ do empurrão. Contra ela: soco/garras 8.
 
+Formigueiro, tique `0x414aed` [confirmado]: sem `0x40`, testa os gatilhos (`0x435bd8`) e
+liga; ligado, zera a velocidade e, se `+0x264` (restantes: `values[1]`, 0 → `+0x18` da variante
+`0x47234c`: 9/5/3; −1 = sem fim) ≠ 0, decresce `+0x26c`; ao zerar, `+0x264 −1` (salvo −1),
+`+0x26c = +0x268` (`values[2]`, 0 → `+0x14`: 100/50/55) e `0x414bd4` cria uma formiga na
+posição dele, na camada dele, variante `+0x180 − 1` (campo 5), `|= 0x11`, tamanho 40.
+
+## Anticorpo × Manta: o byte `+0x278` [confirmado]
+
+O tique do Anticorpo (`0x41129d`) sai logo se `+0x278 ≤ 0` (o byte baixo de `values[6]`): o
+objeto fica parado e intocável; só a saída da fase o zera depois. Nada mais o põe em 1 (as
+duas escritas de 1 no executável são da formiga e da mina). A Manta (`0x421475`) testa a vida
+no lugar desse byte — nos dados solo todos os Anticorpos têm 1 e todas as Mantas 0.
+
 ## Entidade (107): zona do alvo [confirmado]
 
 `0x41299d`: `0x436635(alvo)` acha na lista `0x493b70` (por `+0x58`) o registro de vista com
@@ -139,4 +152,4 @@ cima (ver [`minotauro-ia.md`](minotauro-ia.md)); o robô (`robo-seguranca.md`) u
 - Camaleão: papel de cada um dos ~38 rótulos (7, 34, 35, 39, 40), `0x41ac2d` (2ª mordida) e
   `+0x24/+0x2c` das variantes.
 - Morte: a fórmula exata da aparição (`0x432e5d`) e as unidades de `+0x15c`.
-- Formiga: estados 1–6 e o formigueiro (`0x414aed`, ritmo de criação).
+- Formiga: estados 1–6.

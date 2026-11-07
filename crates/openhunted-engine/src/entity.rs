@@ -47,8 +47,36 @@ pub const SECURITY_ROBOT: u32 = 8;
 pub const SENTINEL: u32 = 10;
 pub const HOP_MINE: u32 = 11;
 pub const MINE_GENERATOR: u32 = 103;
-/// Inimigos cujo quadro o comportamento escolhe (sprite congelado).
-pub const ENEMIES: [u32; 5] = [BRUISER, SECURITY_ROBOT, SENTINEL, HOP_MINE, MINE_GENERATOR];
+/// Hostis da M10: Morte (3), Camaleão (4), dardo (29), catapulta (41), gerador de dardos
+/// (87), formigueiro (88), Manta (89), Anticorpo (105), Entidade (107) e formiga (109).
+pub const DEATH: u32 = 3;
+pub const CHAMELEON: u32 = 4;
+pub const DART: u32 = 29;
+pub const CATAPULT: u32 = 41;
+pub const DART_GENERATOR: u32 = 87;
+pub const ANTHILL: u32 = 88;
+pub const MANTA: u32 = 89;
+pub const ANTIBODY: u32 = 105;
+pub const THE_ENTITY: u32 = 107;
+pub const ANT: u32 = 109;
+/// Inimigos cujo quadro o comportamento escolhe (sprite congelado); os tiros inimigos não
+/// param neles.
+pub const ENEMIES: [u32; 14] = [
+    BRUISER,
+    SECURITY_ROBOT,
+    SENTINEL,
+    HOP_MINE,
+    MINE_GENERATOR,
+    DEATH,
+    CHAMELEON,
+    CATAPULT,
+    DART_GENERATOR,
+    ANTHILL,
+    MANTA,
+    ANTIBODY,
+    THE_ENTITY,
+    ANT,
+];
 /// Paredes e portas `OH` (tipos 50–52).
 pub const DOORS: std::ops::RangeInclusive<u32> = 50..=52;
 /// Itens de coleta genérica tratados: armas e munição (12–14, 16–18, 26, 27), vida e comida
@@ -135,6 +163,14 @@ pub enum Behaviour {
     SecurityRobot(Box<SecurityRobotState>),
     Bruiser(Box<BruiserState>),
     EnemyShot(EnemyShotState),
+    Death(Box<crate::behaviour::death::DeathState>),
+    Chameleon(Box<crate::behaviour::chameleon::ChameleonState>),
+    Flyer(Box<crate::behaviour::flyer::FlyerState>),
+    DartGenerator(crate::behaviour::dart_generator::DartGeneratorState),
+    Catapult(crate::behaviour::catapult::CatapultState),
+    TheEntity(crate::behaviour::the_entity::TheEntityState),
+    Anthill(crate::behaviour::ant::AnthillState),
+    Ant(crate::behaviour::ant::AntState),
 }
 
 #[derive(Debug, Clone)]
@@ -214,6 +250,8 @@ impl Entity {
             && match &self.behaviour {
                 Behaviour::Fire(s) => s.visible,
                 Behaviour::Graffiti(s) => s.visible,
+                Behaviour::Death(s) => !s.hidden(),
+                Behaviour::Chameleon(s) => !s.faded(),
                 _ => true,
             }
     }
@@ -446,6 +484,35 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
             o.x.wrapping_mul(31).wrapping_add(o.y),
         ))),
         BRUISER => Behaviour::Bruiser(Box::new(BruiserState::new(&o.values))),
+        DEATH => Behaviour::Death(Box::default()),
+        CHAMELEON => Behaviour::Chameleon(Box::new(
+            crate::behaviour::chameleon::ChameleonState::new(value(0)),
+        )),
+        MANTA | ANTIBODY => Behaviour::Flyer(Box::new(crate::behaviour::flyer::FlyerState::new(
+            o.kind,
+            &o.values,
+            (o.x, o.y),
+            o.x.wrapping_mul(31).wrapping_add(o.y),
+        ))),
+        DART_GENERATOR => Behaviour::DartGenerator(
+            crate::behaviour::dart_generator::DartGeneratorState::new(&o.values),
+        ),
+        CATAPULT => {
+            // sem BRD: a caixa é o retângulo do quadro, só de contato
+            if let Some(fb) = frame_box {
+                boxes = vec![fb];
+                solid_shapes = false;
+            }
+            Behaviour::Catapult(crate::behaviour::catapult::CatapultState::new(&o.values))
+        }
+        THE_ENTITY => {
+            Behaviour::TheEntity(crate::behaviour::the_entity::TheEntityState::new(&o.values))
+        }
+        ANTHILL => Behaviour::Anthill(crate::behaviour::ant::AnthillState::new(
+            &o.values,
+            field(5),
+        )),
+        ANT => Behaviour::Ant(crate::behaviour::ant::AntState::new(value(0), false)),
         TELEPORTER => Behaviour::Teleporter(TeleporterState::default()),
         k if DOORS.contains(&k) => {
             if boxes.is_empty() {
@@ -472,6 +539,14 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
             SENTINEL => crate::behaviour::sentinel::HEALTH,
             HOP_MINE => crate::behaviour::hop_mine::HEALTH,
             BRUISER => crate::behaviour::bruiser::HEALTH,
+            DEATH => crate::behaviour::death::HEALTH,
+            CHAMELEON => match &behaviour {
+                Behaviour::Chameleon(c) => c.variant().health,
+                _ => 0,
+            },
+            MANTA | ANTIBODY => crate::behaviour::flyer::HEALTH,
+            DART_GENERATOR => crate::behaviour::dart_generator::health(&o.values),
+            ANT => crate::behaviour::ant::HEALTH,
             MINE_GENERATOR => match &behaviour {
                 Behaviour::MineGenerator(g) => g.variant().health,
                 _ => 0,
@@ -480,6 +555,13 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
         };
     }
     let mut f = flags(o);
+    match o.kind {
+        // `+0x178 |= 0x4803` (oculta: 0x2 a tira das colisões)
+        DEATH => f |= 0x4803,
+        // `+0x178 = 0x81 | 0x4000` e o leitor liga 0x80000
+        MANTA | ANTIBODY => f = 0x80000 | 0x4000 | 0x81,
+        _ => {}
+    }
     if DOORS.contains(&o.kind) {
         // `|= 0x89`, `&= ~0x40`; aberta (estado 4) é só contato
         f = (f | 0x89) & !0x40;

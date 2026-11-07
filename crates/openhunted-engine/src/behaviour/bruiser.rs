@@ -407,10 +407,10 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         }
     }
     st.fire_wait -= 1;
-    // 3. dano (`0x417ae0`): imune a fogo, metade do resto
+    // 3. dano (`0x417ae0`): imune a fogo; dificuldade, depois metade
     let w = st.wound.take();
     if !w.is_empty() && !w.pending.fire && st.state != DIE {
-        e.health -= w.pending.amount * 50 / 100;
+        e.health -= ctx.difficulty.damage(w.pending.amount) * 50 / 100;
         if e.health <= 0 {
             st.set(DIE);
         } else if !matches!(st.state, STAGGER | TURN | GROUND_FIRE) {

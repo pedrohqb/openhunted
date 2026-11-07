@@ -155,6 +155,10 @@ pub struct Scene {
     pub quake: u32,
     /// Último tique de cada som com limite global de repetição (sentinelas, robôs).
     sound_clock: HashMap<u16, u32>,
+    /// Dificuldade (`0x487854`): a casca a põe pela opção gravada; padrão médio.
+    pub difficulty: crate::Difficulty,
+    /// Confusão do jogador (`+0x264`): tiques com os pares de direção trocados (Entidade).
+    pub confusion: u32,
 }
 
 /// Tiques por segundo do cronômetro (`0x43c95c`).
@@ -357,6 +361,8 @@ impl Scene {
             cell_doors: Vec::new(),
             quake: 0,
             sound_clock: HashMap::new(),
+            difficulty: crate::Difficulty::Normal,
+            confusion: 0,
         }
     }
 
@@ -405,6 +411,8 @@ impl Scene {
             cell_doors: Vec::new(),
             quake: 0,
             sound_clock: HashMap::new(),
+            difficulty: crate::Difficulty::Normal,
+            confusion: 0,
         };
         let mut scenery = 0usize;
         let mut jake_layer = 0;
@@ -811,6 +819,7 @@ impl Scene {
     /// entidades agem, e todas as animações avançam. Com a partida decidida, só anima.
     pub fn tick(&mut self, input: u32) {
         let input = if self.outcome.is_some() { 0 } else { input };
+        let input = self.confused_input(input);
         if let (Some(j), Some(sp)) = (self.jake.as_mut(), self.jake_sprite.as_mut()) {
             let env = Env {
                 world: &self.world,
@@ -1387,6 +1396,8 @@ impl Scene {
     /// em ordem de lista; depois as saídas (dano ao Jake, novas entidades, eventos).
     fn tick_entities(&mut self) {
         behaviour::mine_generator::sync(&mut self.entities);
+        behaviour::chameleon::sync(&mut self.entities);
+        behaviour::catapult::sync(&mut self.entities);
         let snapshot: Vec<(i32, bool)> = self
             .entities
             .iter()
@@ -1408,6 +1419,7 @@ impl Scene {
                 rng: &mut rng,
                 hints: &self.hints,
                 level: (self.width, self.height),
+                difficulty: self.difficulty,
             };
             for e in self.entities.iter_mut().filter(|e| e.alive) {
                 match e.behaviour {
@@ -1444,6 +1456,16 @@ impl Scene {
                     }
                     Behaviour::Bruiser(_) => behaviour::bruiser::tick(e, &mut ctx, &mut out),
                     Behaviour::EnemyShot(_) => behaviour::enemy_shot::tick(e, &mut ctx, &mut out),
+                    Behaviour::Death(_) => behaviour::death::tick(e, &mut ctx, &mut out),
+                    Behaviour::Chameleon(_) => behaviour::chameleon::tick(e, &mut ctx, &mut out),
+                    Behaviour::Flyer(_) => behaviour::flyer::tick(e, &mut ctx, &mut out),
+                    Behaviour::DartGenerator(_) => {
+                        behaviour::dart_generator::tick(e, &mut ctx, &mut out)
+                    }
+                    Behaviour::Catapult(_) => behaviour::catapult::tick(e, &mut ctx, &mut out),
+                    Behaviour::TheEntity(_) => behaviour::the_entity::tick(e, &mut ctx, &mut out),
+                    Behaviour::Anthill(_) => behaviour::ant::tick_hill(e, &mut ctx, &mut out),
+                    Behaviour::Ant(_) => behaviour::ant::tick(e, &mut ctx, &mut out),
                     _ => {}
                 }
             }
@@ -1488,11 +1510,25 @@ impl Scene {
             }
         }
         self.apply_quake(out.quake);
+        behaviour::catapult::apply(&mut self.entities, &out.launches);
+        if out.confuse && self.confusion <= 1 {
+            self.confusion = behaviour::the_entity::CONFUSION_TICKS;
+        }
         self.spawn_enemy_objects(&mut out);
         self.entities.extend(out.spawn);
         let events = self.throttle_sounds(out.events);
         self.events.extend(events);
         self.rebuild_world();
+    }
+
+    /// Confusão (`tiro-jake.md`): com `+0x264 > 0` os pares de direção se invertem e ele
+    /// decresce a cada leitura da entrada.
+    fn confused_input(&mut self, input: u32) -> u32 {
+        if self.confusion == 0 {
+            return input;
+        }
+        self.confusion -= 1;
+        crate::input::swap_directions(input)
     }
 
     /// Terremoto do Bruiser: enquanto durar, o Jake no chão cambaleia (choque sem dano,
@@ -1601,6 +1637,30 @@ impl Scene {
                             scale: (height, fh.max(1)),
                             mirror: false,
                         });
+                    }
+                    e
+                }
+                behaviour::enemy::Spawn::Dart {
+                    at,
+                    vel,
+                    layer,
+                    vertical,
+                } => {
+                    let mut e = behaviour::enemy_shot::entity(crate::entity::DART, at, vel, layer);
+                    let label = if vertical { 2 } else { 1 };
+                    self.attach_sprite(&mut e, "ODA.ANM", label, vel.0 < 0, 12, Some("ODA.BRD"));
+                    e
+                }
+                behaviour::enemy::Spawn::Ant {
+                    at,
+                    variant,
+                    layer,
+                    mirror,
+                } => {
+                    let mut e = behaviour::ant::spawned(at, variant, layer, mirror);
+                    self.attach_sprite(&mut e, "OAN.ANM", 2, mirror, 40, Some("OAN.BRD"));
+                    if let Some(sp) = e.sprite.as_mut() {
+                        sp.frozen = true;
                     }
                     e
                 }

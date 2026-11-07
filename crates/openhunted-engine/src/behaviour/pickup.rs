@@ -52,9 +52,19 @@ pub const AMMO_CAP: i32 = 99;
 /// Arma e munição (`0x409fe8` + aceitação `0x40b6ed`) com o valor `v` (`values[0]`) do item:
 /// `None` se o item não é de arma, chave ou bandeira; `Some(false)` se recusado (munição ≥ 99
 /// numa arma que já tem). Quem dá a arma aceita sempre quando o "tem" é 0 e pode torná-la a
-/// corrente (`0x43af6c`, antes de a arma entrar). Chaves e bandeiras: "tem" = 1 e +1. A
-/// dificuldade fica em ×1.
+/// corrente (`0x43af6c`, antes de a arma entrar). Chaves e bandeiras: "tem" = 1 e +1. Na
+/// dificuldade média; `take_weapon_at` escala a munição.
 pub fn take_weapon(kind: u32, v: i32, inv: &mut Inventory) -> Option<bool> {
+    take_weapon_at(kind, v, inv, crate::Difficulty::Normal)
+}
+
+/// `take_weapon` com a munição escalada pela dificuldade (`0x40a36d`: ×1,5 / ×1 / ×0,75).
+pub fn take_weapon_at(
+    kind: u32,
+    v: i32,
+    inv: &mut Inventory,
+    difficulty: crate::Difficulty,
+) -> Option<bool> {
     if KEYS.contains(&kind) || FLAGS.contains(&kind) {
         let slot = (kind - if KEYS.contains(&kind) { 49 } else { 73 }) as usize;
         inv.slots[slot].0 = 1;
@@ -92,7 +102,7 @@ pub fn take_weapon(kind: u32, v: i32, inv: &mut Inventory) -> Option<bool> {
         inv.slots[slot].0 = 1;
     }
     if amount != 0 {
-        inv.slots[slot].1 = (qty + amount.max(1)).min(AMMO_CAP);
+        inv.slots[slot].1 = (qty + difficulty.ammo(amount.max(1))).min(AMMO_CAP);
     }
     Some(true)
 }
@@ -224,7 +234,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         .clone()
         .unwrap_or_else(|| jake.inventory.clone());
     let v = e.values.first().copied().unwrap_or(0);
-    if let Some(ok) = take_weapon(e.kind, v, &mut inv) {
+    if let Some(ok) = take_weapon_at(e.kind, v, &mut inv, ctx.difficulty) {
         if ok {
             out.inventory = Some(inv);
             out.events.push(Event::Sound(crate::sound::Cue::ui(
@@ -432,6 +442,21 @@ mod tests {
         tick(&mut item, &ctx(&j, &w, &on), &mut out);
         assert_eq!(out.poison, Some(1));
         assert!(!item.alive);
+    }
+
+    #[test]
+    fn ammo_pickups_scale_with_difficulty() {
+        use crate::Difficulty::{Easy, Hard, Normal};
+        let got = |d| {
+            let mut inv = Inventory::from_points(&[]);
+            let before = inv.slots[PISTOL].1;
+            take_weapon_at(AMMO_ITEM, 10, &mut inv, d);
+            inv.slots[PISTOL].1 - before
+        };
+        assert_eq!([got(Easy), got(Normal), got(Hard)], [45, 30, 22]);
+        let mut inv = Inventory::from_points(&[]);
+        take_weapon_at(63, 0, &mut inv, Easy);
+        assert_eq!(inv.slots[63 - 49], (1, 1), "chaves não escalam");
     }
 
     #[test]
