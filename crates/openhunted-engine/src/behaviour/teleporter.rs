@@ -123,9 +123,8 @@ pub fn settle(entities: &mut [Entity], dest: Option<usize>, tick: u32) {
 }
 
 /// Destino da viagem: sorteia um id da lista entre os que existem; o clone vai ao centro x do
-/// destino e desce/sobe em células inteiras. Devolve o deslocamento do passageiro e o índice
-/// do destino. Só valem destinos na camada do teletransporte [ruling: a troca de camada do
-/// Jake é de outra fatia; levado a outra camada, ele cairia nos sólidos desta].
+/// destino e desce/sobe em células inteiras, na camada do destino (`0x41347e`). Devolve o
+/// deslocamento do passageiro e o índice do destino (a camada é a dele).
 pub fn destination(
     entities: &[Entity],
     req: &Request,
@@ -134,11 +133,7 @@ pub fn destination(
     let found: Vec<usize> = req
         .targets
         .iter()
-        .filter_map(|&id| {
-            entities
-                .iter()
-                .position(|e| e.alive && e.id == id && e.layer == req.layer)
-        })
+        .filter_map(|&id| entities.iter().position(|e| e.alive && e.id == id))
         .collect();
     if found.is_empty() {
         return None;
@@ -237,6 +232,29 @@ mod tests {
         assert!(st.last_on, "esqueceu o passageiro em viagem");
         // espera de 40 tiques contada da mudança de lugar (metade da viagem)
         assert_eq!(st.until, 10 + crate::jake::TELEPORT_MOVE + DEST_COOLDOWN);
+    }
+
+    /// O destino vale em qualquer camada (`0x41347e`: o clone e o passageiro vão à camada do
+    /// destino); na `I_J_005` o da camada 0 leva ao id 4, na camada 2.
+    #[test]
+    fn destination_on_another_layer_is_valid() {
+        let mut t = teleporter();
+        t.triggers = vec![(4, Some(0))];
+        let mut d = teleporter();
+        d.id = 4;
+        d.layer = 2;
+        d.y = 367 + 256;
+        let req = Request {
+            x: t.x,
+            y: t.y,
+            w: 24,
+            layer: 0,
+            targets: vec![4],
+        };
+        let ents = vec![t, d];
+        let ((dx, dy), i) = destination(&ents, &req, &mut Rng::new(1)).expect("destino");
+        assert_eq!((i, dy), (1, 256));
+        assert_eq!(dx, ents[1].center().0 - 12 - 374);
     }
 
     /// Sem destino válido o teletransporte não toca o feixe nem fica 42 tiques ocupado; dois

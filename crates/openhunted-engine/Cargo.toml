@@ -7,8 +7,16 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Auditoria de vencibilidade (M13): ferramenta de diagnóstico, fora do jogo.
+audit = []
+
 [dependencies]
 openhunted-formats = { path = "../openhunted-formats" }
 
 [dev-dependencies]
 openhunted-formats = { path = "../openhunted-formats", features = ["test-support"] }
+
+[[test]]
+name = "real_audit"
+required-features = ["audit"]

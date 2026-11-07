@@ -15,13 +15,21 @@ pub struct ZoneState {
 }
 
 /// A zona está ocupada neste tique. `values[5]`: 0 só jogadores, 2 sempre ocupada; os
-/// demais objetos vivos não são considerados nesta fatia (só o Jake conta).
+/// demais objetos vivos não são considerados nesta fatia (só o Jake conta). O jogador conta
+/// vivo, mesmo entrando na porta de saída: `0x40e14e` testa sinalizadores (`0x80003`, que a
+/// porta não toca: ela liga `0x200008`), presença e vida, não o estado. Ruling: a caixa é a
+/// de colisão, sem o encolher da escala na porta (o original usa o retângulo do quadro,
+/// `0x43585c`).
 fn occupied(e: &Entity, ctx: &Ctx) -> bool {
     let who = e.values.get(5).copied().unwrap_or(0);
     if who == 2 {
         return true;
     }
-    let (Some(zone), Some(j)) = (e.bounds(), ctx.jake_bounds()) else {
+    let player = ctx
+        .jake
+        .filter(|j| !j.is_dead() && !j.is_teleporting())
+        .map(|j| j.body.bounds());
+    let (Some(zone), Some(j)) = (e.bounds(), player) else {
         return false;
     };
     if ctx.jake_layer != e.layer {
@@ -141,6 +149,23 @@ mod tests {
         let on = |_: i32| Some(true);
         tick(&mut z, &ctx_with(&j, &w, &on), &mut out);
         assert!(z.on);
+    }
+
+    /// O jogador entrando na porta de saída ainda ocupa a zona: `0x40e14e` não olha o estado,
+    /// só sinalizadores (`0x80003`), presença e vida, e a porta liga `0x200008`, fora deles.
+    #[test]
+    fn jake_entering_the_exit_still_occupies_the_zone() {
+        let mut z = zone(100, 100, 64, 16, &[0, 0, 1, 5, 2, 0]);
+        let mut out = Out::default();
+        let on = |_: i32| None;
+        let (mut j, w) = ctx_with_jake(110, 100);
+        tick(&mut z, &ctx_with(&j, &w, &on), &mut out);
+        assert!(z.on);
+        j.enter_exit(1);
+        for _ in 0..20 {
+            tick(&mut z, &ctx_with(&j, &w, &on), &mut out);
+        }
+        assert!(z.on, "rearmada pelo jogador na porta");
     }
 
     fn ctx_with<'a>(j: &'a Jake, w: &'a World, on: &'a dyn Fn(i32) -> Option<bool>) -> Ctx<'a> {

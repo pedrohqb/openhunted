@@ -1165,7 +1165,7 @@ impl Scene {
             let dest = behaviour::teleporter::destination(&self.entities, &req, &mut self.rng);
             let mut to = None;
             if let (Some((delta, i)), Some(j)) = (dest, self.jake.as_mut()) {
-                j.start_teleport(delta);
+                j.start_teleport_to(delta, self.entities[i].layer);
                 to = Some(i);
             }
             behaviour::teleporter::settle(&mut self.entities, to, self.tick_count);

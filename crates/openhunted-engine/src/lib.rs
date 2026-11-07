@@ -5,6 +5,8 @@
 pub mod ai;
 pub mod anim;
 pub mod assets;
+#[cfg(feature = "audit")]
+pub mod audit;
 pub mod behaviour;
 pub mod character;
 pub mod damage;

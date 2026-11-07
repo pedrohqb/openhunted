@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `ohtool`: lista, inspeciona e extrai os recursos do Hunter Hunted.
 
+mod audit;
 mod extract;
 
 use std::io::Write;
@@ -48,6 +49,18 @@ enum Cmd {
     Levels {
         #[arg(long)]
         out: Option<PathBuf>,
+    },
+    /// Audita as missões solo (`ENGLEVEL.TXT`, p=1/2): personagem, objetivos, portas,
+    /// chaves e tempo; com --god, vence cada uma no modo deus (invulnerável, teletransporte)
+    /// e mostra WIN/FAIL; com --reach, avisa objetivos fora do alcance pela grade da IA.
+    Audit {
+        /// Só esta fase (ex.: I_J_101.LEV).
+        #[arg(long)]
+        level: Option<String>,
+        #[arg(long)]
+        god: bool,
+        #[arg(long)]
+        reach: bool,
     },
     /// Renderiza um quadro 640×480 de uma fase em PNG (sem janela).
     Render {
@@ -209,6 +222,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     std::fs::write(dir.join(name), serde_json::to_string_pretty(&level)?)?;
                 }
             }
+        }
+        Cmd::Audit { level, god, reach } => {
+            audit::run(&gd, level.as_deref(), god, reach, &mut out)?;
         }
         Cmd::Render {
             level,

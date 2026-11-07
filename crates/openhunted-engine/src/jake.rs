@@ -460,7 +460,7 @@ pub struct Jake {
     /// Rótulo em que morreu (o cadáver fica no último quadro dele).
     death_label: u16,
     /// Deslocamento pendente da viagem de teletransporte.
-    teleport: Option<(i32, i32)>,
+    teleport: Option<((i32, i32), i32)>,
     /// Numerador da escala ao entrar na porta (encolhe 1 por tique após 10 tiques).
     exit_scale: Option<i32>,
     pub inventory: Inventory,
@@ -905,13 +905,19 @@ impl Jake {
 
     /// Entra no teletransporte: some, e na metade da viagem anda `delta` px.
     pub fn start_teleport(&mut self, delta: (i32, i32)) {
+        self.start_teleport_to(delta, self.layer);
+    }
+
+    /// Como `start_teleport`, indo à camada `layer` na metade da viagem (`0x41347e`: o
+    /// passageiro vai à camada do destino).
+    pub fn start_teleport_to(&mut self, delta: (i32, i32), layer: i32) {
         if self.is_dead() {
             return;
         }
         self.body.vx = 0;
         self.body.vy = 0;
         self.pending = Pending::default();
-        self.teleport = Some(delta);
+        self.teleport = Some((delta, layer));
         self.set(State::Teleporting(0));
     }
 
@@ -1505,9 +1511,10 @@ impl Jake {
             }
             State::Teleporting(n) => {
                 if n + 1 == TELEPORT_MOVE {
-                    if let Some((dx, dy)) = self.teleport.take() {
+                    if let Some(((dx, dy), layer)) = self.teleport.take() {
                         self.body.x = self.body.x.saturating_add(dx);
                         self.body.y = self.body.y.saturating_add(dy);
+                        self.layer = layer;
                     }
                 }
                 self.body.vx = 0;
@@ -2197,6 +2204,22 @@ mod tests {
         assert_eq!(j.state(), State::Idle);
         assert!(j.is_visible());
         assert_eq!(j.health.hp, 100, "invulnerável na viagem");
+    }
+
+    /// A viagem a um teletransporte de outra camada leva o Jake a ela na metade.
+    #[test]
+    fn teleport_to_another_layer_changes_layer_halfway() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0);
+        j.start_teleport_to((0, 256), 2);
+        for t in 1..TELEPORT_TICKS {
+            j.tick(0, &w);
+            assert_eq!(
+                j.layer(),
+                if t < TELEPORT_MOVE { 0 } else { 2 },
+                "tique {t}"
+            );
+        }
     }
 
     #[test]
