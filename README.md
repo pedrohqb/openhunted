@@ -11,8 +11,13 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
-**M15a: dois jogadores no motor** (coop e disputa, `Scene::build_with`): vagas, alvos,
-crédito, F/S, renascimento, itens que renascem, fins e cores; a tela dividida vem na M15b.
+**M15: dois jogadores numa máquina.** "Multi Player" leva à disputa ou ao cooperativo: a
+lista de fases do modo, a escolha de personagem e cor de cada jogador e os limites de tempo e
+de pontos (disputa) ou o briefing (coop), a partida em tela dividida (jogador 1 em cima, cada
+metade com a sua câmera e a barra achatada; na disputa, `F − S` no lugar do cronômetro) e o
+resultado por jogador (NEXT, REPLAY, MAIN). O motor (M15a) cuida de vagas, alvos, crédito,
+renascimento e itens que renascem. As partidas a dois não mexem na campanha solo. Regras em
+`docs/superpowers/specs/2026-11-08-m15b-multijogador-casca-design.md`.
 
 **M14: acabamento da casca e entrada.** A abertura do original (logotipo, filme, título,
 história, créditos) repete até uma tecla, também depois de 30 s de menu parado; as teclas e o
@@ -43,22 +48,12 @@ longo com investida, rastejar, barra, esconder, especial) e as armas dele (garra
 chicote, facas, granadas, estrelas). A `T_M_002` é vencida de ponta a ponta. Regras em
 `docs/superpowers/specs/2026-11-06-m8-garathe-design.md`.
 
-**M9: a casca completa.** Todas as telas do menu (carregar, escolher missão, opções gravadas
-na hora, heróis, "Sobre", dois jogadores com o aviso de que não existem); `S_CAR` a cada peça
-do carro, filmes do meio e do final; lista de heróis (`hunter.fam`) e jogo salvo `.hhg`
-compatíveis com o original; música dos menus em laço e faixas de uma pasta na partida; filmes
-AVI pelo `ffmpeg`. Regras em `docs/superpowers/specs/2026-11-06-m9-casca-design.md`.
+**M9: a casca completa** (carregar, escolher missão, opções, heróis, "Sobre"); `S_CAR`,
+filmes, `hunter.fam` e `.hhg` compatíveis com o original; música dos menus e da partida.
 
-**M7b: o arsenal do Jake e os itens da campanha.** Além da pistola, o Jake soca (Z, ou
-ATIRAR com os punhos: 8 de dano na frente), atira com a espingarda (o chumbo se divide em
-quatro, com cartucho), o lança-foguetes (20 diretos e explosão de raio 64 que também fere o
-Jake de perto), as estrelas ninja (voo em onda; na parede cravam e podem ser recolhidas) e as
-granadas (quicam, explodem pelo pavio ou ao tocar um objeto). PgUp/PgDn trocam de arma na
-ordem do original (1–6 escolhem direto, extensão do port); sem munição, ele passa à melhor
-arma. Os itens da campanha funcionam: munição das armas, comida, veneno (perde vida a cada
-20 tiques) e antídoto, armaduras, chaves (abrem as portas de célula empurrando, sem serem
-gastas), bandeiras (objetivo "acionar"), o pistão (anda pelos gatilhos e esmaga) e o
-interruptor (CIMA diante dele).
+**M7b: o arsenal do Jake** (soco, pistola, espingarda, lança-foguetes, estrelas, granadas;
+troca na ordem do original) **e os itens da campanha** (munição, comida, veneno e antídoto,
+armaduras, chaves, bandeiras, pistão, interruptor).
 
 **M7a: os inimigos principais da campanha.** Robô de segurança voador (`OSR`), sentinela
 (`OSE`), mina saltadora (`OHS`), gerador de minas (`OHG`) e Bruiser (acorda pelos gatilhos,
@@ -74,8 +69,7 @@ formatos (`openhunted-formats` lê o CD, pasta ou `.iso`; [`docs/formats/`](docs
 M2 visualizador; M3a o Jake corre e pula; M3b objetos sólidos e presença por modo.
 
 Ainda não há: o equilíbrio na beirada (162/163), os passos e demais sons por quadro do Jake e
-do cenário, o zumbido das minas, a tela dividida e as telas dos modos de dois jogadores,
-tesouros e segredos, a pintura por camadas (o original só mostra a camada do jogador e, nos
+do cenário, o zumbido das minas, tesouros e segredos, a pintura por camadas (o original só mostra a camada do jogador e, nos
 buracos, as de trás escurecidas; aqui todas aparecem) e a navegação das telas pelo joystick.
 Os obstáculos `OPO` (gotas, bloco que cai, portão) ainda não agem.
 
@@ -136,7 +130,10 @@ câmera o acompanha. P ou Pause pausa (Enter,
 espaço ou OKAY retomam). A dica do tutorial pausa o jogo e fecha ao soltar uma tecla. Esc não
 faz nada (como no original). Em fases sem personagem, as setas rolam a tela, PageUp/PageDown pulam
 uma tela, Home/End vão às pontas e Esc volta ao menu (sem personagem, a fase nunca acaba).
-Quando a janela perde o foco, o jogo pausa. Só o botão esquerdo do mouse clica. Tab mostra as caixas de colisão e os objetos de lógica. O
+Quando a janela perde o foco, o jogo pausa.
+Com dois jogadores, o 2 usa por padrão I/M/J/K (mover), Espaço (atirar), Enter (pular), `;`
+(furtivo), `/` (soco) e Insert/Delete (armas) no mesmo teclado, ou o dispositivo escolhido em
+"Input Devices"; a pausa e o foco perdido param a partida inteira, inclusive o limite de tempo. Só o botão esquerdo do mouse clica. Tab mostra as caixas de colisão e os objetos de lógica. O
 som sai pelo dispositivo de áudio padrão; sem ele, o jogo avisa uma vez e segue mudo.
 
 Para renderizar sem janela: `ohtool --data … render T_J_001.LEV --out quadro.png [--camera X,Y]`.

@@ -166,6 +166,7 @@ total [inferido do caminho, não testado].
 
 - Ordem real J1/J2 no coop (lista por `+0x1b4`?); quem é J1 em `C_2`.
 - Animação dos estados 181/80 e se o renascer é instantâneo na tela.
-- Se a pausa congela o limite de tempo (relógio real).
+- Se a pausa congela o limite de tempo (relógio real): o port congela (Ruling da M15b).
 - Nomes dos sons 3773, 3787, 3788, 3790, 3792.
-- "Next" no multijogador pula índices com recorde do solo (mesmo `0x47fa8c`)?
+- "Next" no multijogador pula índices com recorde do solo (mesmo `0x47fa8c`)? O port vai à
+  entrada seguinte da lista do modo (Ruling da M15b).
