@@ -7,8 +7,20 @@
 /// entradas, com OU. Entradas de código 0 (ou ausente) não contam; nenhuma entrada contada →
 /// verdadeiro; alvo inexistente (`on` devolve `None`) → verdadeiro.
 pub fn satisfied(list: &[(i32, Option<i32>)], on: &dyn Fn(i32) -> Option<bool>) -> bool {
+    satisfied_range(list, 0, list.len(), on)
+}
+
+/// Como `satisfied`, avaliando só as entradas `first..first + n` (`0x435bd8(lista, first,
+/// n)`); os números de entrada dos códigos apontam para a lista inteira (a luz da célula usa
+/// as entradas 1–2, a porta as 3–4).
+pub fn satisfied_range(
+    list: &[(i32, Option<i32>)],
+    first: usize,
+    n: usize,
+    on: &dyn Fn(i32) -> Option<bool>,
+) -> bool {
     let mut evaluated = false;
-    for &(_, code) in list {
+    for &(_, code) in list.iter().skip(first).take(n) {
         let mut c = code.unwrap_or(0);
         if c <= 0 {
             continue;
@@ -72,6 +84,15 @@ mod tests {
         // OU entre entradas
         assert!(satisfied(&[(2, Some(11)), (1, Some(12))], &on));
         assert!(armed(&[(0, Some(0)), (1, Some(11))]));
+        // só as entradas 1–2; o código 13 aponta para a 3ª entrada da lista inteira
+        let l = [(7, Some(13)), (0, Some(0)), (1, Some(0)), (9, Some(11))];
+        assert!(satisfied_range(&l, 0, 2, &on));
+        assert!(!satisfied_range(
+            &[(2, Some(11)), (0, None), (1, Some(11))],
+            0,
+            2,
+            &on
+        ));
         assert!(!armed(&[(0, Some(0)), (1, None)]));
     }
 }

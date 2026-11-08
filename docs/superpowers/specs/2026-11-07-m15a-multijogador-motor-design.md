@@ -97,6 +97,11 @@ Morto vira cadáver (como no solo, sem renascer); derrota quando todos morreram 
 esgota; um na saída com os objetivos cumpridos (vivo quem entra) vence pelos dois. Itens não
 renascem; coleta pelo bit do personagem.
 
+## Luz (M14)
+
+**Ruling: a luz por célula é uma só para as duas vistas** (o estado sai dos gatilhos, não do
+jogador); cada jogador é desenhado com a sombra da célula dele (`look_at` no centro dele).
+
 ## Cores
 
 Disputa: `Jake::with_colour(c)` põe a cor-base (`+0x280`) usada no desenho e no piscar (troca

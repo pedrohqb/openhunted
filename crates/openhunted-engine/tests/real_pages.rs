@@ -216,13 +216,15 @@ fn heroes_name_car_and_info_pages() {
     );
     assert_eq!(click(&mut m, info_ids::MULTI_CANCEL), Some(Reply::Close));
     let s = screen(&mut a, "SINPU.ITF", Placement::Full);
-    let mut i = Info::new(s, InfoKind::Input, None, &[]);
-    assert_eq!(i.screen.frame(info_ids::INPUT_P1_KEYBOARD).unwrap().0, 2);
+    let mut i = openhunted_engine::shell::devices::DeviceScreen::new(s, Default::default(), 0);
+    use openhunted_engine::shell::devices::ids as dev;
     assert_eq!(
-        click(&mut i, info_ids::INPUT_P1_CUSTOMIZE),
-        Some(Reply::Customize)
+        i.screen.frame(dev::FIRST[0]).unwrap().0,
+        2,
+        "teclado marcado"
     );
-    assert_eq!(click(&mut i, info_ids::INPUT_DONE), Some(Reply::Close));
+    assert_eq!(click(&mut i, dev::CUSTOMIZE[0]), Some(Reply::Customize(0)));
+    assert_eq!(click(&mut i, dev::DONE), Some(Reply::Close));
     let s = screen(&mut a, "SABOUT.ITF", Placement::Centered);
     let mut ab = Info::new(s, InfoKind::About, Some(font), &["0.1.0".into()]);
     assert_eq!(ab.screen.text(info_ids::ABOUT_VERSION), Some("0.1.0"));

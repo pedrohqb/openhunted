@@ -109,5 +109,5 @@ Anticorpo (sem pulso): `(44, −45)`, `(37, −54)`, `(43, −17)`, `(42, 14)`.
 
 ## Em aberto
 
-- Luz por região (`+0x58` da região, sombra 18 + |x|) no desenho dos objetos e do cenário.
+- (Luz por região: é a luz por célula, em [`casca-acabamento.md`](casca-acabamento.md).)
 - Quem chama os truques que gravam `0x497394`…`0x4973a4`.

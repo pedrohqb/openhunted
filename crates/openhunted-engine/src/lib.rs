@@ -10,6 +10,7 @@ pub mod audit;
 pub mod behaviour;
 pub mod character;
 pub mod damage;
+pub mod devices;
 pub mod difficulty;
 pub mod entity;
 pub mod input;

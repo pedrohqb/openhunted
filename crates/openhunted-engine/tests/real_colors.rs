@@ -23,6 +23,8 @@ fn load(level: &str) -> Option<(Scene, Assets)> {
 /// Desenha só a entidade `e` (sem cenário nem jogador) com a câmera sobre ela.
 fn draw_alone(s: &Scene, a: &mut Assets, e: &openhunted_engine::Entity) -> Framebuffer {
     let mut only = s.clone();
+    // sem a luz por célula: a cor da rotina, isolada (o objeto pode estar numa sala apagada)
+    only.lights = Default::default();
     only.sprites.clear();
     only.jake_sprite = None;
     only.entities = vec![e.clone()];
@@ -118,6 +120,8 @@ fn player_tinted(level: &str, table: i32) {
     let sp = s.jake_sprite.clone().unwrap();
     let camera = (sp.x - 120, sp.y - 100);
     let mut only = s.clone();
+    // sem a luz por célula: a cor da rotina, isolada (o objeto pode estar numa sala apagada)
+    only.lights = Default::default();
     only.sprites.clear();
     only.entities.clear();
     let mut tinted = Framebuffer::new(320, 240);
