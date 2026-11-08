@@ -129,6 +129,10 @@ a de trás se aproxima (34 → 27); no fim a vista passa a ela (23). O Jake fica
   1:1 (`s` = o `d` normal dela), e as outras na razão `d_vista / d_camada`; o zoom absoluto do
   original (30/23 ≈ 1,30) fica para a fatia da câmera (`View::reference = Some(30)` já projeta
   como o original).
+- O porte não limita o desenho às células cobertas pela área (`x/128 … (x+w)/128`): todo
+  sprite da camada que cruza o recorte sai, inclusive a parte de um decalque que passa da
+  célula dele quando a célula está fora da área (no original, cortada). Custo medido: 0,1 a
+  0,5 ms por quadro (release) nas fases de três camadas.
 - Sem campo `+0x1b4` no porte, todos os objetos contam como `< 200` (os vistos nos documentos
   vão de 10 a 175); os objetos das células e os globais saem na ordem das entidades.
 - Ruling: fora de transição e sem o Jake trocando de camada, a camada da vista acompanha a
