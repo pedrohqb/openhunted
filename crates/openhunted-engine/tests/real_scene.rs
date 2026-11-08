@@ -987,3 +987,64 @@ fn random_moves_never_enter_solids() {
         assert!(seen.contains(st), "{st} nunca visitado: {seen:?}");
     }
 }
+
+/// Fases em que a explosão nascia com a escala tirada do primeiro quadro do rótulo (1 px de
+/// altura no `OEX.ANM`) e cobria a tela a ~1600 px de distância (revisão da M16).
+const BLAST_LEVELS: [&str; 13] = [
+    "I_M_003.LEV",
+    "I_J_108.LEV",
+    "H_M_003.LEV",
+    "H_J_024.LEV",
+    "H_J_012.LEV",
+    "D_M_024.LEV",
+    "H_J_013.LEV",
+    "H_J_027.LEV",
+    "D_M_010.LEV",
+    "C_2_018.LEV",
+    "C_2_009.LEV",
+    "C_J_015.LEV",
+    "M_2_004.LEV",
+];
+
+/// Maior lado desenhado do sprite de `e` (bitmaps dos desenhos do quadro atual, com a escala).
+fn drawn_size(e: &openhunted_engine::Entity, a: &mut Assets) -> i64 {
+    let Some(sp) = e.sprite.as_ref() else {
+        return 0;
+    };
+    let (num, den) = (i64::from(sp.scale.0), i64::from(sp.scale.1.max(1)));
+    openhunted_engine::draw_ops(&sp.anim, sp.player.frame())
+        .iter()
+        .filter_map(|op| {
+            let b = a.bitmap(&op.bitmap).ok()?;
+            let f = b.frames.get(op.frame as usize)?;
+            Some(i64::from(f.width.max(f.height)) * num / den)
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// Em 600 tiques parados, nenhuma entidade viva é desenhada com mais de 640 px de lado.
+#[test]
+fn no_entity_is_drawn_larger_than_the_screen() {
+    for name in BLAST_LEVELS {
+        let Some((mut s, mut a)) = load(name) else {
+            return;
+        };
+        for t in 0..600 {
+            s.tick(0);
+            for e in s.entities.iter().filter(|e| e.visible()) {
+                let Some(sp) = e.sprite.as_ref() else {
+                    continue;
+                };
+                let size = drawn_size(e, &mut a);
+                assert!(
+                    size <= 640,
+                    "{name} tique {t}: tipo {} quadro {} escala {:?} desenhado com {size} px",
+                    e.kind,
+                    sp.player.frame(),
+                    sp.scale
+                );
+            }
+        }
+    }
+}

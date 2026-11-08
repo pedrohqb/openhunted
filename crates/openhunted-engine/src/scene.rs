@@ -1303,21 +1303,27 @@ impl Scene {
         }
     }
 
-    /// Entidade visual de uma explosão: `OEX.ANM`, rótulo sorteado 1–4, com o sprite medindo
-    /// `2 · raio` px de altura, centrado no ponto. Sem animação disponível, nenhuma.
+    /// Entidade visual de uma explosão: `OEX.ANM`, rótulo sorteado 1–4, com o maior quadro do
+    /// rótulo medindo `2 · raio` px, centrada no ponto. Sem animação disponível, nenhuma.
     fn explosion_entity(&mut self, b: &behaviour::Blast) -> Option<Entity> {
         let label = 1 + self.rng.below(4) as u16;
         self.effect_entity(b, label)
     }
 
-    /// Efeito do `OEX.ANM` com um rótulo dado (faísca de bala: 15).
+    /// Efeito do `OEX.ANM` com um rótulo dado (faísca de bala: 15). Escala (`0x0040d20c`):
+    /// `+0x1f0 = 2 · max(raio, 2)` sobre `+0x1f4` = o maior lado dos quadros do rótulo
+    /// (`anim::label_extent`; o primeiro quadro de alguns rótulos tem 1 px e não serve de
+    /// medida); posição = centro − metade do quadro inicial já escalado.
     fn effect_entity(&mut self, b: &behaviour::Blast, label: u16) -> Option<Entity> {
         let anim = self.explosion_anim.clone()?;
         let player = AnimPlayer::at_label(&anim, label)?;
         let f = anim.frames.get(player.frame())?;
-        let (fw, fh) = (i32::from(f.width).max(1), i32::from(f.height).max(1));
-        let scale = (2 * b.radius.max(1), fh);
-        let (w, h) = (fw * scale.0 / scale.1, 2 * b.radius.max(1));
+        let scale = (
+            2 * b.radius.max(2),
+            crate::anim::label_extent(&anim, player.frame()).max(1),
+        );
+        let sc = |v: i16| i32::from(v) * scale.0 / scale.1;
+        let (w, h) = (sc(f.width), sc(f.height));
         Some(Entity {
             kind: crate::entity::EXPLOSION,
             x: b.center.0 - w / 2,

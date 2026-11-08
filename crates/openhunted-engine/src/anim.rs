@@ -51,6 +51,26 @@ pub fn draw_ops(anim: &Animation, frame: usize) -> Vec<DrawOp> {
         .collect()
 }
 
+/// Medida de referência da escala da explosão (`0x0040d20c`): o maior lado entre a maior
+/// largura e a maior altura dos quadros do rótulo que começa em `start` — o quadro inicial
+/// (`0x43585c` em 1:1) e os seguintes até antes do quadro em que começa outro rótulo ou do fim
+/// da animação (`0x446fda` ≠ 0), cada um pelo registro do quadro (`0x44714b`). Fora da
+/// animação, 0.
+pub fn label_extent(anim: &Animation, start: usize) -> i32 {
+    if start >= anim.frames.len() {
+        return 0;
+    }
+    let starts_label = |f: usize| anim.labels.iter().any(|l| usize::from(l.frame) == f);
+    let end = (start + 1..anim.frames.len())
+        .find(|&f| starts_label(f))
+        .unwrap_or(anim.frames.len());
+    anim.frames[start..end]
+        .iter()
+        .map(|f| i32::from(f.width).max(i32::from(f.height)))
+        .max()
+        .unwrap_or(0)
+}
+
 /// Reprodução de uma sequência: do quadro inicial de um rótulo até o quadro que termina a
 /// animação (opcode 1) ou até o início do rótulo seguinte, em laço.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,6 +260,24 @@ pub(crate) mod tests {
                 y: 6
             }]
         );
+    }
+
+    /// A medida vai do quadro `start` até antes do próximo rótulo (ou o fim), pelo maior lado
+    /// entre a maior largura e a maior altura: o primeiro quadro de 1 px não manda.
+    #[test]
+    fn label_extent_takes_the_largest_side_of_the_label() {
+        let sized = |w: i16, h: i16| AnimFrame {
+            width: w,
+            height: h,
+            ..frame(0)
+        };
+        let mut a = anim();
+        a.frames = vec![sized(1, 1), sized(5, 3), sized(2, 9), sized(100, 40)];
+        a.labels[1].frame = 3;
+        assert_eq!(label_extent(&a, 0), 9);
+        assert_eq!(label_extent(&a, 1), 9);
+        assert_eq!(label_extent(&a, 3), 100);
+        assert_eq!(label_extent(&a, 7), 0);
     }
 
     #[test]

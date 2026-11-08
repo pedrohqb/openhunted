@@ -16,6 +16,11 @@ const OVERLAY_BORDER: u8 = 255;
 const OVERLAY_MARKER: u8 = 254;
 const OVERLAY_OBJECT: u8 = 253;
 
+/// Maior lado, em px do mundo, de um desenho de sprite (defesa, não do original): o maior
+/// objeto legítimo das 100 fases mede menos de 400 px; uma escala acima disto é um erro de
+/// medida (como o do quadro de 1 px da explosão) e o desenho é pulado.
+const MAX_DRAWN: i32 = 2048;
+
 /// Como desenhar numa camada: projeção (`d`), modo e recorte.
 #[derive(Clone, Copy)]
 struct Pen<'a> {
@@ -60,6 +65,9 @@ fn draw_sprite(
             w: sc(i32::from(frame.width)).max(1),
             h: sc(i32::from(frame.height)).max(1),
         };
+        if world.w > MAX_DRAWN || world.h > MAX_DRAWN {
+            continue;
+        }
         // amostragem pela escala composta (a do sprite e a da camada), como `blit_scaled`
         let r = (
             i64::from(num.max(1)) * i64::from(pen.view.reference()),
@@ -592,5 +600,25 @@ mod tests {
         assert_eq!(fb.pixels[50 * 100 + 20], 1);
         assert_eq!(fb.pixels[50 * 100 + 35], 0);
         assert_eq!(fb.pixels[50 * 100 + 8], view::EMPTY_COLOUR);
+    }
+
+    /// Defesa: um desenho de sprite com mais de `MAX_DRAWN` px de lado no mundo (escala
+    /// absurda) não sai; até o limite, sai normalmente.
+    #[test]
+    fn absurd_sprite_scales_are_not_drawn() {
+        let mut a = assets();
+        let mut s = scene(&mut a, false);
+        // arte de 20 px a `k`: o `mkanm` a desloca (−2, +7); começa em (−10, −10) no mundo,
+        // com borda de índice 1 de `5·k` px
+        let place = |s: &mut Scene, k: i32| {
+            let sp = &mut s.sprites[0];
+            sp.scale = (k, 1);
+            sp.x = 2 * k - 10;
+            sp.y = -7 * k - 10;
+        };
+        place(&mut s, MAX_DRAWN / 20);
+        assert_eq!(render(&s, &mut a).pixels[41 * 100 + 41], 1);
+        place(&mut s, MAX_DRAWN / 20 + 1);
+        assert_ne!(render(&s, &mut a).pixels[41 * 100 + 41], 1);
     }
 }
