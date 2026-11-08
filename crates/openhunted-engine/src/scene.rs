@@ -952,8 +952,8 @@ impl Scene {
             self.ai_shots_hit_human(&mut pre);
             self.bullet_hits(&mut pre);
             self.resolve_impacts(&mut pre);
-            self.entities.extend(pre.spawn);
-            self.events.extend(pre.events);
+            self.entities.extend(std::mem::take(&mut pre.spawn));
+            self.events.append(&mut pre.events);
             for i in 0..seats {
                 self.with_seat(i, |s| {
                     let up = crate::input::UP;
@@ -963,7 +963,7 @@ impl Scene {
                     }
                 });
             }
-            self.tick_entities();
+            self.tick_entities(pre);
             if self.timer > 0 {
                 self.timer -= 1;
             }
@@ -1638,7 +1638,9 @@ impl Scene {
 
     /// Tique das entidades: estado dos gatilhos congelado antes do tique; cada entidade age
     /// em ordem de lista; depois as saídas (dano ao Jake, novas entidades, eventos).
-    fn tick_entities(&mut self) {
+    /// O tique das entidades; `pre` traz o que a passada à queima-roupa (balas e projéteis
+    /// que acertam ao nascer) deixou: explosões com crédito, efeitos e perigos entram aqui.
+    fn tick_entities(&mut self, mut pre: Out) {
         behaviour::mine_generator::sync(&mut self.entities);
         behaviour::chameleon::sync(&mut self.entities);
         behaviour::catapult::sync(&mut self.entities);
@@ -1784,6 +1786,17 @@ impl Scene {
             out.enemy_spawns.append(&mut o.enemy_spawns);
             out.launches.append(&mut o.launches);
             extra.push(o);
+        }
+        // a explosão do foguete ou da granada à queima-roupa (`weapon_impact` na passada
+        // antes do voo) e as faíscas dela entram nas do tique
+        let off = out.blasts.len();
+        out.blast_credits
+            .extend(pre.blast_credits.drain(..).map(|(b, c)| (b + off, c)));
+        out.blasts.append(&mut pre.blasts);
+        out.effects.append(&mut pre.effects);
+        out.hazards.append(&mut pre.hazards);
+        if !pre.jake_damage.is_empty() {
+            out.jake_damage.add(&pre.jake_damage);
         }
         self.schedule_regen(&alive_before);
         self.ai_shots_hit_human(&mut out);

@@ -250,6 +250,40 @@ fn scripted_deathmatch_reaches_the_points_limit() {
     assert!(corpses >= 2, "{corpses} cadáveres do 2");
 }
 
+/// Disputa sem limite de pontos (`0x43cdf0`/`0x43cf4c`): a saída liga sem testar os
+/// objetivos, mas o veredito os testa. Nas `M_*` com objetivos (`M_2_012`, `M_2_015`: "acionar";
+/// `M_M_033`, `M_M_045`: "destruir"), saída ligada com eles pendentes dá "2"; nas demais, "1".
+#[test]
+fn deathmatch_exit_needs_the_level_objectives() {
+    let Some(gd) = data() else { return };
+    for (name, want) in [
+        ("M_2_012.LEV", Outcome::Defeat),
+        ("M_2_015.LEV", Outcome::Defeat),
+        ("M_M_033.LEV", Outcome::Defeat),
+        ("M_M_045.LEV", Outcome::Defeat),
+        ("M_2_001.LEV", Outcome::Victory),
+        ("M_J_024.LEV", Outcome::Victory),
+    ] {
+        let l = level(&gd, name);
+        let mut a = Assets::new(gd.resources().unwrap());
+        let mut s = Scene::build_with(&l, &mut a, duel(PAIRS[0])).unwrap();
+        for _ in 0..45 {
+            s.tick_players([0, 0]);
+        }
+        assert_eq!(s.outcome, None, "{name}: saída desligada");
+        let exit = s
+            .entities
+            .iter()
+            .position(|e| matches!(e.behaviour, openhunted_engine::Behaviour::Exit(_)))
+            .unwrap();
+        s.entities[exit].on = true;
+        for _ in 0..45 {
+            s.tick_players([0, 0]);
+        }
+        assert_eq!(s.outcome, Some(want), "{name}");
+    }
+}
+
 /// Entradas aleatórias nos dois jogadores em todas as `M_*` (pares sorteados) e `C_*`, 3000
 /// tiques: sem pânico, jogadores fora do cenário e dentro da fase, entidades limitadas.
 #[test]
