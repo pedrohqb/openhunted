@@ -328,7 +328,9 @@ impl Page for Info {
             (_, CANCEL) | (InfoKind::About, ABOUT_DONE) | (InfoKind::Multi, MULTI_CANCEL) => {
                 Some(Reply::Close)
             }
-            (InfoKind::Multi, MULTI_H2H | MULTI_COOP) => Some(Reply::Unavailable),
+            // `0x43f0bb`: 13001 disputa, 13002 cooperação → `SLEVL` (estado 5)
+            (InfoKind::Multi, MULTI_H2H) => Some(Reply::Party(super::Party::Deathmatch)),
+            (InfoKind::Multi, MULTI_COOP) => Some(Reply::Party(super::Party::Coop)),
             _ => None,
         }
     }

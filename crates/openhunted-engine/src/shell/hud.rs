@@ -26,6 +26,8 @@ pub struct HudState {
     pub weapon: usize,
     /// Cronômetro em tiques (`0x4972fc`); 0 nas fases sem limite.
     pub timer: i32,
+    /// Disputa: `F − S` do jogador no lugar do cronômetro (`0x40b089`).
+    pub score: Option<i32>,
 }
 
 /// Tabela das armas por personagem: (quadro se tem, par, quadro se não tem), na ordem da
@@ -81,7 +83,8 @@ pub fn draw_number(fb: &mut Framebuffer, bar: &Bitmap, value: i32, style: usize,
         19 => (3, 40, 32, 4),
         50 => (2, 72, 14, 8),
         51 => (2, 82, 14, 8),
-        196 => (2, 20, 20, 4),
+        // `0x40a836`: os pontos da disputa (o `hud.md` dizia 196)
+        SCORE_STYLE => (2, 20, 20, 4),
         _ => return,
     };
     blit(fb, bar, style, x, y);
@@ -97,6 +100,10 @@ pub fn draw_number(fb: &mut Framebuffer, bar: &Bitmap, value: i32, style: usize,
         cx -= width(bar, next) + 1;
     }
 }
+
+/// Pontos da disputa (`0x40b089`): moldura 194 encostada à direita, número no estilo 195.
+pub const SCORE_FRAME: usize = 194;
+pub const SCORE_STYLE: usize = 195;
 
 /// Quadros dos 4 dígitos do cronômetro, das unidades para os milhares: contador de rolo,
 /// quadro `193 − 10·d − r` com `r = (tiques % 20) / 2`, que só passa ao dígito seguinte
@@ -171,11 +178,38 @@ pub fn draw_hud(fb: &mut Framebuffer, bar: &Bitmap, x: i32, y: i32, w: i32, s: &
             wx += width(bar, 50);
         }
     }
+    if let Some(score) = s.score {
+        // disputa: `max(0, F − S)` (`0x40b089`)
+        let sx = x + w - width(bar, SCORE_FRAME);
+        blit(fb, bar, SCORE_FRAME, sx, y + 30);
+        draw_number(fb, bar, score.max(0), SCORE_STYLE, sx + 38, y + 35);
+        return;
+    }
     // cronômetro
     let tx = x + w - 93;
     blit(fb, bar, 92, tx, y + 30);
     for (k, f) in timer_frames(s.timer).iter().enumerate() {
         blit(fb, bar, *f, tx + 68 - 22 * k as i32, y + 36);
+    }
+}
+
+/// A barra achatada da tela dividida (`0x471cd0`, `0x45aee4`): Ruling: a barra inteira em
+/// 640×75 copiada uma linha sim, outra não para a faixa de `BAR_H / 2` linhas em (x, y).
+pub fn draw_half_hud(fb: &mut Framebuffer, bar: &Bitmap, x: i32, y: i32, w: i32, s: &HudState) {
+    let mut full = Framebuffer::new(w.max(1) as usize, BAR_H as usize);
+    draw_hud(&mut full, bar, 0, 0, w, s);
+    for r in 0..BAR_H / 2 {
+        let dy = y + r;
+        if dy < 0 || dy >= fb.height as i32 {
+            continue;
+        }
+        let src = &full.pixels[(2 * r) as usize * full.width..][..full.width];
+        for (i, &p) in src.iter().enumerate() {
+            let dx = x + i as i32;
+            if dx >= 0 && dx < fb.width as i32 {
+                fb.pixels[dy as usize * fb.width + dx as usize] = p;
+            }
+        }
     }
 }
 
@@ -248,6 +282,7 @@ mod tests {
             slots,
             weapon: 2,
             timer: 0,
+            score: None,
         };
         draw_hud(&mut fb, &b, 0, 0, 640, &s);
         assert_eq!(color_at(&fb, 6, 35), 16, "rosto: quadro 15");
@@ -259,5 +294,51 @@ mod tests {
         );
         // pistola corrente: quadro 61 (60 + 1) presente em algum lugar da faixa das armas
         assert!(fb.pixels[30 * 640..32 * 640].contains(&62));
+        // disputa: a moldura 194 e o estilo 195 no lugar do cronômetro
+        let d = HudState {
+            score: Some(7),
+            ..s.clone()
+        };
+        let mut fb = Framebuffer::new(640, 75);
+        draw_hud(&mut fb, &b, 0, 0, 640, &d);
+        assert_eq!(
+            color_at(&fb, 640 - 2, 30),
+            195,
+            "quadro 194 encostado à direita"
+        );
+        assert_eq!(color_at(&fb, 640 - 2 + 38, 35), 0, "fora da tela");
+        assert!(!fb.pixels.contains(&194), "sem o cronômetro (quadro 193)");
+        let mut fb = Framebuffer::new(700, 75);
+        draw_hud(&mut fb, &b, 0, 0, 640, &d);
+        assert_eq!(color_at(&fb, 638 + 38 + 20, 39), 28, "unidade 7 → glifo 27");
+    }
+
+    #[test]
+    fn half_bar_takes_every_other_row() {
+        let b = bar();
+        let s = HudState {
+            character: Character::Jake,
+            health: 0,
+            armor: 0,
+            face_alt: false,
+            slots: [(0, 0); 30],
+            weapon: 1,
+            timer: 0,
+            score: None,
+        };
+        let mut full = Framebuffer::new(640, 75);
+        draw_hud(&mut full, &b, 0, 0, 640, &s);
+        let mut fb = Framebuffer::new(640, 480);
+        draw_half_hud(&mut fb, &b, 0, 203, 640, &s);
+        for r in 0..37usize {
+            assert_eq!(
+                fb.pixels[(203 + r) * 640..(204 + r) * 640],
+                full.pixels[2 * r * 640..(2 * r + 1) * 640]
+            );
+        }
+        assert!(
+            fb.pixels[240 * 640..].iter().all(|&p| p == 0),
+            "37 linhas só"
+        );
     }
 }

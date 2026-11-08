@@ -3,12 +3,12 @@
 //! (`docs/re/menus-restantes.md`, `opcoes-salvamento.md`): uma interface comum para a
 //! aplicação despachar a entrada e desenhar.
 
+use super::Party;
 use super::config::Config;
+use super::results::Choice;
 use super::screen::{Input, Screen};
+use crate::character::Character;
 use crate::render::Framebuffer;
-
-/// Texto da caixa dos modos de dois jogadores (decisão do port: não existem).
-pub const UNAVAILABLE: &str = "TWO PLAYER MODES ARE NOT AVAILABLE.";
 
 /// O que a tela pede à aplicação.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,8 +21,16 @@ pub enum Reply {
     Pick(usize),
     /// Texto confirmado no campo de edição.
     Name(String),
-    /// Modo de dois jogadores: caixa "não disponível".
-    Unavailable,
+    /// Modo de jogo escolhido (`SMULT`, ou os grupos 22016–22018 da `SLEVL`).
+    Party(Party),
+    /// `SEGOC`: OK com o personagem e a cor (35–38) do jogador da vez.
+    Chosen(Character, u8),
+    /// `SEGOC`: o botão do dispositivo (15009) leva ao `SINPU`.
+    Devices,
+    /// `SHVLD`: GO com os limites em minutos e pontos (`0x497374`, `0x497378`).
+    Limits { minutes: i32, points: i32 },
+    /// Botão do resultado de dois jogadores (`SH2HS`).
+    Choice(Choice),
     /// CUSTOMIZE do jogador 0 ou 1 (`SINPU` → `SKEYB` ou `SJOYS`).
     Customize(usize),
 }
@@ -49,4 +57,7 @@ pub trait Page {
     }
     fn raw_key(&mut self, _vk: u8) {}
     fn joy_buttons(&mut self, _pressed: u32) {}
+    /// O resultado deixa de vir direto do jogo (volta de um briefing cancelado): o Esc passa
+    /// a valer.
+    fn leave_game(&mut self) {}
 }

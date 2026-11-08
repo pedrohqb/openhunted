@@ -120,6 +120,70 @@ fn main() {
     run(&mut app, 300);
     save(&mut app, &out.join("briefing_next.png"));
     m9(Path::new(&args[1]), out);
+    m15(Path::new(&args[1]), out);
+}
+
+/// Telas da M15b: `SMULT`, lista da disputa, `SEGOC`, `SHVLD`, a partida dividida (disputa e
+/// coop) e o `SH2HS`. Jogador 1 anda à direita (setas), o 2 à esquerda (J) no mesmo teclado.
+fn m15(data: &Path, out: &Path) {
+    use openhunted_engine::shell::{choose, levels, limits, menu};
+    use shell::PageKind;
+    let root = std::env::temp_dir().join("openhunted-shots-m15");
+    let _ = std::fs::remove_dir_all(&root);
+    let press = |app: &mut App, id: u16, name: Option<&str>| {
+        let r = app.screen().unwrap().rect(id).unwrap();
+        app.pointer_move(r.x + r.w / 2, r.y + r.h / 2);
+        app.pointer_button(true);
+        run(app, 50);
+        app.pointer_button(false);
+        run(app, 600);
+        if let Some(name) = name {
+            save(app, &out.join(format!("{name}.png")));
+        }
+    };
+    let play = |app: &mut App, ms: u32| {
+        for _ in 0..ms / 50 {
+            app.read_input(&|vk| vk == 39 || vk == 74, 0);
+            app.advance(50);
+        }
+    };
+    let mut app = App::load(data, None).unwrap();
+    app.set_storage(storage::Storage::at(&root));
+    press(&mut app, menu::MULTI_PLAYER, Some("m15_smult"));
+    press(&mut app, 13001, Some("m15_levels_dm"));
+    press(&mut app, levels::LOAD, None);
+    press(&mut app, choose::ids::RED, None);
+    run(&mut app, 1500);
+    save(&mut app, &out.join("m15_segoc.png"));
+    press(&mut app, choose::ids::OK, None);
+    press(&mut app, choose::ids::OK, None);
+    assert_eq!(app.page_kind(), Some(PageKind::Limits));
+    press(&mut app, limits::ids::TIME_UP, None);
+    press(&mut app, limits::ids::KILLS_UP, None);
+    press(&mut app, limits::ids::KILLS_UP, Some("m15_shvld"));
+    press(&mut app, limits::ids::GO, None);
+    assert_eq!(app.mode(), Mode::Play);
+    play(&mut app, 3000);
+    save(&mut app, &out.join("m15_duel.png"));
+    // o limite de um minuto encerra a partida
+    let mut n = 0;
+    while app.mode() == Mode::Play && n < 2000 {
+        play(&mut app, 50);
+        n += 1;
+    }
+    run(&mut app, 3000);
+    save(&mut app, &out.join("m15_sh2hs.png"));
+    let mut b = App::load(data, None).unwrap();
+    b.set_storage(storage::Storage::at(&root));
+    press(&mut b, menu::MULTI_PLAYER, None);
+    press(&mut b, 13002, None);
+    press(&mut b, levels::LOAD, None);
+    assert_eq!(b.mode(), Mode::Briefing);
+    b.key_down(Key::Enter);
+    run(&mut b, 200);
+    play(&mut b, 3000);
+    save(&mut b, &out.join("m15_coop.png"));
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 /// Telas da M9: opções, missões, heróis, nome, dispositivos, teclas, sobre, carro.
@@ -156,8 +220,6 @@ fn m9(data: &Path, out: &Path) {
     app.key_down(Key::Escape);
     run(&mut app, 100);
     press(&mut app, menu::MULTI_PLAYER, "m9_multi");
-    press(&mut app, 13001, "m9_unavailable");
-    app.key_down(Key::Escape);
     app.key_down(Key::Escape);
     run(&mut app, 100);
     let mut b = App::load(data, None).unwrap();

@@ -377,6 +377,16 @@ impl Screen {
         }
     }
 
+    /// Põe o quadro corrente do controle (limitado ao rótulo); a tela passa a não avançá-lo
+    /// sozinha (rotina própria, como os retratos da `SEGOC`).
+    pub fn set_frame(&mut self, id: u16, frame: usize) {
+        if let Some(c) = self.ctl_mut(id) {
+            c.looping = false;
+            c.once = false;
+            c.frame = frame.min(c.count.saturating_sub(1));
+        }
+    }
+
     /// Toca o rótulo uma vez, parando no último quadro.
     pub fn play_once(&mut self, id: u16) {
         if let Some(c) = self.ctl_mut(id) {
