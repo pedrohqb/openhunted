@@ -340,5 +340,16 @@ fn layer_door_runs_the_view_transition() {
             (1, 0)
         ]
     );
-    assert_eq!(s.views[0].focus_distance, 23);
+    // `+0x4c` sem normalizar (20) e normalizado pela vista de 640×405 que desenha (23)
+    assert_eq!(s.views[0].focus_distance, 20);
+    let screen = Rect {
+        x: 0,
+        y: 0,
+        w: 640,
+        h: 480,
+    };
+    assert_eq!(
+        s.view_of(0, (0, 0), screen, (640, 405)).focus_distance(),
+        23
+    );
 }

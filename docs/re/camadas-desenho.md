@@ -79,6 +79,12 @@ Profundidade > 0 (camadas de trás, tudo no modo atrás e com a tabela da profun
 decalques `+0x24 ≠ 0`, objetos globais (todos), objetos das células, decalques `+0x24 = 0`,
 cenário das células visíveis (sem a luz; ausente ou invisível → nada, fica 0), buracos.
 
+Decalques (`0x430479`) numa célula com luz (`+0x58 = s ≠ 0`, sem o `0x49ccb1` bit 0): tabela
+`18 + |s|` (`0x43be54`), **liga** `0x100` (`0x43054e`), desenha e **desliga** `0x100`
+(`0x430571`), devolvendo a tabela anterior. Como nos objetos (abaixo), numa camada de trás o
+desligamento vale para o resto: os decalques e objetos seguintes da mesma camada saem sem
+tabela (sem escurecer) até alguém religar o modo — peculiaridade não reproduzida.
+
 - **Camadas à frente da vista nunca são desenhadas**; a de trás só aparece pelos buracos.
   Fora dos buracos, os índices 0 da camada da frente ficam 0 (preto do sistema).
 - Nos dados: 692 células com buraco (6 na camada 0); `T_J_007` (56, 60, 29×40) na porta
@@ -92,7 +98,7 @@ desenho** (`0x48bab8`). Escala: o objeto da vista em transição usa `+0x4c`; os
 `d` da própria camada. Célula do centro da caixa (camada do objeto): invisível → não
 desenha; sombra `s ≠ 0` → tabela `18 + s` (substitui a da profundidade; depois o modo
 `0x100` é **desligado**, e os objetos seguintes da mesma camada de trás saem sem a tabela —
-peculiaridade não reproduzida); sem célula → desenha. Objetos com rotina `+0x1c4` compõem a
+peculiaridade não reproduzida; o mesmo vale depois de um decalque com luz, acima); sem célula → desenha. Objetos com rotina `+0x1c4` compõem a
 cor com a tabela corrente (`T = S[A[i]]`), então também escurecem atrás.
 
 `0x4879e4[camada]` marca as camadas desenhadas no quadro (zerado na 1ª vista); `0x435fef`
@@ -140,8 +146,17 @@ a de trás se aproxima (34 → 27); no fim a vista passa a ela (23). O Jake fica
 - O overlay de depuração sai por cima de tudo, projetado com o `d` da camada da vista: as
   caixas das células, as portas de célula e as zonas só dessa camada; os sólidos dos objetos
   (do mundo da camada do Jake) e os marcadores (sem camada), sempre.
-- Objetos de sombra própria numa camada de trás: o porte usa sempre a tabela da célula ou a
-  da profundidade (sem a peculiaridade do modo `0x100` desligado, acima).
+- Objetos e decalques de sombra própria numa camada de trás: o porte usa sempre a tabela da
+  célula ou a da profundidade (sem a peculiaridade do modo `0x100` desligado depois de um
+  objeto `0x43558e` ou de um decalque `0x43054e`/`0x430571` com luz, acima).
+- `+0x4c` (`ViewState::focus_distance`) fica guardado **sem** a normalização pelo tamanho
+  da vista e é normalizado por quem desenha (`View::focus_distance`): o tique da cena não
+  conhece o tamanho nem o número das vistas do desenho (com dois jogadores, normalizar por
+  640×405 e duas vistas dava o Jake ~15 % maior). No original o valor sai já normalizado pela
+  própria vista, o que dá o mesmo enquanto o tamanho dela não muda no meio da transição.
+- Meia-volta 12 → 11 no último tique da subida (contador do Jake 0) com `+0x44` já 0: o
+  `0x4262c9` chamado em seguida começa outra transição (`+0x4c`, `+0x44 = 1`), e o porte
+  também.
 
 ## Em aberto
 
@@ -151,3 +166,15 @@ a de trás se aproxima (34 → 27); no fim a vista passa a ela (23). O Jake fica
 - Campo `+0x1b4` (ordem de desenho) e a separação lista da célula / global no porte.
 - Zoom absoluto e ponto fixo da câmera (`+0x5c` bit 0, `+0x64/+0x68`) na câmera do porte.
 - O tremor (`+0x274`, ±5 px) e o `0x47d474`.
+- Perto das bordas da fase, o zoom da transição sai fora do centro: a câmera do porte é
+  limitada à cena (`clamp_camera`, `crates/openhunted/src/viewer.rs` em `follow` e no tique),
+  então o Jake não fica no meio da vista e a camada aumentada cresce em torno de outro
+  ponto; o original centra a vista no objeto seguido e pinta 245 fora da grade. Fica para a
+  fatia da câmera.
+- O `+0x1b4` do Jake: se for ≥ 200, ele sai **depois** dos decalques da frente (`+0x24 ≠ 0`)
+  no passo 4; o porte desenha os jogadores logo depois das entidades, antes deles. A
+  conferir no Wine.
+- A `D_J_009` agora começa toda preta: o Jake nasce em células invisíveis (luz apagada,
+  bit 0 de `+0x38` = 0), e o porte pinta 245 nas células invisíveis (`0x4061ee`) e não
+  desenha objetos de célula invisível (`0x43558e`). Segue o executável, mas falta conferir
+  no Wine que o original também abre assim.

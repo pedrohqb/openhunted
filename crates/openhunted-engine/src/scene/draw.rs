@@ -121,20 +121,9 @@ impl Scene {
             };
             let (now, layer) = (Some(j.state()), j.layer());
             let focus = self.focus_of(i);
-            let mut v = self.view_of(
-                i,
-                (0, 0),
-                Rect {
-                    x: 0,
-                    y: 0,
-                    w: 0,
-                    h: 0,
-                },
-                (crate::SCREEN_W as i32, crate::shell::hud::VIEW_H),
-            );
-            v.views = n as i32;
-            let start = v.layer_distance(layer);
             let st = &mut self.views[i];
+            // sem normalizar: quem desenha normaliza pela própria vista (`View::focus_distance`)
+            let start = st.raw_distance(layer);
             st.follow(prev.get(i).copied().flatten(), now, layer, start);
             let target = focus.map_or(0, |c| self.cell_map.zoom_at(c, st.layer));
             st.tick(self.layers, target);
@@ -359,7 +348,7 @@ impl Scene {
             }
             let mut p = *pen;
             if pen.view.player == Some(i) && pen.view.state.counter != 0 {
-                p.d = pen.view.state.focus_distance.max(1);
+                p.d = pen.view.focus_distance().max(1);
             }
             let m = table(dls, Some(j.tint()), shade(look, depth));
             draw_sprite(sp, assets, fb, &p, m.as_ref());

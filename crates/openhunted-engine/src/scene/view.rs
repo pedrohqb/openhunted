@@ -39,7 +39,10 @@ pub struct ViewState {
     pub counter: i32,
     /// Sentido (+1 descendo para z + 1, −1 subindo).
     pub dir: i32,
-    /// Distância fixa do jogador da vista durante a transição.
+    /// Distância fixa do jogador da vista durante a transição (`+0x4c`), guardada **sem** a
+    /// normalização pelo tamanho da vista (`ViewState::raw_distance`); a vista que desenha a
+    /// normaliza (`View::focus_distance`). O original guarda já normalizado, pela própria vista
+    /// (o tamanho não muda no meio da transição); aqui o tique da cena não conhece a vista.
     pub focus_distance: i32,
 }
 
@@ -54,6 +57,14 @@ impl ViewState {
         }
     }
 
+    /// Distância da camada `layer` antes da normalização pelo tamanho da vista (`0x436a70`
+    /// sem a transição): `(camada da vista − layer) · 9 + distância`.
+    pub fn raw_distance(&self, layer: i32) -> i32 {
+        (self.layer - layer)
+            .saturating_mul(LAYER_STEP)
+            .saturating_add(self.distance)
+    }
+
     /// O jogador da vista passou de `prev` a `now` neste tique (rotinas 11 e 12 do Jake).
     /// `start` = distância da camada dele no começo (`0x436a70`, para `+0x4c`).
     pub fn follow(&mut self, prev: Option<State>, now: Option<State>, layer: i32, start: i32) {
@@ -65,10 +76,16 @@ impl ViewState {
                 self.counter = c;
                 self.dir = -1;
             }
-            // meia-volta 12 → 11 (`0x426456`)
-            (Some(LayerUp(_)), Some(LayerDown(_))) => {
+            // meia-volta 12 → 11 (`0x426456`), seguida de `0x4262c9` no mesmo tique: com a
+            // transição parada e o contador do Jake em 0 (último tique da subida), começa
+            // outra (`0x426352…0x42637c`)
+            (Some(LayerUp(_)), Some(LayerDown(c))) => {
                 if self.counter == 1 && self.layer > 0 {
                     self.layer -= 1;
+                }
+                if self.counter == 0 && c == 0 {
+                    self.focus_distance = start;
+                    self.counter = 1;
                 }
                 self.dir = 1;
             }
@@ -168,13 +185,28 @@ impl View {
         }
     }
 
-    /// Distância normal da camada (`0x436a70` sem a transição).
-    fn base_distance(&self, layer: i32) -> i64 {
-        let d = i64::from(self.state.layer - layer) * i64::from(LAYER_STEP)
-            + i64::from(self.state.distance);
+    /// Normalização da distância pelo tamanho da vista (`0x436a70`): `d·640/largura` se a
+    /// altura passa de 480 (uma vista) ou 240 (duas), senão `d·480/altura` (ou `d·240/altura`).
+    fn normalise(&self, d: i64) -> i64 {
         let r: i64 = if self.views <= 1 { 480 } else { 240 };
         let (w, h) = (i64::from(self.size.0.max(1)), i64::from(self.size.1.max(1)));
         if r < h { d * 640 / w } else { d * r / h }
+    }
+
+    /// Distância normal da camada (`0x436a70` sem a transição).
+    fn base_distance(&self, layer: i32) -> i64 {
+        self.normalise(i64::from(self.state.raw_distance(layer)))
+    }
+
+    /// Distância do jogador da vista durante a transição (`+0x4c`), normalizada por esta
+    /// vista.
+    pub fn focus_distance(&self) -> i32 {
+        let d = self.normalise(i64::from(self.state.focus_distance));
+        if d == 0 {
+            1
+        } else {
+            d.clamp(-(1 << 30), 1 << 30) as i32
+        }
     }
 
     /// Distância da camada (`0x436a70`), com a transição.
@@ -471,6 +503,54 @@ mod tests {
         assert_eq!(v.layer, 0);
     }
 
+    /// Meia-volta 12 → 11 no último tique da subida (contador do Jake 0) com a transição
+    /// já parada (`+0x44 = 0`): o original entra em `0x4262c9`, que começa outra transição
+    /// (`+0x4c`, `+0x44 = 1`, `0x426352…0x42637c`), como uma descida nova.
+    #[test]
+    fn half_turn_on_the_last_tick_starts_a_new_transition() {
+        use State::{LayerDown as D, LayerUp as U};
+        let mut v = ViewState::new(1);
+        let got = walk(
+            &mut v,
+            &[
+                U(6),
+                U(5),
+                U(4),
+                U(3),
+                U(2),
+                U(1),
+                U(0),
+                D(0),
+                D(1),
+                D(2),
+                D(3),
+                D(4),
+                D(5),
+                State::Idle,
+            ],
+            &[1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+            3,
+        );
+        assert_eq!(
+            got[6..],
+            [
+                (0, 0),
+                (1, 2),
+                (1, 3),
+                (1, 4),
+                (1, 5),
+                (1, 6),
+                (1, 0),
+                (1, 0)
+            ]
+        );
+        assert_eq!(v.focus_distance, 23);
+        // com o contador do Jake ≠ 0, a meia-volta não começa outra
+        let mut w = ViewState::new(0);
+        w.follow(Some(U(2)), Some(D(2)), 0, 23);
+        assert_eq!(w.counter, 0);
+    }
+
     #[test]
     fn zoom_steps_towards_the_cell_distance() {
         let mut v = ViewState::new(0);
@@ -482,5 +562,28 @@ mod tests {
         v.distance = 1;
         v.tick(1, -5);
         assert_eq!(v.distance, MIN_DISTANCE);
+    }
+
+    /// O `+0x4c` guardado na entrada da transição é normalizado pela vista que desenha: com
+    /// uma ou duas vistas e qualquer tamanho, o Jake fica no tamanho que a camada dele tinha
+    /// nessa vista no começo (revisão da M16: o tique normalizava por 640×405 e uma vista).
+    #[test]
+    fn focus_distance_is_normalised_by_the_drawing_view() {
+        for views in [1, 2] {
+            for size in [(640, 405), (640, 202), (320, 405), (640, 480)] {
+                let mut st = ViewState::new(1);
+                st.distance = 26;
+                let mut v = View::new(solo(1).screen, size, (0, 0), st);
+                v.views = views;
+                let want = v.layer_distance(1);
+                v.state.follow(
+                    Some(State::Idle),
+                    Some(State::LayerDown(1)),
+                    1,
+                    st.raw_distance(1),
+                );
+                assert_eq!(v.focus_distance(), want, "{views} vistas, {size:?}");
+            }
+        }
     }
 }
