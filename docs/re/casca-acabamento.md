@@ -143,16 +143,13 @@ As entradas 1–2 da lista de gatilhos da célula (`+0xa0`; as 3–4 são da por
 - 49 das 65 missões solo têm células assim (código 11 = "o alvo da entrada 1 ligado", em
   geral uma zona de proximidade): salas que aparecem quando o jogador entra.
 
-### Camadas no desenho (`0x405c7c(rect, camada, prof.)`) [confirmado em parte]
+### Camadas no desenho
 
-A vista desenha a camada dela; nos buracos, a camada − 1 com profundidade + 1 (salvo
-`0x4879e0 = 2`), escurecida pela sombra 26 + prof. (prof. ≥ 7 → 33). As camadas > a da vista
-não são desenhadas. O OpenHunted ainda desenha todas as camadas sem escurecer (ver Em aberto).
+Ver [`camadas-desenho.md`](camadas-desenho.md) (M16): a vista desenha a camada dela e, pelos
+buracos das células, as de trás com a sombra 26 + prof. (prof. ≥ 7 → 33).
 
 ## Em aberto
 
-- A pintura completa por camadas (`0x405c7c`, passes de decalques e objetos com profundidade
-  > 0) e a transição da vista (`+0x44/+0x48`): 60 das 65 missões solo têm mais de uma camada.
 - Significado de vários comandos do `PLAY.VCR` (`../formats/vcr.md`).
 - O texto "Your joystick does not have enough buttons." (2008): quando aparece.
 - O que o bit 4 de `0x499f38` é (não conta como interrupção).
