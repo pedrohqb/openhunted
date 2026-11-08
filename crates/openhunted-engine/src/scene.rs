@@ -4,10 +4,12 @@
 mod ai;
 mod arsenal;
 mod cell_door;
+mod draw;
 mod garathe;
 pub mod light;
 pub(crate) mod players;
 mod switches;
+pub mod view;
 
 pub use players::{COLOURS, DEFAULT_COLOURS, Duel, Mode, Player, Stats};
 
@@ -25,16 +27,12 @@ use crate::physics::{Rect, SUB, World};
 use crate::rng::Rng;
 use crate::sound::Cue;
 use crate::verdict::{self, Streak};
-use crate::{AnimPlayer, Assets, Framebuffer, Jake, draw_ops};
+use crate::{AnimPlayer, Assets, Framebuffer, Jake};
 
 /// Duração de um tick de animação, em milissegundos (provisório: `docs/re/cenario.md`).
 pub const TICK_MS: u32 = 50;
 /// Som "Pistol" (SOUND.TBL, primeiro quadro dos estados de tiro).
 pub const SOUND_PISTOL: u16 = 3040;
-/// Cores do overlay (índices da paleta).
-const OVERLAY_BORDER: u8 = 255;
-const OVERLAY_MARKER: u8 = 254;
-const OVERLAY_OBJECT: u8 = 253;
 /// Lado de uma célula da grade, em pixels.
 pub const CELL: i32 = 128;
 
@@ -179,6 +177,12 @@ pub struct Scene {
     /// Luz por célula (`light`) e, para cada sprite de `sprites`, a célula com luz dele.
     pub lights: light::Lights,
     sprite_light: Vec<Option<usize>>,
+    /// Célula (x, y, z) de cada sprite de `sprites` e se é decalque da frente (`+0x24`).
+    sprite_cells: Vec<Option<view::SpriteCell>>,
+    /// Buracos, zoom e tamanho da grade (`docs/re/camadas-desenho.md`).
+    cell_map: view::CellMap,
+    /// Estado da vista de cada jogador (camada, distância, transição).
+    pub views: Vec<view::ViewState>,
     /// Dificuldade (`0x487854`): a casca a põe pela opção gravada; padrão médio.
     pub difficulty: crate::Difficulty,
     /// Confusão do jogador (`+0x264`): tiques com os pares de direção trocados (Entidade).
@@ -304,86 +308,6 @@ fn label_lengths(a: &Animation) -> HashMap<u16, usize> {
         .collect()
 }
 
-/// Desenha um sprite com a câmera; com `map`, cada pixel passa pela tabela de cor
-/// (`crate::tint`).
-fn draw_sprite(
-    sp: &Sprite,
-    assets: &mut Assets,
-    fb: &mut Framebuffer,
-    camera: (i32, i32),
-    map: Option<&[u8; 256]>,
-) {
-    for op in draw_ops(&sp.anim, sp.player.frame()) {
-        let Ok(bmp) = assets.bitmap(&op.bitmap) else {
-            continue;
-        };
-        let Some(frame) = bmp.frames.get(op.frame as usize) else {
-            continue;
-        };
-        let (num, den) = sp.scale;
-        let sc = |v: i32| (i64::from(v) * i64::from(num) / i64::from(den.max(1))) as i32;
-        let mut ox = sc(op.x);
-        if sp.mirror {
-            // espelha em torno do quadro de referência (quadro 0 da animação)
-            let rw = sp.anim.frames.first().map_or(0, |f| i32::from(f.width));
-            ox = sc(rw) - ox - sc(i32::from(frame.width));
-        }
-        let x = sp.x.saturating_add(ox).saturating_sub(camera.0);
-        let y = sp.y.saturating_add(sc(op.y)).saturating_sub(camera.1);
-        // Índice 0 transparente em todas as camadas (ver docs/re/cenario.md).
-        match map {
-            Some(m) => fb.blit_scaled_mapped(frame, x, y, sp.scale, sp.mirror, m),
-            None => fb.blit_scaled(frame, x, y, sp.scale, sp.mirror, true),
-        }
-    }
-}
-
-/// Grafite: um glifo do `OGF.ANM` por caractere, com a escala do texto.
-fn draw_graffiti(
-    e: &Entity,
-    g: &behaviour::graffiti::GraffitiState,
-    sp: &Sprite,
-    assets: &mut Assets,
-    fb: &mut Framebuffer,
-    camera: (i32, i32),
-) {
-    for &(dx, frame) in &g.glyphs {
-        let glyph = Sprite {
-            player: AnimPlayer::from_frame(&sp.anim, frame),
-            x: e.x.saturating_add(dx),
-            y: e.y,
-            scale: g.scale,
-            mirror: false,
-            ..sp.clone()
-        };
-        draw_sprite(&glyph, assets, fb, camera, None);
-    }
-}
-
-/// Raio laser (`0x00410dae`): traço da cauda à cabeça, até 25 px, nas cores da variante.
-fn draw_laser(
-    e: &Entity,
-    l: &behaviour::laser::LaserState,
-    fb: &mut Framebuffer,
-    camera: (i32, i32),
-) {
-    let head = e.center();
-    let (mut dx, mut dy) = (l.tail.0 - head.0, l.tail.1 - head.1);
-    let d = behaviour::mine::distance((0, 0), (dx, dy));
-    if d > behaviour::laser::TRAIL {
-        dx = dx * behaviour::laser::TRAIL / d;
-        dy = dy * behaviour::laser::TRAIL / d;
-    }
-    let colors = behaviour::laser::COLORS[l.variant.min(3)];
-    let n = dx.abs().max(dy.abs()).max(1);
-    for i in 0..=n {
-        let x = head.0 + dx * i / n - camera.0;
-        let y = head.1 + dy * i / n - camera.1;
-        fb.fill_rect(x - 1, y, 3, 1, colors[2]);
-        fb.fill_rect(x, y, 1, 1, colors[0]);
-    }
-}
-
 impl Scene {
     /// Cena vazia de `width × height` pixels.
     pub fn empty(width: i32, height: i32) -> Self {
@@ -431,6 +355,9 @@ impl Scene {
             ai_grid: crate::ai::CellGrid::default(),
             lights: light::Lights::default(),
             sprite_light: Vec::new(),
+            sprite_cells: Vec::new(),
+            cell_map: view::CellMap::default(),
+            views: Vec::new(),
             mode: Mode::Solo,
             players: Vec::new(),
             parked: Vec::new(),
@@ -472,6 +399,8 @@ impl Scene {
             let i = i as i32;
             let (cx, cy) = ((i % gx) * CELL, ((i / gx) % gy) * CELL);
             let cz = i / (gx * gy);
+            let key = (i % gx, (i / gx) % gy, cz);
+            s.cell_map.add(cell, key);
             if !cell.animation.is_empty() {
                 match assets.animation(&cell.animation) {
                     Ok(a) => match u16::try_from(cell.index)
@@ -512,6 +441,10 @@ impl Scene {
                             scenery += 1;
                             s.sprite_light
                                 .push(s.lights.index_of((i % gx, (i / gx) % gy, cz)));
+                            s.sprite_cells.push(Some(view::SpriteCell {
+                                cell: key,
+                                front: false,
+                            }));
                             s.sprites.push(Sprite {
                                 layer: Layer::Scenery,
                                 anim: a,
@@ -595,6 +528,11 @@ impl Scene {
                         let player = AnimPlayer::from_frame(&a, frame);
                         s.sprite_light
                             .push(s.lights.index_of((i % gx, (i / gx) % gy, cz)));
+                        // `+0x24` (5º `s16` do item DC): decalque da frente
+                        s.sprite_cells.push(Some(view::SpriteCell {
+                            cell: key,
+                            front: d.fields.get(4).is_some_and(|&f| f != 0),
+                        }));
                         s.sprites.push(Sprite {
                             layer: Layer::Decoration,
                             anim: a,
@@ -734,19 +672,30 @@ impl Scene {
                 });
             }
         }
-        // ordem de desenho por camada, levando junto a célula com luz de cada sprite
-        let mut paired: Vec<(Sprite, Option<usize>)> = std::mem::take(&mut s.sprites)
+        // ordem de desenho por camada, levando junto a célula de cada sprite
+        type Meta = (Option<usize>, Option<view::SpriteCell>);
+        let mut paired: Vec<(Sprite, Meta)> = std::mem::take(&mut s.sprites)
             .into_iter()
-            .zip(std::mem::take(&mut s.sprite_light))
+            .zip(
+                std::mem::take(&mut s.sprite_light)
+                    .into_iter()
+                    .zip(std::mem::take(&mut s.sprite_cells)),
+            )
             .collect();
         paired.sort_by_key(|(p, _)| p.layer);
-        (s.sprites, s.sprite_light) = paired.into_iter().unzip();
+        let (sprites, cells): (Vec<_>, Vec<_>) = paired.into_iter().unzip();
+        s.sprites = sprites;
+        (s.sprite_light, s.sprite_cells) = cells.into_iter().unzip();
         s.jake_flags = jake_flags;
         s.layers = i32::from(level.grid_z).max(1);
+        s.cell_map.grid = (gx, gy, s.layers);
         s.set_jake_layer(jake_layer);
         for i in 1..s.players.len() {
             s.with_seat(i, |s| s.set_jake_layer(s.jake_layer));
         }
+        s.views = (0..s.players.len().max(1))
+            .map(|i| view::ViewState::new(s.layer_of(i).unwrap_or(s.layers - 1)))
+            .collect();
         // o campo 1004 não vale na disputa (`0x488e54 = 0`)
         if s.mode.duel().is_none() {
             s.time_limit = i32::from(level.field_1004.max(0));
@@ -788,9 +737,11 @@ impl Scene {
         Ok(s)
     }
 
-    /// Desenha a cena com a câmera em `camera` (canto superior esquerdo, em pixels da fase).
-    /// O índice 0 é transparente em todas as camadas (cenário, decorações, objetos). Com
-    /// `overlay`, desenha as caixas de colisão das células e os marcadores.
+    /// Desenha a vista do jogador 1 no quadro inteiro, com a câmera em `camera` (canto
+    /// superior esquerdo da camada da vista, em pixels da fase) e o centro no meio da área de
+    /// jogo (640×405; a barra cobre o resto): a camada da vista e, pelos buracos, as de trás
+    /// (`view`, `docs/re/camadas-desenho.md`). Com `overlay`, as caixas de colisão, zonas e
+    /// marcadores da camada da vista.
     pub fn draw(
         &self,
         assets: &mut Assets,
@@ -798,121 +749,16 @@ impl Scene {
         camera: (i32, i32),
         overlay: bool,
     ) {
-        // tabelas de cor das rotinas de desenho `+0x1c4` (`docs/re/cores-sprites.md`) e de
-        // sombra da luz por célula (`light`): `T[i] = S[A[i]]`; sem tabela do objeto, a
-        // identidade (1, 0)
-        let dls = assets.dls();
-        let map = |t: Option<crate::tint::Tint>, look: Option<light::Look>| {
-            let shadow = match look {
-                Some(light::Look::Shaded(s)) => s,
-                _ => 0,
-            };
-            if t.is_none() && shadow == 0 {
-                return None;
-            }
-            let t = t.unwrap_or(crate::tint::Tint::new(1, 0));
-            Some(dls.as_ref()?.table(t, shadow))
+        let screen = Rect {
+            x: 0,
+            y: 0,
+            w: fb.width as i32,
+            h: fb.height as i32,
         };
-        for (i, sp) in self.sprites.iter().enumerate() {
-            let look = self
-                .sprite_light
-                .get(i)
-                .copied()
-                .flatten()
-                .and_then(|c| self.lights.look(c));
-            if look == Some(light::Look::Hidden) {
-                continue;
-            }
-            draw_sprite(sp, assets, fb, camera, map(None, look).as_ref());
-        }
-        for (i, e) in self.entities.iter().enumerate() {
-            if !e.visible() {
-                continue;
-            }
-            let look = self.lights.look_at(e.center(), e.layer);
-            if look == Some(light::Look::Hidden) {
-                continue;
-            }
-            match (&e.behaviour, &e.sprite) {
-                (Behaviour::Graffiti(g), Some(sp)) => draw_graffiti(e, g, sp, assets, fb, camera),
-                (Behaviour::Laser(l), _) => draw_laser(e, l, fb, camera),
-                (_, Some(sp)) => {
-                    let m = map(crate::tint::entity(e, i, self.tick_count), look);
-                    draw_sprite(sp, assets, fb, camera, m.as_ref());
-                }
-                _ => {}
-            }
-        }
-        // os jogadores: o 1 e, com dois, o outro (M15a)
-        for i in 0..self.players.len().max(1) {
-            let (Some(sp), Some(j)) = (self.player_sprite(i), self.player_jake(i)) else {
-                continue;
-            };
-            if !j.is_visible() {
-                continue;
-            }
-            let look = self
-                .focus_of(i)
-                .and_then(|c| self.lights.look_at(c, j.layer()));
-            if look != Some(light::Look::Hidden) {
-                let m = map(Some(j.tint()), look);
-                draw_sprite(sp, assets, fb, camera, m.as_ref());
-            }
-        }
-        if overlay {
-            for (bx, by, _, b) in &self.borders {
-                let x = bx.saturating_add(i32::from(b.x)).saturating_sub(camera.0);
-                let y = by.saturating_add(i32::from(b.y)).saturating_sub(camera.1);
-                fb.rect(
-                    x,
-                    y,
-                    i32::from(b.width),
-                    i32::from(b.height),
-                    OVERLAY_BORDER,
-                );
-            }
-            // portas de célula: fora de `borders`, desenhadas no estado atual
-            for r in self.cell_doors.iter().flat_map(|d| d.solids()) {
-                fb.rect(
-                    r.x.saturating_sub(camera.0),
-                    r.y.saturating_sub(camera.1),
-                    r.w,
-                    r.h,
-                    OVERLAY_BORDER,
-                );
-            }
-            for r in &self.object_solids {
-                fb.rect(
-                    r.x.saturating_sub(camera.0),
-                    r.y.saturating_sub(camera.1),
-                    r.w,
-                    r.h,
-                    OVERLAY_OBJECT,
-                );
-            }
-            for z in self
-                .prop_zones
-                .iter()
-                .filter(|z| z.layer == self.jake_layer)
-            {
-                fb.rect(
-                    z.rect.x.saturating_sub(camera.0),
-                    z.rect.y.saturating_sub(camera.1),
-                    z.rect.w,
-                    z.rect.h,
-                    OVERLAY_MARKER,
-                );
-            }
-            for m in &self.markers {
-                fb.rect(
-                    m.x.saturating_sub(4).saturating_sub(camera.0),
-                    m.y.saturating_sub(4).saturating_sub(camera.1),
-                    9,
-                    9,
-                    OVERLAY_MARKER,
-                );
-            }
-        }
+        let size = (screen.w, screen.h.min(crate::shell::hud::VIEW_H));
+        let mut v = self.view_of(0, camera, screen, size);
+        v.views = 1;
+        self.draw_view(assets, fb, &v, overlay);
     }
 
     /// A fase tem limite de tempo e o cronômetro chegou a 0.
@@ -937,6 +783,9 @@ impl Scene {
     /// Um tique com a entrada de cada jogador (a do 2º só vale com dois jogadores).
     pub fn tick_players(&mut self, inputs: [u32; 2]) {
         let seats = self.seats();
+        let prev: Vec<Option<crate::State>> = (0..self.players.len().max(1))
+            .map(|i| self.player_jake(i).map(Jake::state))
+            .collect();
         for (i, &input) in inputs.iter().enumerate().take(seats) {
             self.with_seat(i, |s| s.tick_seat(input));
         }
@@ -991,6 +840,7 @@ impl Scene {
         for i in 0..seats {
             self.with_seat(i, Self::sync_jake_sprite);
         }
+        self.tick_views(&prev);
         for sp in self.sprites.iter_mut().filter(|sp| !sp.frozen) {
             let anim = sp.anim.clone();
             sp.player.tick(&anim);
@@ -2800,7 +2650,11 @@ mod tests {
         s.draw(&mut a, &mut fb, (190, 20), false);
         // origem (200, 30) + quadro (-7, 1) + opcode (5, 6) = (198, 37)
         assert_eq!(fb.pixels[(37 - 20) * 64 + (198 - 190)], 1);
-        assert_eq!(fb.pixels[(37 - 20) * 64 + (198 - 190) - 1], 0);
+        // em volta, a cor das células vazias da camada da vista (`view::EMPTY_COLOUR`)
+        assert_eq!(
+            fb.pixels[(37 - 20) * 64 + (198 - 190) - 1],
+            view::EMPTY_COLOUR
+        );
         let mut empty = crate::Framebuffer::new(64, 64);
         s.draw(&mut a, &mut empty, (10_000, 10_000), true);
     }
