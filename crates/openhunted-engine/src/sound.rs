@@ -126,6 +126,97 @@ pub fn resolve(cues: &[Cue], listener: (i32, i32), layer: i32) -> Vec<Play> {
     now
 }
 
+/// Vagas da fila do locutor (`0x497190`, 10 × 36 bytes).
+pub const SPEECH_SLOTS: usize = 10;
+
+/// Uma sequência de até 3 falas, tocadas uma depois da outra pela fila do locutor
+/// (`0x0043c868(id1, id2, id3, p1, p2, p3)`); id 0 encerra.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Chain {
+    /// (id, prioridade) de cada fala.
+    pub lines: [(u16, u16); 3],
+    /// Só entra se nenhuma das falas já está na fila (os chamadores testam `0x0043c814`
+    /// antes, como a porta de célula trancada).
+    pub unique: bool,
+}
+
+impl Chain {
+    /// Sequência das falas dadas (as que passam de 3 são ignoradas).
+    pub fn new(lines: &[(u16, u16)], unique: bool) -> Self {
+        let mut c = Chain {
+            unique,
+            ..Default::default()
+        };
+        for (o, l) in c.lines.iter_mut().zip(lines) {
+            *o = *l;
+        }
+        c
+    }
+
+    fn ids(&self) -> impl Iterator<Item = u16> + '_ {
+        self.lines.iter().map(|l| l.0).filter(|&id| id != 0)
+    }
+}
+
+/// Fila do locutor (`0x497190`): 10 vagas, cada uma com uma sequência de falas. Por tique
+/// (`0x0043c8cd`), a vaga cuja fala da frente ainda não começou a toca (sem posição, pela
+/// prioridade dela); a que começou e já parou de tocar passa à fala seguinte, que toca no
+/// tique seguinte. Sem vaga livre, a sequência se perde.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Announcer {
+    slots: [Option<(Chain, bool)>; SPEECH_SLOTS],
+}
+
+impl Announcer {
+    /// A fala está em alguma vaga (`0x0043c814`).
+    pub fn contains(&self, id: u16) -> bool {
+        self.slots
+            .iter()
+            .flatten()
+            .any(|(c, _)| c.ids().any(|x| x == id))
+    }
+
+    /// Fila vazia (`0x0043c84a`).
+    pub fn is_empty(&self) -> bool {
+        self.slots.iter().all(Option::is_none)
+    }
+
+    /// Põe a sequência na primeira vaga livre (`0x0043c868`); `false` se não entrou.
+    pub fn enqueue(&mut self, c: Chain) -> bool {
+        if c.ids().next().is_none() || (c.unique && c.ids().any(|id| self.contains(id))) {
+            return false;
+        }
+        match self.slots.iter_mut().find(|s| s.is_none()) {
+            Some(s) => {
+                *s = Some((c, false));
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Um tique da fila (`0x0043c8cd`): `playing(id)` diz se o som ainda toca no mixer.
+    pub fn tick(&mut self, mut playing: impl FnMut(u16) -> bool) -> Vec<Cue> {
+        let mut out = Vec::new();
+        for slot in self.slots.iter_mut() {
+            let Some((c, started)) = slot.as_mut() else {
+                continue;
+            };
+            if !*started {
+                out.push(Cue::ui(c.lines[0].0, c.lines[0].1));
+                *started = true;
+            } else if !playing(c.lines[0].0) {
+                c.lines = [c.lines[1], c.lines[2], (0, 0)];
+                *started = false;
+                if c.lines[0].0 == 0 {
+                    *slot = None;
+                }
+            }
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,5 +298,32 @@ mod tests {
         cues.push(Cue::at(3040, 9, (0, 0), 0));
         let ids: Vec<u16> = resolve(&cues, (0, 0), 0).iter().map(|p| p.id).collect();
         assert_eq!(ids, vec![3040, 3021, 3022, 3023]);
+    }
+
+    #[test]
+    fn announcer_plays_chains_in_order_after_each_line_ends() {
+        let mut a = Announcer::default();
+        assert!(a.enqueue(Chain::new(&[(3715, 200), (3714, 200)], true)));
+        assert!(a.contains(3714) && !a.contains(3719));
+        // a mesma fala na fila: o chamador não repete
+        assert!(!a.enqueue(Chain::new(&[(3715, 200), (3719, 200)], true)));
+        let ids = |v: Vec<Cue>| v.iter().map(|c| (c.id, c.priority)).collect::<Vec<_>>();
+        assert_eq!(ids(a.tick(|_| true)), vec![(3715, 200)]);
+        assert_eq!(ids(a.tick(|_| true)), vec![], "ainda tocando");
+        assert_eq!(ids(a.tick(|_| false)), vec![], "acabou: passa à seguinte");
+        assert_eq!(ids(a.tick(|_| false)), vec![(3714, 200)]);
+        assert_eq!(ids(a.tick(|_| false)), vec![]);
+        assert!(a.is_empty(), "a vaga se libera depois da última");
+        // sem exigir unicidade (as provocações da Morte), duas vagas tocam juntas
+        assert!(a.enqueue(Chain::new(&[(3760, 0)], false)));
+        assert!(a.enqueue(Chain::new(&[(3760, 0), (3761, 0), (3762, 0)], false)));
+        assert_eq!(ids(a.tick(|_| true)), vec![(3760, 0), (3760, 0)]);
+        // dez vagas: a 11ª sequência se perde
+        let mut b = Announcer::default();
+        for _ in 0..SPEECH_SLOTS {
+            assert!(b.enqueue(Chain::new(&[(3760, 0)], false)));
+        }
+        assert!(!b.enqueue(Chain::new(&[(3761, 0)], false)));
+        assert!(!b.enqueue(Chain::new(&[], false)), "vazia");
     }
 }

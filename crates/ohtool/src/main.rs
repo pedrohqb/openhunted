@@ -396,6 +396,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(w) = sons_out.as_mut() {
                     // os eventos se acumulam na cena: os deste tique saem aqui
                     for ev in scene.events.drain(..).collect::<Vec<_>>() {
+                        if let openhunted_engine::Event::Speech(c) = &ev {
+                            let lines: Vec<_> = c.lines.iter().filter(|l| l.0 != 0).collect();
+                            writeln!(w, "{}", serde_json::json!({"t": t, "fala": lines}))?;
+                        }
                         if let openhunted_engine::Event::Sound(c) = ev {
                             let at = c.at.map(|s| [s.x, s.y, s.layer]);
                             writeln!(

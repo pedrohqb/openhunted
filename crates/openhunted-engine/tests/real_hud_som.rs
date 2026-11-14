@@ -61,3 +61,35 @@ fn camera_target_is_the_reference_rect_top_centre() {
     assert_eq!(seen.last(), Some(&(1707, 69)));
     assert!(center.0 + 320 > s.width, "sem limite na borda da fase");
 }
+
+/// Passos pelo `SOUND.TBL` (lista 1, `JAKE.ANM`): correndo, 5101 e 5100 alternados a cada 6
+/// tiques (quadros 40 e 37 do ciclo), prioridade 3, no centro do Jake; a pistola continua só
+/// pela tabela das armas.
+#[test]
+fn running_jake_plays_footsteps_from_the_sound_table() {
+    let Some((mut s, _)) = load("T_J_001.LEV") else {
+        return;
+    };
+    let mut steps = Vec::new();
+    for t in 0..40 {
+        s.tick(if t < 20 {
+            0
+        } else {
+            openhunted_engine::input::LEFT
+        });
+        for e in s.events.drain(..) {
+            if let openhunted_engine::Event::Sound(c) = e
+                && (5100..=5101).contains(&c.id)
+            {
+                assert_eq!(c.priority, 3);
+                assert!(c.at.is_some());
+                steps.push((t, c.id));
+            }
+        }
+    }
+    assert!(steps.len() >= 3, "{steps:?}");
+    for w in steps.windows(2) {
+        assert_eq!(w[1].0 - w[0].0, 6, "{steps:?}");
+        assert_ne!(w[0].1, w[1].1, "alternados: {steps:?}");
+    }
+}

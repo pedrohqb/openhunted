@@ -11,7 +11,7 @@ use openhunted_engine::scene::Mode;
 use openhunted_engine::scene::view::View;
 use openhunted_engine::shell::hud::{self, HudState, VIEW_H};
 use openhunted_engine::shell::views::{self, ViewRect};
-use openhunted_engine::sound::Cue;
+use openhunted_engine::sound::{Announcer, Cue};
 use openhunted_engine::{
     Assets, Event, Framebuffer, Outcome, SCREEN_H, SCREEN_W, Scene, TICK_MS, background_index,
     clamp_camera, display_palette, draw_text, measure_text,
@@ -83,6 +83,8 @@ pub struct Viewer {
     clock_ms: u64,
     /// Foco de cada vista no tique anterior (salto → recentrar na hora).
     last_focus: [Option<(i32, i32)>; 2],
+    /// Fila do locutor (`0x497190`): falas em sequência.
+    announcer: Announcer,
 }
 
 /// Salto do foco num tique (px, por eixo) acima do qual a vista da tela dividida recentra na
@@ -160,6 +162,7 @@ impl Viewer {
             taps2: 0,
             clock_ms: 0,
             last_focus: [None; 2],
+            announcer: Announcer::default(),
         }
     }
 
@@ -328,6 +331,14 @@ impl Viewer {
         }
     }
 
+    /// Um tique da fila do locutor (`0x0043c8cd`): a fala da frente de cada vaga toca e,
+    /// quando acaba no mixer, passa à seguinte. Mudo, cada fala dura um tique.
+    fn speech_tick(&mut self) -> Vec<Cue> {
+        let sfx = &mut self.sfx;
+        self.announcer
+            .tick(|id| sfx.as_mut().is_some_and(|s| s.is_playing(id)))
+    }
+
     pub fn modal(&self) -> Option<&Modal> {
         self.modal.as_ref()
     }
@@ -434,9 +445,16 @@ impl Viewer {
     /// Com uma dica aberta, o jogo não anda (só o relógio da dica).
     pub fn advance(&mut self, ms: u32) -> u32 {
         if let Some(m) = self.modal.as_mut() {
+            let before = m.open_ms / TICK_MS;
             m.open_ms = m.open_ms.saturating_add(ms);
-            if m.open_ms > MODAL_MAX_MS {
+            let (ticks, expired) = (m.open_ms / TICK_MS - before, m.open_ms > MODAL_MAX_MS);
+            if expired {
                 self.modal = self.queued.pop_front();
+            }
+            // a fila do locutor anda também com a dica aberta (`0x402d9e`)
+            for _ in 0..ticks {
+                let cues = self.speech_tick();
+                self.play_sounds(&cues);
             }
             return 0;
         }
@@ -460,6 +478,8 @@ impl Viewer {
             for ev in self.scene.events.drain(..) {
                 if let Event::Sound(c) = ev {
                     cues.push(c);
+                } else if let Event::Speech(c) = ev {
+                    self.announcer.enqueue(c);
                 } else if let Event::Hint { text, left_of_jake } = ev {
                     let m = Modal {
                         text,
@@ -475,6 +495,7 @@ impl Viewer {
                 }
                 // veredito: nada a fazer aqui por enquanto
             }
+            cues.extend(self.speech_tick());
             self.play_sounds(&cues);
             if opened {
                 self.pending_ms = 0;
