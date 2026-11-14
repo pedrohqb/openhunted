@@ -39,6 +39,7 @@ PASTA_JOGO = r"C:\Sierra\Hunter"
 
 BP_TIQUE = 0x4043A3  # laço do jogo: depois de 0x448366 (dispositivos), antes de 0x435e7f
 BP_CARGA = 0x43124B  # 0x43124b(nome): carga da fase
+BP_DICA = 0x4156F7   # fim da dica modal (0x4153d8): depois da última leitura dos dispositivos
 
 
 def log(*a):
@@ -95,14 +96,15 @@ def entrada_do_tique(seq, t):
 
 
 def dispositivo(bits):
-    """Bits do porte → bytes do teclado do original (+0x8c…+0x9d)."""
+    """Bits do porte → os 20 bytes do teclado do original (+0x8c…+0x9f; os botões 7 e 8,
+    +0x9e/+0x9f, não têm ação)."""
     x = 128 * ((1 if bits & 0x8 else 0) - (1 if bits & 0x4 else 0))
     y = 128 * ((1 if bits & 0x2 else 0) - (1 if bits & 0x1 else 0))
     botoes = [bits & 0x100, bits & 0x200, bits & 0x400,  # atirar, pular, furtivo
               bits & 0x1000, bits & 0x800, bits & 0x40000]  # próxima, anterior, soco
     # +0x8c/+0x90: o teclado grava ((eixo + 0x80) >> 8) − 1 (0x4485bf)
     return (struct.pack("<ii", ((x + 0x80) >> 8) - 1, ((y + 0x80) >> 8) - 1)
-            + struct.pack("<hh", x, y) + bytes(1 if b else 0 for b in botoes))
+            + struct.pack("<hh", x, y) + bytes(1 if b else 0 for b in botoes) + bytes(2))
 
 
 # --------------------------------------------------------------------------- Wine
@@ -240,7 +242,7 @@ def cmd_run(a):
         log("pid", pid)
         th = Thread(pid)  # a thread inicial roda o WinMain e o laço do jogo
         th.interrupt()
-        th.set_breakpoints([BP_TIQUE, BP_CARGA])
+        th.set_breakpoints([BP_TIQUE, BP_CARGA, BP_DICA])
         th.cont()
         rng_ini = memoria.rng_inicial(os.path.join(pasta_jogo_unix(a.prefix), "Hunter.exe"))
 
@@ -302,7 +304,7 @@ def cmd_run(a):
         t = 0
         pausados = 0
         modal = 0
-        bits = entrada_do_tique(seq, 0)
+        antes, bits = 0, entrada_do_tique(seq, 0)
         mem.write(dev + 0x8C, dispositivo(bits))
         th.cont()
         while t < a.ticks:
@@ -314,6 +316,12 @@ def cmd_run(a):
                 if modal > 40:
                     raise RuntimeError(f"o jogo parou no tique {t}")
                 xdo("key", "--delay", "100", "Escape")
+                continue
+            if eip == BP_DICA:
+                # a dica releu o teclado de verdade (nada apertado) no meio do tique; o
+                # jogador do roteiro continua segurando a entrada: repõe a atual e a anterior
+                mem.write(dev + 0x8C, dispositivo(bits) + dispositivo(antes))
+                th.cont()
                 continue
             if eip != BP_TIQUE:
                 th.cont()
@@ -331,7 +339,7 @@ def cmd_run(a):
             if a.shots and t % a.shot_every == 0:
                 xdo.foto(os.path.join(a.shots, f"t{t:05d}.png"))
             t += 1
-            bits = entrada_do_tique(seq, t)
+            antes, bits = bits, entrada_do_tique(seq, t)
             mem.write(dev + 0x8C, dispositivo(bits))
             th.cont()
         log(f"{t} tiques gravados em {a.out}" + (f" ({pausados} pausados)" if pausados else ""))
