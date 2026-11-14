@@ -2,3 +2,5 @@
 /re-out
 /.superpowers
 *.iso
+__pycache__/
+*.pyc
