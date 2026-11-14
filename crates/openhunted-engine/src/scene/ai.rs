@@ -96,6 +96,9 @@ pub(super) fn character(
         .with_inventory(crate::jake::Inventory::for_character(&o.points, ch))
         .with_layer(layer)
         .with_boxes(crawl, bar);
+    // `values[i]` vão para `+0x260 + 4·i` (`logica-fase.md`): `values[4]` é o veneno
+    // `+0x270` (o Jake da `D_J_012` começa envenenado; oráculo: vida 99 no tique 0)
+    j.poison = o.values.get(4).copied().unwrap_or(0).max(0);
     if let Some(n) = prof.collapse_brd {
         j = j.with_collapse_box(brd(assets, n, boxr));
     }
