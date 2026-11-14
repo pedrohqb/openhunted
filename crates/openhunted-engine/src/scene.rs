@@ -340,7 +340,7 @@ impl Scene {
             events: Vec::new(),
             outcome: None,
             tick_count: 0,
-            rng: Rng::new(0x4a4b_4531),
+            rng: Rng::original(),
             kills: 0,
             mines_at_start: 0,
             kills_total: 0,
@@ -567,6 +567,21 @@ impl Scene {
             }
             objects.extend(cell.objects.iter());
         }
+        // sorteios da carga, na ordem do arquivo (lista global, depois as células), com os
+        // objetos de outros modos também (o leitor cria todos): o primeiro de cada objeto
+        // escolhe o quadro inicial (`0x0040b2c8`)
+        s.rng.reset();
+        let draws: HashMap<*const LevelObject, u32> = objects
+            .iter()
+            .filter_map(|&o| {
+                let n = crate::entity::init_draws(o.kind);
+                let first = (n > 0).then(|| s.rng.next_u16());
+                for _ in 1..n {
+                    s.rng.next_u16();
+                }
+                first.map(|v| (o as *const LevelObject, v))
+            })
+            .collect();
         // Vagas (`0x43cbb0`): com dois jogadores, as atribuídas, e só fica o que está na
         // máscara do modo (`0x43cb28`).
         let slots = if mode == Mode::Solo {
@@ -631,7 +646,13 @@ impl Scene {
                     continue;
                 }
             }
-            let e = from_object(o, assets, &mut s.warnings);
+            let mut e = from_object(o, assets, &mut s.warnings);
+            if let (Some(sp), Some(&v)) = (e.sprite.as_mut(), draws.get(&(o as *const _))) {
+                if crate::entity::keeps_random_frame(o.kind) {
+                    let n = sp.player.len().max(1) as u32;
+                    sp.player.seek((v % n) as usize);
+                }
+            }
             if e.sprite.is_none() {
                 s.markers.push(Marker {
                     kind: o.kind,
@@ -782,6 +803,10 @@ impl Scene {
 
     /// Um tique com a entrada de cada jogador (a do 2º só vale com dois jogadores).
     pub fn tick_players(&mut self, inputs: [u32; 2]) {
+        if self.tick_count == 0 {
+            // o `rand` volta ao estado do executável antes do tique 0 (`rng.rs`)
+            self.rng.reset();
+        }
         let seats = self.seats();
         let prev: Vec<Option<crate::State>> = (0..self.players.len().max(1))
             .map(|i| self.player_jake(i).map(Jake::state))
@@ -880,7 +905,10 @@ impl Scene {
                 zones: &self.prop_zones,
                 layers: self.layers,
             };
+            std::mem::swap(&mut j.rng, &mut self.rng);
+            j.set_clock(self.tick_count);
             j.tick_in(input, &env);
+            std::mem::swap(&mut j.rng, &mut self.rng);
             j.respawn_if_outside((self.width, self.height));
             sp.x = j.body.x;
             sp.y = j.body.y;
@@ -1307,11 +1335,21 @@ impl Scene {
         }
     }
 
-    /// Entidade visual de uma explosão: `OEX.ANM`, rótulo sorteado 1–4, com o maior quadro do
-    /// rótulo medindo `2 · raio` px, centrada no ponto. Sem animação disponível, nenhuma.
+    /// Entidade visual de uma explosão (`0x0040d20c`): `OEX.ANM`, com o maior quadro do
+    /// rótulo medindo `2 · raio` px, centrada no ponto. Sem direção, dois sorteios na ordem do
+    /// original: o ângulo `a` (`0x0040d253`) e o rótulo `(rand >> 14) + 1`, 1–4
+    /// (`0x0040d260`); `a < 0x4000` ou `a > 0xc000` espelha na horizontal (`+0x194 |= 1`,
+    /// `0x0040d3dd`; o bit 1 da horizontal, `0x00405775`). `a > 0x8000` espelharia na vertical
+    /// (`|= 2`), que o sprite do porte não tem. Sem animação disponível, nenhuma (os sorteios
+    /// acontecem do mesmo jeito).
     fn explosion_entity(&mut self, b: &behaviour::Blast) -> Option<Entity> {
-        let label = 1 + self.rng.below(4) as u16;
-        self.effect_entity(b, label)
+        let a = self.rng.next_u16();
+        let label = ((self.rng.next_u16() >> 14) + 1) as u16;
+        let mut e = self.effect_entity(b, label)?;
+        if let Some(sp) = e.sprite.as_mut() {
+            sp.mirror = !(0x4000..=0xc000).contains(&a);
+        }
+        Some(e)
     }
 
     /// Efeito do `OEX.ANM` com um rótulo dado (faísca de bala: 15). Escala (`0x0040d20c`):

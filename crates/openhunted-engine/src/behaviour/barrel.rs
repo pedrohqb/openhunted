@@ -347,7 +347,8 @@ mod tests {
             s.vx = 12 * SUB;
         }
         let mut out = Out::default();
-        for _ in 0..30 {
+        // rolando no chão anda a metade do vetor (`physics::step`): chega à parede mais tarde
+        for _ in 0..60 {
             if !b.alive {
                 break;
             }
@@ -360,7 +361,7 @@ mod tests {
             s.state = ROLLING;
             s.vx = 5 * SUB;
         }
-        for _ in 0..60 {
+        for _ in 0..120 {
             tick(&mut b, &c, &mut Out::default());
         }
         assert!(b.alive);

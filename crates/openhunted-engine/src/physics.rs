@@ -205,14 +205,49 @@ fn sweep(world: &World, start: Rect, d: i32, horizontal: bool) -> i32 {
 
 /// Um tique de física: gravidade (opcional), deslocamento de velocidade >> 3 eixo a eixo,
 /// colisão e resposta (meio rebote, atrito no contato).
+///
+/// Chão (medido no oráculo; a varredura do original, `0x00432e5d`, encurta o vetor inteiro até
+/// o contato): descendo, quem chega ao chão neste tique anda só a fração `g/vy` do vetor, com
+/// `g = 8·livres + 8` (1 px de folga além dos pixels livres, em 1/8 px); na horizontal, para a
+/// direita perde mais 1/8 px e para a esquerda arredonda para baixo (a matemática fina da
+/// varredura segue em aberto: a regra reproduz todos os casos medidos). Correndo (vx 96, vy 8
+/// depois da gravidade) anda 11 px para a direita e 12 para a esquerda; o Garathe (120) 14;
+/// os estados do esqueleto e as minas saltadoras, com a vy guardada em 0 (16 depois da
+/// gravidade), andam metade: furtivo −72 → −5 px, −17 → −2. Caindo de 4 px a 48, desce 4 e a
+/// vy gravada é −24 + 7 = −17: o atrito (`0x00404842`) pega as duas componentes depois do
+/// rebote.
 pub fn step(b: &mut Body, world: &World, gravity: bool) {
     if gravity {
         b.vy = b.vy.saturating_add(GRAVITY);
     }
     b.hit_wall = false;
     b.hit_ceiling = false;
-    let (dx, dy) = (b.vx >> 3, b.vy >> 3);
-    let moved_x = sweep(world, b.bounds(), dx, true);
+    let r0 = b.bounds();
+    let mut ux = b.vx;
+    let mut dy = b.vy >> 3;
+    let mut floor = false;
+    if b.vy > 0 {
+        // folga até o chão onde o passo horizontal chega
+        let rx = r0.moved(sweep(world, r0, b.vx >> 3, true), 0);
+        let reach = (b.vy >> 3).saturating_add(1);
+        let free = sweep(world, rx, reach, false);
+        let g = free.saturating_mul(SUB).saturating_add(SUB);
+        if free < reach && b.vy >= g {
+            // a fração do vetor até o chão; o arredondamento medido difere pelo sentido
+            // (para a direita perde 1/8 px, para a esquerda arredonda para baixo)
+            let part = i64::from(ux) * i64::from(g);
+            let vy = i64::from(b.vy);
+            ux = if ux > 0 {
+                (part / vy) as i32 - 1
+            } else {
+                part.div_euclid(vy) as i32
+            };
+            dy = free;
+            floor = true;
+        }
+    }
+    let dx = ux >> 3;
+    let moved_x = sweep(world, r0, dx, true);
     b.x = b.x.saturating_add(moved_x);
     let mut contact_x = false;
     if moved_x != dx.clamp(-MAX_STEP, MAX_STEP) {
@@ -222,13 +257,15 @@ pub fn step(b: &mut Body, world: &World, gravity: bool) {
     }
     let moved_y = sweep(world, b.bounds(), dy, false);
     b.y = b.y.saturating_add(moved_y);
-    let mut contact_y = false;
+    let mut contact_y = floor;
     if moved_y != dy.clamp(-MAX_STEP, MAX_STEP) {
         if dy < 0 {
             b.hit_ceiling = true;
         }
-        b.vy = bounce(b.vy);
         contact_y = true;
+    }
+    if contact_y {
+        b.vy = friction(bounce(b.vy));
     }
     b.on_ground = world.standing_on(&b.bounds(), 1);
     if contact_y || b.on_ground {
@@ -280,15 +317,18 @@ mod tests {
         let mut b = body(300, 53);
         step(&mut b, &w, true);
         assert!(b.on_ground, "o chão sustenta mesmo sobreposto à parede");
-        b.vx = -12 * SUB;
-        step(&mut b, &w, true);
+        // correndo: vy −1 px/tique, que a gravidade leva a +1 (o vetor inteiro chega ao chão)
+        let run = |b: &mut Body, vx: i32| {
+            b.vx = vx;
+            b.vy = -SUB;
+            step(b, &w, true);
+        };
+        run(&mut b, -12 * SUB);
         assert_eq!(b.x, 288, "anda para a esquerda dentro da parede");
-        b.vx = -12 * SUB;
-        step(&mut b, &w, true);
+        run(&mut b, -12 * SUB);
         assert_eq!(b.x, 276, "sai da parede");
         // já fora, a parede volta a barrar
-        b.vx = 12 * SUB;
-        step(&mut b, &w, true);
+        run(&mut b, 12 * SUB);
         assert_eq!(b.bounds().x + b.bounds().w, 300);
         assert!(b.hit_wall);
     }
@@ -311,9 +351,10 @@ mod tests {
     fn wall_stops_and_bounces_fast_bodies() {
         let w = floor();
         let mut b = body(250, 53);
-        b.vx = 12 * SUB;
         let mut hit = false;
         for _ in 0..10 {
+            b.vx = 12 * SUB;
+            b.vy = -SUB;
             step(&mut b, &w, true);
             if b.hit_wall {
                 hit = true;
@@ -324,10 +365,12 @@ mod tests {
         assert_eq!(b.x + 2 + 18, 300); // no tique do choque, encostado na parede
         let mut c = body(279, 53);
         c.vx = 12 * SUB;
+        c.vy = -SUB;
         step(&mut c, &w, true);
         assert_eq!(c.vx, -6 * SUB + 7); // meio rebote (acima de 4 px/tique) e atrito do chão
         let mut d = body(279, 53);
         d.vx = 3 * SUB;
+        d.vy = -SUB;
         step(&mut d, &w, true);
         assert_eq!(d.vx, 0);
     }
@@ -340,6 +383,57 @@ mod tests {
         step(&mut b, &w, true);
         assert!(b.on_ground);
         assert_eq!(b.vx, 33); // 7/8 px/tique² de atrito
+    }
+
+    /// Números medidos no oráculo (o `Hunter.exe` no Wine): o vetor que chega ao chão anda
+    /// só até ele (com 1 px de folga) e recua 1/8 px.
+    #[test]
+    fn floor_contact_shortens_the_vector_like_the_original() {
+        let w = floor();
+        // correndo (vx ±96, vy −8): +11 px para a direita, −12 para a esquerda (`T_J_003`,
+        // `T_J_001`); depois do choque o atrito leva vx a ±89
+        for (vx, dx) in [(96, 11), (-96, -12)] {
+            let mut b = body(50, 53);
+            b.on_ground = true;
+            (b.vx, b.vy) = (vx, -SUB);
+            step(&mut b, &w, true);
+            assert_eq!(
+                (b.x - 50, b.y, b.vx, b.vy),
+                (dx, 53, vx - 7 * vx.signum(), 0)
+            );
+        }
+        // pelo esqueleto (vy 0): metade do vetor; furtivo −72 → −5, engatinhar −80 → −5,
+        // −128 → −8, aterrissagem −40 → −3 (`T_J_001`)
+        // e a mina saltadora `H_J_006` (−25 → −2, −17 → −2, −11 → −1, −3 → −1, 33 → 1)
+        for (vx, dx) in [
+            (-72, -5),
+            (-80, -5),
+            (-128, -8),
+            (-40, -3),
+            (-24, -2),
+            (-120, -8),
+            (-96, -6),
+            (-25, -2),
+            (-17, -2),
+            (-11, -1),
+            (-3, -1),
+            (33, 1),
+        ] {
+            let mut b = body(50, 53);
+            b.vx = vx;
+            step(&mut b, &w, true);
+            assert_eq!(b.x - 50, dx, "vx {vx}");
+        }
+        // caindo a 48 com o chão a 4 px: desce 4 e quica a −24, com atrito −17 (`I_J_002`)
+        let mut b = body(50, 49);
+        b.vy = 32;
+        step(&mut b, &w, true);
+        assert_eq!((b.y, b.vy), (53, -17));
+        // −1 + 16 = 15 com o chão a 1 px: desce 1 sem choque e guarda 15
+        let mut b = body(50, 52);
+        b.vy = -1;
+        step(&mut b, &w, true);
+        assert_eq!((b.y, b.vy), (53, 15));
     }
 
     #[test]

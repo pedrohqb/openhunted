@@ -449,6 +449,14 @@ struct SkeReq {
     diag: i32,
 }
 
+/// O que a física do tique deixou para a atualização: subia antes da física (a velocidade
+/// gravada era negativa) e a altura de antes.
+#[derive(Debug, Clone, Copy)]
+struct Phys {
+    was_rising: bool,
+    y0: i32,
+}
+
 /// O Jake controlável.
 #[derive(Debug, Clone)]
 pub struct Jake {
@@ -490,8 +498,10 @@ pub struct Jake {
     box_bar: Rect,
     /// Garathe caído (`MN_COLPS`: 29–33, 35, 59 e as mortes); no Jake, a padrão.
     box_collapse: Rect,
-    /// Gerador para o sorteio do 79 (`rand & 3`).
-    rng: u32,
+    /// O `rand` do jogo (`rng.rs`) enquanto o Jake está no tique: a cena empresta o dela
+    /// (`Scene::tick_seat`), para os sorteios do tiro (`rand & 1`) e do 79 (`rand & 3`)
+    /// saírem na ordem do original.
+    pub(crate) rng: crate::rng::Rng,
     /// Especial disparado neste tique (a cena aplica nos objetos).
     pub special: Option<SpecialBlast>,
     /// Caixa do soco no primeiro tique da janela do golpe (a cena fere quem cruza).
@@ -514,6 +524,12 @@ pub struct Jake {
     push_loop: bool,
     /// Tiques desde a criação (o veneno age em `tique % 20 = 0`).
     clock: u32,
+    /// Estado no começo do tique.
+    prev_state: State,
+    /// O estado posto neste tique já rodou a rotina dele (o original troca de estado e chama a
+    /// rotina no mesmo tique, que acha o estado igual e avança um quadro): parado pela
+    /// rotina do 1 (`idle_routine`), agachar (`0x423835` duas vezes no 85).
+    entry_advance: bool,
     /// Quem é (perfil de movimentos, rótulos e armas).
     character: Character,
     /// Som posicional pedido neste tique (Garathe: pouso do pulo longo, empurrar, pulo
@@ -555,7 +571,7 @@ impl Jake {
             box_crawl: moves::CRAWL_BOX,
             box_bar: moves::BAR_BOX,
             box_collapse: boxr,
-            rng: 0x4a41_4b45,
+            rng: crate::rng::Rng::original(),
             special: None,
             punch: None,
             blow: None,
@@ -566,6 +582,8 @@ impl Jake {
             door_push: false,
             push_loop: false,
             clock: 0,
+            prev_state: State::Idle,
+            entry_advance: false,
             character: Character::Jake,
             sound: None,
             colour: 0,
@@ -750,8 +768,8 @@ impl Jake {
             }
         }
         self.stop_for_fire();
-        self.rng = self.rng.wrapping_mul(1_103_515_245).wrapping_add(12345);
-        let alt = w == FISTS && (self.rng >> 16) & 1 != 0;
+        // `rand & 1` escolhe o par de estados (`0x0043b4ea`)
+        let alt = w == FISTS && self.rng.next_u16() & 1 != 0;
         self.state = State::Fire {
             aim,
             t: 0,
@@ -1147,6 +1165,11 @@ impl Jake {
         self.advance
     }
 
+    /// O tique começou no estado `s`.
+    fn state_was(&self, s: State) -> bool {
+        self.prev_state == s
+    }
+
     fn set(&mut self, s: State) {
         if s != self.state {
             self.state = s;
@@ -1173,11 +1196,17 @@ impl Jake {
         self.lengths.get(&label).copied().unwrap_or(1).max(1)
     }
 
+    /// O quadro avança neste tique: `tique mod (atraso + 1) = 0` pelo contador do laço
+    /// (`0x004879c4`, em `0x004238fa`/`0x00423835`), não pelo tempo no estado.
+    fn anim_tick(&self, c: u32) -> bool {
+        self.clock % (c + 1) == 0
+    }
+
     /// A animação do estado chegou ao fim e avançaria neste tique (o modo "parar no fim" de
     /// `0x00406c71` devolve 1).
     fn anim_done(&self) -> bool {
         let (label, c) = self.anim_of(self.state);
-        if self.label_changed || self.ticks % (c + 1) != 0 {
+        if self.label_changed || !self.anim_tick(c) {
             return false;
         }
         if self.reversed_state(self.state) {
@@ -1194,11 +1223,12 @@ impl Jake {
         let n = self.len_of(label);
         self.advance = false;
         self.frame = self.frame.min(n - 1);
-        if self.label_changed || self.ticks % (c + 1) != 0 {
+        if (self.label_changed && !self.entry_advance) || !self.anim_tick(c) {
             return;
         }
         let before = self.frame;
         let mode = match self.anim_mode {
+            _ if self.label_changed => AnimMode::Auto,
             AnimMode::Auto if self.reversed_state(self.state) => AnimMode::Reverse,
             m => m,
         };
@@ -1330,9 +1360,19 @@ impl Jake {
         false
     }
 
-    /// Um tique (50 ms) com a máscara de entrada `input`, sem zonas PR (só cenário).
+    /// Um tique (50 ms) com a máscara de entrada `input`, sem zonas PR (só cenário). Fora da
+    /// cena, o próprio Jake conta os tiques do laço (`Jake::set_clock`).
     pub fn tick(&mut self, input: u32, world: &World) {
         self.tick_in(input, &Env::new(world));
+        self.clock = self.clock.wrapping_add(1);
+    }
+
+    /// Número do tique do laço (`0x004879c4`) da próxima atualização: a cena o passa antes de
+    /// cada tique. Os quadros avançam quando `tique mod (atraso + 1) = 0` (`0x004238fa`) e o
+    /// veneno pesa a cada 20 tiques (`0x004232fa`), pelo contador global, não pelo tempo no
+    /// estado.
+    pub fn set_clock(&mut self, tick: u32) {
+        self.clock = tick;
     }
 
     /// Um tique com o ambiente completo: sólidos, zonas PR e número de camadas.
@@ -1348,11 +1388,17 @@ impl Jake {
         self.sound = None;
         self.anim_mode = AnimMode::Auto;
         self.ske_req = None;
+        self.entry_advance = false;
+        self.prev_state = self.state;
         if self.state == State::Dead {
             self.advance = false;
             return;
         }
-        self.clock = self.clock.wrapping_add(1);
+        // 1. Física (`0x004045a5`) antes da atualização (`personagem.md` §1.2): o corpo anda
+        // com a velocidade e a caixa que a máquina de estados deixou no tique anterior; a
+        // velocidade que os estados gravam abaixo só move o corpo no próximo tique.
+        let phys = self.physics(world);
+        // 2. Atualização (`0x0042293c`).
         // veneno (`0x004231f9`, passo 3): a cada 20 tiques, `+0x270` de dano de veneno
         if self.poison > 0 && self.clock % POISON_PERIOD == 0 && self.is_active() {
             self.pending.add(&Pending {
@@ -1372,7 +1418,7 @@ impl Jake {
         }
         self.flash.tick(self.poison > 0);
         if !self.controllable() {
-            self.tick_passive(input, env);
+            self.tick_passive(input, env, phys);
             return;
         }
         self.switch_pose = self.switch_pose.saturating_sub(1);
@@ -1410,13 +1456,18 @@ impl Jake {
                 | State::Taunt
         ) || (self.is_garathe() && self.state == State::Pushed)
             || (self.state == State::Crawl && self.free_above(world, self.profile().headroom));
+        // Garathe: a animação do pulo 22/25 acaba neste tique; só então vê chão e parede
+        let jump_over =
+            self.is_garathe() && matches!(self.state, State::Jump(_)) && self.anim_done();
+        // transições pelo contato da física deste tique (chão, teto, queda): a primeira que
+        // trata encerra a atualização, como as globais de `0x0042293c` e o chão dos pulos
+        let landed = !quaking && self.after_physics(world, phys, pressed(SHOOT | PUNCH), jump_over);
         let fired = !quaking
+            && !landed
             && !matches!(self.state, State::Fire { .. })
             && can_fire
             && shooting
             && self.start_fire(input, world);
-        // Garathe: a animação do pulo 22/25 acabou neste tique
-        let mut jump_over = false;
         match self.state {
             _ if quaking => {
                 // 121 toca uma vez; no fim, a rotina do parado, e o próximo tique recomeça
@@ -1424,7 +1475,7 @@ impl Jake {
                     self.decide_or_idle(input, env, jump_edge, side);
                 }
             }
-            _ if fired => {}
+            _ if landed || fired => {}
             State::Fire { aim, t, w, alt } => self.tick_fire(input, world, (aim, t, w, alt)),
             State::Recover(_) | State::Ready(..) | State::Holster(_) => {
                 if moving || jump_edge || pressed(UP) || pressed(DOWN) {
@@ -1478,11 +1529,10 @@ impl Jake {
                     // fim do 80 ainda no ar → queda descontrolada (76)
                     self.set(State::WildFall);
                 } else {
-                    if self.is_garathe() && self.anim_done() {
+                    if jump_over {
                         // 22/25: a animação toca uma vez e para no último quadro; só então
                         // vê chão, parede e contato (`0x429e46`, `0x429c6c`)
                         self.anim_mode = AnimMode::Hold;
-                        jump_over = true;
                     }
                     self.air_reverse(side);
                 }
@@ -1516,25 +1566,62 @@ impl Jake {
             self.door_push = self.state == State::Push
                 && self.ticks + 1 == self.len_of(push_label) as u32 * (push_c + 1);
         }
-        // a caixa do estado vale já para a física deste tique (o BRD troca com o estado)
+        self.animate();
+        self.apply_ske();
         self.fit_box(world);
-        if matches!(self.state, State::Run | State::Push) {
-            // −1 px por tique enquanto corre (sobe degraus pequenos), se houver espaço.
-            let up = Rect {
-                y: self.body.bounds().y.saturating_sub(1),
-                ..self.body.bounds()
-            };
-            if !world.blocked(&up) {
+        self.finish_tick();
+        self.prev_input = input;
+    }
+
+    /// Física do tique (`0x004045a5`): gravidade (salvo nos estados sem ela), deslocamento e
+    /// colisão com a velocidade e a caixa que a atualização anterior deixou. Correndo ou
+    /// empurrando contra um degrau de 1 px, sobe 1 px antes (o porte não tem os chanfros do
+    /// `JK_DEFLT.BRD` que fazem o corpo escorregar pela quina); o original só soma −1 px/tique
+    /// à `vy` (`0x0047892c`, `moves.rs`), que a gravidade anula no chão.
+    fn physics(&mut self, world: &World) -> Phys {
+        let phys = Phys {
+            was_rising: self.body.vy < 0,
+            y0: self.body.y,
+        };
+        if matches!(
+            self.state,
+            State::EnteringExit(_) | State::Teleporting(_) | State::Dead
+        ) {
+            return phys;
+        }
+        let climb = matches!(self.state, State::Run | State::Push);
+        if climb {
+            let b = self.body.bounds();
+            let dx = (self.body.vx >> 3).signum();
+            let up = b.moved(0, -1);
+            if dx != 0
+                && world.blocked_from(&b, &b.moved(dx, 0))
+                && !world.blocked(&up)
+                && !world.blocked(&up.moved(dx, 0))
+            {
                 self.body.y = self.body.y.saturating_sub(1);
             }
         }
-        self.animate();
-        self.apply_ske();
-        let was_rising = self.body.vy < 0;
-        let y0 = self.body.y;
         let gravity = self.gravity_on();
         step(&mut self.body, world, gravity);
-        let attacking = pressed(SHOOT | PUNCH);
+        if climb && self.body.on_ground && self.body.vy > 0 {
+            // no chão a resposta de colisão tira a componente normal (`0x00404842`)
+            self.body.vy = 0;
+        }
+        phys
+    }
+
+    /// Transições pelo contato da física deste tique, antes do despacho do estado: aterrissar
+    /// dos pulos e da queda, agarrar a barra no teto, a queda (`0x0042415c`). Devolve `true`
+    /// se trocou de estado (o despacho não roda neste tique).
+    fn after_physics(
+        &mut self,
+        world: &World,
+        phys: Phys,
+        attacking: bool,
+        jump_over: bool,
+    ) -> bool {
+        let before = self.state;
         match self.state {
             // Garathe no meio do pulo: nada decide até a animação acabar
             State::Jump(_) if self.is_garathe() && !jump_over => {}
@@ -1552,7 +1639,7 @@ impl Jake {
                 self.set(State::Fall);
             }
             State::Jump(_) | State::Fall | State::WildFall
-                if self.body.on_ground && !was_rising =>
+                if self.body.on_ground && !phys.was_rising =>
             {
                 self.body.vx = 0;
                 self.body.vy = 0;
@@ -1579,7 +1666,7 @@ impl Jake {
             // só os leva se o jogador não está atacando; atacando, ao tocar o chão vindo
             // a 5 px ou mais por tique, aterrissa (`0x00424220`/`0x00429395` → 26/28)
             State::Fire { .. } if attacking => {
-                if self.body.on_ground && self.body.y - y0 >= FALL_SPEED / SUB {
+                if self.body.on_ground && self.body.y - phys.y0 >= FALL_SPEED / SUB {
                     self.body.vx = 0;
                     self.body.vy = 0;
                     self.set(State::Land(Landing::Fall));
@@ -1592,9 +1679,7 @@ impl Jake {
             }
             _ => {}
         }
-        self.fit_box(world);
-        self.finish_tick();
-        self.prev_input = input;
+        self.state != before
     }
 
     /// No ar, o lado oposto inverte a velocidade horizontal.
@@ -1614,7 +1699,7 @@ impl Jake {
     }
 
     /// Tique dos estados sem entrada do jogador.
-    fn tick_passive(&mut self, input: u32, env: &Env) {
+    fn tick_passive(&mut self, input: u32, env: &Env, phys: Phys) {
         let world = env.world;
         self.fit_box(world);
         match self.state {
@@ -1647,7 +1732,6 @@ impl Jake {
             }
             State::Shocked(n) => {
                 self.body.vx = 0;
-                step(&mut self.body, world, true);
                 if self.garathe_passive_fall() {
                 } else if n <= 1 {
                     self.set(State::Idle);
@@ -1669,7 +1753,6 @@ impl Jake {
                         diag: 0,
                     });
                     self.apply_ske();
-                    step(&mut self.body, world, true);
                     self.garathe_passive_fall();
                     self.fit_box(world);
                     self.finish_tick();
@@ -1677,7 +1760,6 @@ impl Jake {
                 }
             }
             State::Pushed => {
-                step(&mut self.body, world, true);
                 if self.anim_done() {
                     self.body.vx = 0;
                     self.set(State::Idle);
@@ -1691,9 +1773,12 @@ impl Jake {
                     self.finish_tick();
                     return;
                 }
-                let was_rising = self.body.vy < 0;
-                step(&mut self.body, world, true);
-                if self.body.on_ground && !was_rising {
+                // no tique da derrubada o corpo ainda não voou (a velocidade do empurrão anda
+                // na física do próximo)
+                if matches!(self.prev_state, State::KnockedDown(_))
+                    && self.body.on_ground
+                    && !phys.was_rising
+                {
                     self.body.vx = 0;
                     self.body.vy = 0;
                     let next = match self.state {
@@ -1724,7 +1809,6 @@ impl Jake {
                     diag: 0,
                 });
                 self.apply_ske();
-                step(&mut self.body, world, true);
                 self.fit_box(world);
                 self.finish_tick();
                 return;
@@ -1736,13 +1820,11 @@ impl Jake {
                 if done {
                     self.anim_mode = AnimMode::Hold;
                 }
-                step(&mut self.body, world, true);
                 if self.body.on_ground && done && self.body.vx == 0 {
                     self.set(State::Dead);
                 }
             }
             State::Dying(_) => {
-                step(&mut self.body, world, true);
                 if self.body.on_ground {
                     self.body.vx = 0;
                 }
@@ -1895,11 +1977,21 @@ mod tests {
         let mut j = jake_on(&w, 0);
         assert_eq!((j.state(), j.label()), (State::Idle, 1));
         let x0 = j.body.x;
+        // a velocidade da corrida só move o corpo no tique seguinte (a física vem antes da
+        // máquina de estados); no chão o atrito tira 7 antes: (96 − 7) >> 3 = 11 px para a
+        // direita (o oráculo mede 11 para a direita e 12 para a esquerda)
+        j.tick(RIGHT, &w);
+        assert_eq!((j.state(), j.body.x - x0), (State::Run, 0));
         j.tick(RIGHT, &w);
         j.tick(RIGHT, &w);
         assert_eq!(j.state(), State::Run);
         assert_eq!(j.label(), 10);
-        assert_eq!(j.body.x - x0, 24); // 12 px/tique
+        assert_eq!(j.body.x - x0, 22);
+        assert_eq!(
+            (j.body.vx, j.body.vy),
+            (96, -8),
+            "gravado antes da gravidade"
+        );
         assert!(j.facing_right());
         j.tick(0, &w);
         assert_eq!(j.state(), State::Idle);
@@ -1914,6 +2006,7 @@ mod tests {
         j.tick(RIGHT | JUMP, &w);
         assert_eq!(j.state(), State::Jump(JumpKind::Medium));
         assert_eq!(j.label(), 29);
+        j.tick(RIGHT, &w);
         assert!(!j.body.on_ground);
         let mut landed = false;
         for _ in 0..30 {
@@ -2032,7 +2125,10 @@ mod tests {
             j.tick(RIGHT, &w);
         }
         assert_eq!(j.state(), State::Jump(JumpKind::Extended));
-        // lança de onde sondou: só o primeiro tique de voo (17 px) desde o início
+        // lança de onde sondou (sem esqueleto, o impulso não anda); o voo começa no tique
+        // seguinte: 17 px
+        assert_eq!(j.body.x - x0, 0);
+        j.tick(RIGHT, &w);
         assert_eq!(j.body.x - x0, 17);
         for _ in 0..40 {
             j.tick(RIGHT, &w);
@@ -2172,7 +2268,10 @@ mod tests {
         });
         j.tick(0, &w);
         assert_eq!((j.state(), j.label()), (State::KnockedDown(true), 81));
-        assert!(j.body.x > x && j.body.vy < 0);
+        // o empurrão fica na velocidade e move o corpo no tique seguinte
+        assert!(j.body.vx > 0 && j.body.vy < 0);
+        j.tick(0, &w);
+        assert!(j.body.x > x);
         for _ in 0..40 {
             j.tick(0, &w);
         }
@@ -2348,9 +2447,10 @@ mod tests {
         j.tick(RIGHT, &w);
         j.tick(RIGHT, &w);
         assert_eq!(j.state(), State::Run);
-        let x = j.body.x;
         j.tick(RIGHT | SHOOT, &w);
         assert!(j.is_firing());
+        // a física do tique do tiro ainda andou com a velocidade da corrida; depois, parado
+        let x = j.body.x;
         j.tick(RIGHT | SHOOT, &w);
         assert_eq!(j.body.x, x, "parou para atirar");
         // sem munição na pistola (só ela e os punhos): aviso, troca para os punhos e soca

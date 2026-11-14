@@ -31,7 +31,8 @@ fn attacks_from_the_jumps_and_the_fall() {
     assert_eq!(j.state(), State::StandJump);
     j.tick(SHOOT, &w);
     assert!(matches!(j.state(), State::Fire { .. }), "{:?}", j.state());
-    assert_eq!(j.body.vy, 2 * SUB, "21: vertical zerada antes do golpe");
+    // gravada antes da gravidade da física seguinte (`physics` vem antes da atualização)
+    assert_eq!(j.body.vy, 0, "21: vertical zerada antes do golpe");
     // 21 ainda no chão (impulso): o golpe vale também (`0x429857` não olha o chão)
     let mut j = real_jumper(&w, 0, 44);
     j.tick(JUMP, &w);
@@ -43,7 +44,7 @@ fn attacks_from_the_jumps_and_the_fall() {
     airborne(&mut j, &w, UP);
     j.tick(SHOOT, &w);
     assert!(matches!(j.state(), State::Fire { .. }), "{:?}", j.state());
-    assert_eq!(j.body.vy, 2 * SUB, "20: vertical zerada antes do golpe");
+    assert_eq!(j.body.vy, 0, "20: vertical zerada antes do golpe");
     // 19 subindo depois do quadro 9: a vertical segue
     let mut j = real_jumper(&w, 0, -400);
     j.set(State::JumpUp(true));
@@ -339,11 +340,13 @@ fn deaths_61_and_63_slide_by_the_skeleton() {
     run(&mut j, &w, 0, 4);
     assert_eq!((j.state(), j.frame()), (State::Dying(63), 3));
     // rótulo 63 sintético: 0, 3, 6, 9 → Δ 3 por quadro × 2, para trás (olhando à esquerda)
-    assert_eq!(j.body.x - x0, 3 * 6, "recuo pelo esqueleto");
+    // pedido 6 px por quadro, andado no tique seguinte e pela metade no chão
+    // (`physics::step`: (48/2 − 1) >> 3 = 2 px; o oráculo mede ~metade da vx guardada)
+    assert_eq!(j.body.x - x0, 4, "recuo pelo esqueleto");
     run(&mut j, &w, 0, 12);
     assert_eq!((j.state(), j.body.vx, j.frame()), (State::Dead, 0, 3));
     assert!(
-        j.body.x - x0 > 18,
+        j.body.x - x0 > 4,
         "o atrito gasta o resto: {}",
         j.body.x - x0
     );

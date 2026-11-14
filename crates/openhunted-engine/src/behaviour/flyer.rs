@@ -588,7 +588,7 @@ mod tests {
         let mut c = ctx(&j, &w, &on);
         let mut a = flyer(ANTIBODY, 200, 560, 3, 1);
         let mut out = Out::default();
-        for _ in 0..600 {
+        for _ in 0..3000 {
             tick(&mut a, &mut c, &mut out);
             if out.jake_damage.amount > 0 {
                 break;

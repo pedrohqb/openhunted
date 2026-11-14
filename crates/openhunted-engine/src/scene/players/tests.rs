@@ -190,7 +190,10 @@ fn duo(mode: Mode, (x1, w1): (i32, usize), (x2, w2): (i32, usize)) -> Scene {
     {
         s.projectile_anims.insert(n.to_string(), anm.clone());
     }
-    s.explosion_anim = Some(anm.clone());
+    s.explosion_anim = Some(Rc::new(crate::anim::tests::with_labels(
+        (*anm).clone(),
+        &[1, 2, 3, 4],
+    )));
     let sprite = |x| Sprite {
         layer: Layer::Object,
         player: AnimPlayer::from_frame(&anm, 0),

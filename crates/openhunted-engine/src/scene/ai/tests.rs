@@ -46,7 +46,10 @@ fn arena(hx: i32) -> Scene {
     {
         s.projectile_anims.insert(n.to_string(), a.clone());
     }
-    s.explosion_anim = Some(a);
+    s.explosion_anim = Some(Rc::new(crate::anim::tests::with_labels(
+        (*a).clone(),
+        &[1, 2, 3, 4],
+    )));
     let solids = vec![Rect {
         x: -100,
         y: 100,
@@ -115,7 +118,7 @@ fn human_hp(s: &Scene) -> i32 {
 }
 
 /// O golpe só cobre a metade da frente da caixa (`0x43accb`): as garras pegam quem chega
-/// perto. O humano corre para o Minotauro, que corre para ele e o fere.
+/// perto. O Minotauro corre para o humano, ataca, e o humano que chega perto é ferido.
 #[test]
 fn ai_minotaur_approaches_and_hits_the_human() {
     let mut s = arena(100);
@@ -124,7 +127,11 @@ fn ai_minotaur_approaches_and_hits_the_human() {
     let x0 = body(&s, 0).body.x;
     let mut hit = None;
     for t in 0..60 {
-        s.tick(crate::input::RIGHT);
+        // o humano espera e, quando o Minotauro ataca, chega perto (as garras só pegam a
+        // metade da frente da caixa; correndo os dois desde o início, com a velocidade
+        // andando um tique depois do pedido, eles se cruzam entre dois pensamentos da IA)
+        let attacking = matches!(body(&s, 0).state(), State::Fire { .. });
+        s.tick(if attacking { crate::input::RIGHT } else { 0 });
         if human_hp(&s) < 100 {
             hit = Some(t);
             break;

@@ -436,7 +436,10 @@ mod tests {
         for n in ANIMS.iter().chain(&["OEX.ANM"]) {
             s.projectile_anims.insert(n.to_string(), anm.clone());
         }
-        s.explosion_anim = Some(anm.clone());
+        s.explosion_anim = Some(Rc::new(crate::anim::tests::with_labels(
+            (*anm).clone(),
+            &[1, 2, 3, 4],
+        )));
         s.jake_sprite = Some(crate::Sprite {
             layer: crate::Layer::Object,
             player: crate::AnimPlayer::from_frame(&anm, 0),
@@ -810,6 +813,9 @@ mod tests {
         for _ in 0..10 {
             s.tick(0); // o Jake para de deslizar
         }
+        // o soco principal: o primeiro `rand` sai par (`rand & 1` escolhe o par de estados,
+        // `0x0043b4ea`); o outro golpe chega depois e a mina já explodiu no Jake
+        s.rng = crate::rng::Rng::new(2);
         // à frente do corpo: a mina vem ao Jake ~4 px por tique e entra na caixa do golpe
         // (5 px além do corpo) no tique do acerto
         let jb = s.jake.as_ref().unwrap().body.bounds();

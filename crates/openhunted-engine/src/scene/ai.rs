@@ -402,7 +402,10 @@ impl Scene {
             zones: &self.prop_zones,
             layers: self.layers,
         };
+        std::mem::swap(&mut ai.body.rng, &mut self.rng);
+        ai.body.set_clock(self.tick_count);
         ai.body.tick_in(input, &env);
+        std::mem::swap(&mut ai.body.rng, &mut self.rng);
         ai.body.respawn_if_outside((self.width, self.height));
         let b = ai.body.body.bounds();
         let center = (b.x + b.w / 2, b.y + b.h / 2);

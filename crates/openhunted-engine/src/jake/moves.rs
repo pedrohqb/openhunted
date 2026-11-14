@@ -54,6 +54,8 @@ pub const SPECIAL_RADIUS: i32 = 70;
 const HEADROOM_77: i32 = 25;
 /// Sondas de 4 px (corda, barra, engatinhar).
 const PROBE: i32 = 4;
+/// Ajuste vertical da corrida, −1 px/tique (`0x0047892c`) em 1/8 px.
+const RUN_VY: i32 = -SUB;
 /// Controle no ar dos pulos parado e para cima (`0x00408205`): 8 px/tique.
 const AIR_CONTROL: i32 = 8;
 /// Quadro até o qual o pulo parado/para cima pode virar pulo lançado.
@@ -375,7 +377,9 @@ impl Jake {
     pub(super) fn gravity_on(&self) -> bool {
         match self.state {
             State::JumpUp(true) if self.is_garathe() => {
-                self.ticks as usize >= super::garathe::ROPE_JUMP_FRAME
+                // a física do tique vem antes da atualização: a gravidade volta na física
+                // seguinte à que pôs vy = −30
+                self.ticks as usize > super::garathe::ROPE_JUMP_FRAME
             }
             s => gravity(s),
         }
@@ -590,6 +594,11 @@ impl Jake {
                     self.profile().run
                 };
                 self.body.vx = speed * SUB * self.dir();
+                if next == State::Run {
+                    // correr soma −1 px/tique à vertical (Jake `0x004262bf`/`0x0047892c`,
+                    // Garathe `0x47d148`)
+                    self.body.vy = self.body.vy.saturating_add(RUN_VY);
+                }
                 self.set(next);
             }
             return true;
@@ -603,13 +612,30 @@ impl Jake {
                 return false;
             }
             if pressed(DOWN) {
+                // o 85 chama `0x423835` duas vezes: a primeira troca de estado, a segunda já
+                // avança um quadro
                 self.set(State::Crouch);
+                self.entry_advance = true;
             } else {
                 self.set(State::Hide);
             }
             return true;
         }
         false
+    }
+
+    /// A rotina do parado (`0x00426ecc`) chamada com o estado já em 1: a decisão em pé e, sem
+    /// decisão, o avanço do quadro do tique (`0x004238fa` com o estado igual).
+    pub(super) fn idle_routine(
+        &mut self,
+        input: u32,
+        env: &Env,
+        jump_edge: bool,
+        side: Option<bool>,
+    ) {
+        if !self.decide(input, env, jump_edge, side) {
+            self.entry_advance = true;
+        }
     }
 
     /// Decisão em pé ou repouso.
@@ -889,6 +915,12 @@ impl Jake {
                     self.body.vx = 0;
                     self.body.vy = 0;
                     self.set(State::Idle);
+                    if self.state_was(State::StandJump) {
+                        // fim do 27 (`0x004250f2`): estado 1 e, no mesmo tique, a rotina do
+                        // parado (`0x00426ecc`): decisão em pé e `0x004238fa(1)`, que já acha o
+                        // estado 1 e avança o quadro
+                        self.idle_routine(input, env, jump_edge, side);
+                    }
                     return;
                 }
                 if self.is_garathe() {
@@ -969,10 +1001,7 @@ impl Jake {
                     self.set(State::Crawl);
                 } else if self.decide(input, env, jump_edge, side) {
                 } else if self.anim_done() {
-                    self.rng ^= self.rng << 13;
-                    self.rng ^= self.rng >> 17;
-                    self.rng ^= self.rng << 5;
-                    if self.rng & 3 == 0 {
+                    if self.rng.next_u16() & 3 == 0 {
                         self.set(State::Shake);
                     } else {
                         self.set(State::Idle);
@@ -1142,7 +1171,10 @@ impl Jake {
                 if pressed(UP) {
                     self.set(State::StandUp);
                 } else if jump_edge && self.decide(input, env, jump_edge, side) {
-                } else if self.anim_done() {
+                } else if self.anim_done()
+                    || self.frame + 2 >= self.len_of(self.anim_of(self.state).0)
+                {
+                    // dois avanços por tique: o segundo que passa do último quadro já encerra
                     self.set(State::Crawl);
                 } else {
                     self.anim_mode = AnimMode::Double;
@@ -1363,7 +1395,7 @@ impl Jake {
                     self.anim_mode = AnimMode::Hold;
                 } else if !self.bar_at(world, front) && !self.bar_at(world, ahead) {
                     self.fall();
-                } else if !self.label_changed && self.ticks % 2 == 0 {
+                } else if !self.label_changed && self.anim_tick(self.anim_of(self.state).1) {
                     // a cada `atraso + 1` tiques: dois quadros (`0x428a9f` e `0x406c71(9)`)
                     // e o esqueleto com k = 6; no tique do meio, a velocidade fica
                     let n = self.len_of(self.anim_of(self.state).0);
@@ -1551,23 +1583,27 @@ mod tests {
         j.tick(JUMP, &w);
         assert_eq!(j.state(), State::StandJump);
         let mut vys = Vec::new();
-        for _ in 0..17 {
+        for _ in 0..18 {
             j.tick(0, &w);
             vys.push(j.body.y);
         }
-        // tiques 1–8 parados; o 9º pede −18 (+2 de gravidade → sobe 16)
-        assert_eq!(vys[7], y0);
-        assert_eq!(vys[8], y0 - 16);
-        assert_eq!(vys[9], y0 - 32);
-        assert_eq!(vys[10], y0 - 42);
-        assert_eq!(vys[11], y0 - 43);
-        assert!(vys[16] == y0, "volta ao chão: {vys:?}");
-        // controle no ar: 8 px/tique para o lado apertado
+        // tiques 1–9 parados; o 9º pede −18, que anda no 10º (+2 de gravidade → sobe 16):
+        // o arco do oráculo na `T_J_001` (y 69, 53, 37, 27, 26, t 29–33)
+        assert_eq!(vys[8], y0);
+        assert_eq!(vys[9], y0 - 16);
+        assert_eq!(vys[10], y0 - 32);
+        assert_eq!(vys[11], y0 - 42);
+        assert_eq!(vys[12], y0 - 43);
+        assert!(vys[17] == y0, "volta ao chão: {vys:?}");
+        // controle no ar: 8 px/tique para o lado apertado; antes de decolar, no chão, a
+        // metade menos 1/8 px: (32 − 1) >> 3 = 3
         let mut j = jake(&w, 0);
         j.tick(JUMP, &w);
         let x0 = j.body.x;
         j.tick(RIGHT, &w);
-        assert_eq!(j.body.x - x0, 8);
+        assert_eq!((j.body.x - x0, j.body.vx), (0, 64));
+        j.tick(RIGHT, &w);
+        assert_eq!(j.body.x - x0, 3);
         assert_eq!(j.state(), State::StandJump);
         for _ in 0..30 {
             j.tick(0, &w);
@@ -1726,10 +1762,14 @@ mod tests {
         j.tick(RIGHT | JUMP, &w);
         assert_eq!((j.state(), j.body.x), (State::RunUp, x0));
         j.tick(RIGHT, &w);
-        assert_eq!(j.body.x - x0, 16, "2º tique: 16 px (k = 2)");
+        assert_eq!(j.body.vx, 16 * 8, "2º tique: pede 16 px (k = 2)");
         j.tick(RIGHT, &w);
         assert_eq!(j.state(), State::Jump(JumpKind::Extended));
-        assert_eq!(j.body.x - x0, 16 + 17);
+        // os 16 px andam na física do 3º tique, pela metade no chão (vy guardada 0):
+        // (64 − 1) >> 3 = 7 (`physics::step`)
+        assert_eq!(j.body.x - x0, 7);
+        j.tick(RIGHT, &w);
+        assert_eq!(j.body.x - x0, 7 + 17, "o voo começa no tique seguinte");
     }
 
     #[test]
@@ -1744,13 +1784,16 @@ mod tests {
             j.tick(0, &w);
             xs.push((x0 - j.body.x, j.frame()));
         }
+        // a velocidade do esqueleto de cada quadro anda na física do tique seguinte; no chão,
+        // a metade menos 1/8 px (`physics::step`): vx 4, 2, 3, 2 px → 2, 1, 2, 1
         assert_eq!(
             xs[..5],
-            [(0, 0), (4, 1), (6, 3), (9, 5), (11, 7)],
+            [(0, 0), (0, 1), (2, 3), (3, 5), (5, 7)],
             "vx 4, 2, 3, 2"
         );
-        // 5º tique: o segundo `0x423835` passa do último quadro → parado (11 px ao todo)
-        assert_eq!(xs[5].0, 11);
+        // 6º tique: anda o último pedido e o segundo `0x423835` passa do último quadro →
+        // parado (6 px ao todo)
+        assert_eq!(xs[5].0, 6);
         assert_eq!(j.state(), State::Idle);
         let mut j = jake(&w, 0);
         j.set(State::Land(Landing::Medium));
@@ -1758,9 +1801,14 @@ mod tests {
         for _ in 0..2 {
             j.tick(0, &w);
         }
-        assert_eq!(x0 - j.body.x, 5, "35: 5 px no 1º tique");
+        assert_eq!(
+            (x0 - j.body.x, j.body.vx),
+            (0, -40),
+            "35: pede 5 px no 1º tique"
+        );
+        // anda no seguinte, já parado: −40 no chão dá −3 px (oráculo, `T_J_001` t 101–102)
         j.tick(0, &w);
-        assert_eq!((x0 - j.body.x, j.state()), (5, State::Idle), "parado no 2º");
+        assert_eq!((x0 - j.body.x, j.state()), (3, State::Idle), "parado no 2º");
     }
 
     #[test]
@@ -1795,8 +1843,10 @@ mod tests {
         for _ in 0..8 {
             j.tick(RIGHT | STEALTH, &w);
         }
-        // 3·(1+3+5+3+3+3+3+4) = 75 px, contra 108 correndo
-        assert_eq!(j.body.x - x0, 75);
+        // o esqueleto pede 3·(1, 3, 5, 3, 3, 3, 3, 4) px/tique, que andam no tique seguinte
+        // e, no chão, pela metade menos 1/8 px (`physics::step`): 1+4+7+4+4+4+4 = 28 px para
+        // a direita (o oráculo mede 2+5+8+5+5+5+5+6 para a esquerda, `T_J_001`)
+        assert_eq!(j.body.x - x0, 28);
         j.tick(RIGHT, &w);
         assert_eq!(j.state(), State::Run);
     }
@@ -1826,7 +1876,8 @@ mod tests {
             j.tick_in(UP, &env);
         }
         assert_eq!(y0 - j.body.y, 42, "42 px por ciclo (k = 2)");
-        // parado na corda: sem gravidade
+        // parado na corda: sem gravidade (o pedido do último quadro ainda anda um tique)
+        j.tick_in(0, &env);
         let y1 = j.body.y;
         for _ in 0..5 {
             j.tick_in(0, &env);
@@ -1837,7 +1888,8 @@ mod tests {
             j.tick_in(DOWN, &env);
         }
         assert!(j.body.y > y1);
-        // diagonal: vx = ±vy
+        // diagonal: vx = ±vy (um tique parado esgota o pedido da descida)
+        j.tick_in(0, &env);
         let x0 = j.body.x;
         let y2 = j.body.y;
         for _ in 0..4 {
@@ -2020,12 +2072,14 @@ mod tests {
         j.tick(DOWN, &w);
         j.tick(DOWN, &w);
         assert_eq!(j.state(), State::Crawl);
-        // engatinhando: k = 2, 10 px por quadro (Δ 5)
+        // engatinhando: k = 2, 10 px por quadro (Δ 5), pedidos num tique e andados no seguinte
+        // pela metade no chão: (40 − 1) >> 3 = 4 px (o oráculo mede −80 → −5 para a esquerda)
         let x0 = j.body.x;
         j.tick(DOWN | RIGHT, &w);
+        assert_eq!((j.body.x - x0, j.body.vx), (0, 80));
         j.tick(DOWN | RIGHT, &w);
-        assert_eq!(j.body.x - x0, 20);
-        for _ in 0..20 {
+        assert_eq!(j.body.x - x0, 4);
+        for _ in 0..40 {
             j.tick(DOWN | RIGHT, &w);
         }
         assert!(j.body.x > 120, "passou sob o teto: {}", j.body.x);

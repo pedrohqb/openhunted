@@ -333,6 +333,9 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         }
         if !st.turning && on_floor {
             st.vx = side * SPEED * SUB;
+            // `0x4207c3` também refaz vy = −8 a cada tique: como na corrida do Jake, o vetor
+            // inteiro chega ao chão (`physics::step`) e a formiga anda a vx toda
+            st.vy = -SUB;
         }
     }
     let boxr = e.boxes.first().copied().unwrap_or(Rect {

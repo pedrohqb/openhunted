@@ -443,7 +443,10 @@ mod tests {
         let x0 = j.body.x;
         j.tick(RIGHT, &w);
         assert_eq!((j.state(), j.label()), (State::Run, 10));
-        assert_eq!(j.body.x - x0, 15, "15 px/tique (`0x47d144`)");
+        // vx 15 px/tique (`0x47d144`), gravado 120: no chão anda (120 − 1) >> 3 = 14, como o
+        // oráculo mede na `T_M_002`
+        assert_eq!(j.body.vx, 15 * SUB);
+        assert_eq!(j.body.x - x0, 14, "15 px/tique (`0x47d144`)");
         // FURTIVO: andar 3 (rótulo 103), arte espelhada, esqueleto com k = 3
         let mut j = garathe(&w, 0);
         j.tick(LEFT | STEALTH, &w);
@@ -452,10 +455,19 @@ mod tests {
             j.sprite_mirrored(),
             "olhando à esquerda, a arte espelhada vira"
         );
-        let x0 = j.body.x;
         j.tick(LEFT | STEALTH, &w);
         // à esquerda, "para a frente" é x negativo: Δ −5 da raiz (espelhado) × 3
-        assert_eq!((j.body.x - x0).abs(), 15);
+        assert_eq!(j.body.vx.abs(), 15 * SUB);
+        // anda no tique seguinte, pela metade no chão: −120 → −8 px (o furtivo do Jake no
+        // oráculo, `physics::step`)
+        let x0 = j.body.x;
+        j.tick(LEFT | STEALTH, &w);
+        // (o arredondamento da fração depende do sentido: 7 ou 8)
+        assert!(
+            (7..=8).contains(&(j.body.x - x0).abs()),
+            "{}",
+            j.body.x - x0
+        );
     }
 
     #[test]
@@ -505,8 +517,8 @@ mod tests {
         assert_eq!(j.state(), State::Jump(JumpKind::Long));
         assert_eq!(
             j.body.vy,
-            -14 * SUB + 2 * SUB,
-            "lançado a −14 e um tique de gravidade"
+            -14 * SUB,
+            "lançado a −14, gravado antes da gravidade da física seguinte"
         );
     }
 
@@ -555,15 +567,15 @@ mod tests {
         assert_eq!((j.state(), j.label()), (State::StandJump, 21));
         j.tick(0, &w);
         j.tick(0, &w);
-        // quadro 2: Δy = 4 para cima × 3
-        assert_eq!(j.body.vy, -12 * SUB + 2 * SUB);
+        // quadro 2: Δy = 4 para cima × 3 (gravado antes da gravidade)
+        assert_eq!(j.body.vy, -12 * SUB);
         let mut j = garathe(&w, 0);
         j.tick(JUMP | UP, &w);
         assert_eq!((j.state(), j.label()), (State::JumpUp(false), 20));
         j.tick(UP, &w);
         j.tick(UP, &w);
         // quadro 2: Δy = 6 × 2
-        assert_eq!(j.body.vy, -12 * SUB + 2 * SUB);
+        assert_eq!(j.body.vy, -12 * SUB);
     }
 
     #[test]
@@ -587,8 +599,10 @@ mod tests {
         assert_eq!((j.state(), j.label()), (State::Crawl, 36));
         let x0 = j.body.x;
         j.tick(DOWN | LEFT, &w);
+        assert_eq!(j.body.vx, -2 * 5 * SUB, "Δ 2 × k 5 por tique");
+        // anda no tique seguinte, pela metade no chão: −80 → −5 px (o Jake no oráculo)
         j.tick(DOWN | LEFT, &w);
-        assert_eq!(x0 - j.body.x, 2 * 5 + 2 * 5, "Δ 2 × k 5 por tique");
+        assert_eq!(x0 - j.body.x, 5);
         // teto a 21 px da caixa de rastejar: cabe a folga de 20, levanta
         assert_eq!(Character::Garathe.profile().headroom, 20);
         j.tick(0, &w);
@@ -690,7 +704,6 @@ mod tests {
                 "{s:?} + {input:#x}: {:?}",
                 j.state()
             );
-            assert!(j.body.y > y0 || j.body.vy > 0, "{s:?}: soltou (gravidade)");
             let mut hit = false;
             for _ in 0..3 {
                 j.tick(input & (SHOOT | PUNCH), &w);
@@ -700,6 +713,8 @@ mod tests {
                     "{s:?}: ataca caindo"
                 );
             }
+            // a gravidade volta na física do tique seguinte ao que soltou
+            assert!(j.body.y > y0, "{s:?}: soltou (gravidade)");
             assert!(hit, "{s:?}: golpe das garras no ar");
             j.tick(0, &w);
             assert_eq!(j.state(), State::Fall, "{s:?}: sem ataque, a queda (27)");
@@ -1107,6 +1122,8 @@ mod tests {
         let w = floor_world();
         let mut j = real_jumper(&w, 0, -400);
         j.set(State::JumpUp(true));
+        // o primeiro tique ainda anda com a velocidade de antes (a física vem antes)
+        j.tick(UP, &w);
         let y0 = j.body.y;
         let mut top = y0;
         let mut seen = vec![];

@@ -69,8 +69,10 @@ fn tutorial_render_matches_reference() {
 }
 
 /// Atualizado na M4a: a saída mostra o rótulo 8 (`osw08`, o portão "EXIT"); na M12, as três
-/// minas flutuantes saem pela tabela de cor 40 (verdes), conferidas visualmente.
-const REFERENCE: u64 = 0xfd21_fcb0_8501_b294;
+/// minas flutuantes saem pela tabela de cor 40 (verdes), conferidas visualmente; na
+/// auditoria do núcleo (M17), minas e itens no quadro sorteado na carga pelo `rand` do original
+/// (`rng.rs`), conferido visualmente.
+const REFERENCE: u64 = 0xc04d_e293_7538_dc34;
 
 /// Camadas (M16): a camada da vista sai opaca; o índice 0 dela só é preenchido pelas de trás
 /// dentro dos buracos das células (pixel a pixel em `real_layers.rs`). Aqui: nas fases de
@@ -824,7 +826,13 @@ fn walk_to_zone(s: &mut Scene, kind: u16) {
             layers: s.layers,
         };
         let j = s.jake.as_ref().unwrap();
-        if j.zones_under(&env) & kind != 0 {
+        // onde o corpo vai estar: a velocidade pedida ainda anda na física do próximo tique
+        let next = j.body.bounds().moved(j.body.vx >> 3, 0);
+        let ahead = s
+            .prop_zones
+            .iter()
+            .any(|z| z.layer == j.layer() && z.kind & kind != 0 && z.rect.overlaps(&next));
+        if j.zones_under(&env) & kind != 0 && ahead {
             run(s, 1, 0);
             return;
         }
@@ -874,7 +882,9 @@ fn t_j_007_layer_doors() {
     assert!(s.jake.as_ref().unwrap().body.on_ground);
     assert!(feet(&s) <= 372, "não subiu: pés em {}", feet(&s));
     walk_to_zone(&mut s, zone::LAYER_DOWN);
-    assert!((440..=470).contains(&s.jake.as_ref().unwrap().body.x));
+    let x = s.jake.as_ref().unwrap().body.x;
+    // (era 440..=470: parando pela posição prevista, o Jake chega à zona por 432)
+    assert!((425..=470).contains(&x), "x {x}");
     let solids0 = s.cell_world().solids().len();
     run(&mut s, 1, DOWN);
     assert!(matches!(

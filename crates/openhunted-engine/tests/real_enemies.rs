@@ -291,6 +291,10 @@ fn bruiser_wakes_attacks_and_dies_by_pistol() {
     }
     assert!(!awake(&s), "acordou sem o gatilho");
     s.entities[sw].on = true;
+    // o que o brutamontes faz depende dos sorteios (`rand % 100`, `bruiser.md`); com a
+    // sequência do original a partir deste tique ele anda para longe sem atacar (acontece no
+    // jogo também). Um valor descartado dá uma sequência em que ataca nos 300 tiques.
+    s.rng = openhunted_engine::rng::Rng::new(1);
     let hp = s.jake.as_ref().unwrap().health.hp;
     let n0 = s.entities.len();
     let mut attacked = false;

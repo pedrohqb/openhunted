@@ -168,6 +168,21 @@ pub(crate) mod tests {
     use super::*;
     use openhunted_formats::{AnimFrame, AnimLabel, Animation, Instruction};
 
+    /// A animação de teste com os rótulos `ids` a mais, todos no quadro 0 (ex.: os rótulos
+    /// 1–4 do `OEX.ANM` que a explosão sorteia).
+    pub(crate) fn with_labels(mut a: Animation, ids: &[u16]) -> Animation {
+        for &id in ids {
+            if !a.labels.iter().any(|l| l.id == id) {
+                a.labels.push(AnimLabel {
+                    frame: 0,
+                    id,
+                    name: None,
+                });
+            }
+        }
+        a
+    }
+
     #[test]
     fn tick_once_stops_at_end() {
         let anim = Animation {

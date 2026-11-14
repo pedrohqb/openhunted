@@ -130,6 +130,44 @@ pub const WHIP_SHOT: u32 = 108;
 pub const PISTON: u32 = 39;
 pub const SWITCH: u32 = 74;
 
+/// Sorteios (`rand`, `0x00460a74`) que a inicialização do tipo faz na carga da fase
+/// (tabela tipo → rotina `0x0047d47c`). A inicialização genérica `0x0040b2c8` sorteia o quadro
+/// inicial (`+0x184 = rand % n`) e quase todas as outras a chamam primeiro; as chaves
+/// (`0x0040f214`) sorteiam do mesmo jeito; a Morte soma o temporizador (`0x00416753`), a Manta
+/// 3 e o Anticorpo 4 sorteios próprios (`0x0042127c`, `0x004110b8`). Sem sorteio: tipo 0,
+/// Jake (1), Garathe (2), grafite (6), paredes `OH` (50–52) e os tipos fora da tabela.
+pub fn init_draws(kind: u32) -> u32 {
+    match kind {
+        3 => 2,
+        89 => 4,
+        105 => 5,
+        4
+        | 5
+        | 7..=18
+        | 25..=30
+        | 32..=35
+        | 37
+        | 39..=42
+        | 44..=46
+        | 56
+        | 62..=74
+        | 76..=85
+        | 87
+        | 88
+        | 102..=104
+        | 107
+        | 109 => 1,
+        _ => 0,
+    }
+}
+
+/// Tipos que ficam no quadro sorteado na carga (a inicialização não troca o rótulo depois do
+/// sorteio genérico): os itens genéricos (`0x0040b2c8`), as chaves (`0x0040f214`) e a mina
+/// flutuante (`0x0041e6bc`).
+pub fn keeps_random_frame(kind: u32) -> bool {
+    PICKUPS.contains(&kind) || matches!(kind, 62..=67 | MINE)
+}
+
 /// Estado por tipo.
 #[derive(Debug, Clone)]
 pub enum Behaviour {

@@ -264,6 +264,8 @@ mod tests {
         let x0 = e.x;
         tick(&mut e, &mut c, &mut Out::default());
         assert!(e.alive && e.health == 0 && !enemy::killed(&e));
+        // o empurrão anda na física do tique seguinte
+        tick(&mut e, &mut c, &mut Out::default());
         assert!(e.x < x0 - 4, "empurrada para longe do Jake (à direita)");
         let mut xs = vec![];
         for _ in 0..80 {
