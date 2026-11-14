@@ -73,6 +73,8 @@ pub struct Profile {
     /// BRDs de rastejar e da barra.
     pub crawl_brd: &'static str,
     pub bar_brd: &'static str,
+    /// BRD do personagem caído (só o Garathe tem: `MN_COLPS`).
+    pub collapse_brd: Option<&'static str>,
 }
 
 pub const JAKE: Profile = Profile {
@@ -107,6 +109,7 @@ pub const JAKE: Profile = Profile {
     ske_id: 1,
     crawl_brd: "JK_CRAWL.BRD",
     bar_brd: "JK_BARUP.BRD",
+    collapse_brd: None,
 };
 
 pub const GARATHE: Profile = Profile {
@@ -142,6 +145,7 @@ pub const GARATHE: Profile = Profile {
     ske_id: 2,
     crawl_brd: "MN_CRAWL.BRD",
     bar_brd: "MN_BARUP.BRD",
+    collapse_brd: Some("MN_COLPS.BRD"),
 };
 
 impl Character {

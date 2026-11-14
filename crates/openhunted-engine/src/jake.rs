@@ -10,7 +10,9 @@ pub mod weapons;
 
 use std::collections::HashMap;
 
-pub use moves::{BAR_BOX, CRAWL_BOX, Env, Skel, SpecialBlast, SpecialEffect, Zone, zone};
+pub use moves::{
+    BAR_BOX, CRAWL_BOX, Env, PlayerHit, Skel, SpecialBlast, SpecialEffect, Zone, zone,
+};
 
 pub use crate::character::Character;
 use crate::character::Profile;
@@ -133,6 +135,9 @@ pub enum State {
     /// Pose de provocação com a entrada exatamente 0xf (Jake: estado 4, rótulo 18,
     /// `0x426f05`; Garathe: 76, `0x42bcbc`); no fim do rótulo, parado.
     Taunt,
+    /// Só o Garathe: cambaleando no terremoto (121 `MNQUAKE` do quadro 0, `0x42bd73`)
+    /// enquanto dura o contador `+0x274` (`0x42bcf8`).
+    Quake,
 }
 
 /// Entrada da pose: as quatro direções e nada mais (`0x423940`, passo 1).
@@ -406,6 +411,8 @@ fn jake_anim(s: State) -> (u16, u32) {
         State::Rise => (78, 0),
         State::Jolted => (168, 0),
         State::Taunt => (18, 0),
+        // o Jake não entra aqui (o terremoto dele é o da cena)
+        State::Quake => (15, 0),
     }
 }
 
@@ -481,6 +488,8 @@ pub struct Jake {
     box_default: Rect,
     box_crawl: Rect,
     box_bar: Rect,
+    /// Garathe caído (`MN_COLPS`: 29–33, 35, 59 e as mortes); no Jake, a padrão.
+    box_collapse: Rect,
     /// Gerador para o sorteio do 79 (`rand & 3`).
     rng: u32,
     /// Especial disparado neste tique (a cena aplica nos objetos).
@@ -512,6 +521,8 @@ pub struct Jake {
     pub sound: Option<u16>,
     /// Cor-base (`+0x280`): 0 no solo e no coop (35/36); na disputa, a da `SEGOC`.
     colour: i32,
+    /// Garathe: tiques de terremoto (`+0x274`, `0x42bcf8`); o do Jake fica na cena.
+    quake: u32,
 }
 
 impl Jake {
@@ -543,6 +554,7 @@ impl Jake {
             box_default: boxr,
             box_crawl: moves::CRAWL_BOX,
             box_bar: moves::BAR_BOX,
+            box_collapse: boxr,
             rng: 0x4a41_4b45,
             special: None,
             punch: None,
@@ -557,6 +569,7 @@ impl Jake {
             character: Character::Jake,
             sound: None,
             colour: 0,
+            quake: 0,
         }
     }
 
@@ -667,6 +680,12 @@ impl Jake {
         self
     }
 
+    /// Caixa do Garathe caído (`MN_COLPS.BRD`).
+    pub fn with_collapse_box(mut self, r: Rect) -> Self {
+        self.box_collapse = r;
+        self
+    }
+
     /// Camada inicial.
     pub fn with_layer(mut self, layer: i32) -> Self {
         self.layer = layer;
@@ -716,7 +735,7 @@ impl Jake {
         if self.weapon(w).shot.is_some() && !self.inventory.available(w) {
             self.no_ammo = true;
             self.inventory.weapon = self.inventory.best();
-            self.body.vx = 0;
+            self.stop_for_fire();
             let nw = self.inventory.weapon as u8;
             self.set(State::Ready(0, nw));
             return true;
@@ -729,7 +748,7 @@ impl Jake {
                 w = melee;
             }
         }
-        self.body.vx = 0;
+        self.stop_for_fire();
         self.rng = self.rng.wrapping_mul(1_103_515_245).wrapping_add(12345);
         let alt = w == FISTS && (self.rng >> 16) & 1 != 0;
         self.state = State::Fire {
@@ -742,6 +761,14 @@ impl Jake {
         self.frame = 0;
         self.label_changed = true;
         true
+    }
+
+    /// O ataque para o Jake; o Garathe no ar segue com a horizontal (o `0x43b43e` e o
+    /// `0x43b50b` não gravam `+0x164`; no chão a decisão já zerou com `0x407009`).
+    fn stop_for_fire(&mut self) {
+        if !(self.is_garathe() && !self.body.on_ground) {
+            self.body.vx = 0;
+        }
     }
 
     /// Arma do SOCO e da boca na parede: os punhos/garras ou, no Garathe com o par 2, a
@@ -999,10 +1026,13 @@ impl Jake {
 
     /// O cadáver não avança a animação.
     fn controllable(&self) -> bool {
+        // o 58 do Garathe decide em pé a cada tique (`0x42b93e`)
+        if self.state == State::Pushed {
+            return self.is_garathe();
+        }
         !matches!(
             self.state,
-            State::Pushed
-                | State::Jolted
+            State::Jolted
                 | State::KnockedDown(_)
                 | State::Shocked(_)
                 | State::Dying(_)
@@ -1044,7 +1074,10 @@ impl Jake {
             self.body.vy = p.push.1 * SUB;
             self.set(State::KnockedDown(right));
         } else if p.shove && shovable {
-            self.body.vx = p.push.0 * SUB;
+            // o Garathe não é deslocado (`0x428531` não grava velocidade)
+            if !g {
+                self.body.vx = p.push.0 * SUB;
+            }
             self.set(State::Pushed);
         } else if g && p.jolt && moves::joltable(self.state) {
             // tranco (`0x42859e`): 59, ou queda na corda
@@ -1063,6 +1096,10 @@ impl Jake {
             }
         }
         if apply(&mut self.health, &p, tick) == 0 {
+            if g && garathe::death_waits(self.state) {
+                // `0x428863`: nada agora; a vida a 0 é vista a cada tique
+                return false;
+            }
             self.death_label = match self.state {
                 State::KnockedDown(right) if g => {
                     if garathe::knocked_label(right, self.facing_right) == 32 {
@@ -1073,6 +1110,7 @@ impl Jake {
                 }
                 State::Land(Landing::Hard) if g => garathe::DIE_FORWARD,
                 State::Rise if g => garathe::DIE_BACK,
+                State::Land(Landing::Fall) if g => garathe::DIE_DEFAULT,
                 _ if g && p.poison => garathe::DIE_POISON,
                 _ if g => garathe::DIE_DEFAULT,
                 State::KnockedDown(true) => DIE_KNOCKED_RIGHT,
@@ -1323,6 +1361,9 @@ impl Jake {
             });
         }
         self.take_damage(self.ticks);
+        if self.is_garathe() {
+            self.garathe_late_death();
+        }
         // piscar: envenenado (`0x42328e`), e o passo do fim da atualização (`0x408129`)
         // adiantado para cá (o do especial, posto depois, conta a partir do próximo tique)
         if self.poison > 0 {
@@ -1338,7 +1379,11 @@ impl Jake {
         let pressed = |bit: u32| input & bit != 0;
         let jump_edge = pressed(JUMP) && self.prev_input & JUMP == 0;
         let side = self.wanted_side(input);
-        let airborne = matches!(self.state, State::Jump(_) | State::Fall | State::WildFall);
+        // Garathe: terremoto (`0x42bcf8`), antes da rotina do estado
+        let quaking = self.is_garathe() && self.tick_quake();
+        // o Garathe vira com a entrada em todo tique (`0x427c9c`); o Jake não no ar
+        let airborne = !self.is_garathe()
+            && matches!(self.state, State::Jump(_) | State::Fall | State::WildFall);
         if let (false, Some(right)) = (airborne, side) {
             self.facing_right = right;
         }
@@ -1362,15 +1407,22 @@ impl Jake {
                 | State::Hidden
                 | State::Unhide
                 | State::Taunt
-        ) || (self.state == State::Crawl
-            && self.free_above(world, self.profile().headroom));
-        let fired = !matches!(self.state, State::Fire { .. })
+        ) || (self.is_garathe() && self.state == State::Pushed)
+            || (self.state == State::Crawl && self.free_above(world, self.profile().headroom));
+        let fired = !quaking
+            && !matches!(self.state, State::Fire { .. })
             && can_fire
             && shooting
             && self.start_fire(input, world);
         // Garathe: a animação do pulo 22/25 acabou neste tique
         let mut jump_over = false;
         match self.state {
+            _ if quaking => {
+                // 121 toca uma vez; no fim, a rotina do parado, e o próximo tique recomeça
+                if self.anim_done() {
+                    self.decide_or_idle(input, env, jump_edge, side);
+                }
+            }
             _ if fired => {}
             State::Fire { aim, t, w, alt } => self.tick_fire(input, world, (aim, t, w, alt)),
             State::Recover(_) | State::Ready(..) | State::Holster(_) => {
@@ -1435,8 +1487,10 @@ impl Jake {
                 }
             }
             State::Fall if self.is_garathe() => {
-                // 27 (`0x4293c2`): zona 4 agarra; senão controle no ar (`0x408205`)
-                if !self.try_grab_in_air(input, env) {
+                // 27 (`0x4293c2`): ataque (`0x4293ef`); zona 4 agarra; senão controle no ar
+                // (`0x408205`)
+                if self.air_attack(input, world, false) {
+                } else if !self.try_grab_in_air(input, env) {
                     self.air_control(world, side);
                 }
             }
@@ -1593,7 +1647,8 @@ impl Jake {
             State::Shocked(n) => {
                 self.body.vx = 0;
                 step(&mut self.body, world, true);
-                if n <= 1 {
+                if self.garathe_passive_fall() {
+                } else if n <= 1 {
                     self.set(State::Idle);
                 } else {
                     self.state = State::Shocked(n - 1);
@@ -1614,6 +1669,7 @@ impl Jake {
                     });
                     self.apply_ske();
                     step(&mut self.body, world, true);
+                    self.garathe_passive_fall();
                     self.fit_box(world);
                     self.finish_tick();
                     return;
@@ -1653,6 +1709,37 @@ impl Jake {
                     self.set(next);
                 }
             }
+            State::Dying(label)
+                if self.is_garathe()
+                    && matches!(label, garathe::DIE_POISON | garathe::DIE_DEFAULT)
+                    && !self.anim_done() =>
+            {
+                // 61 e 63 deslizam pelo esqueleto (k = 2, só x: `0x42bc84`, `0x42bb62`)
+                self.animate();
+                self.ske_req = Some(SkeReq {
+                    k: 2,
+                    x: true,
+                    y: false,
+                    diag: 0,
+                });
+                self.apply_ske();
+                step(&mut self.body, world, true);
+                self.fit_box(world);
+                self.finish_tick();
+                return;
+            }
+            State::Dying(_) if self.is_garathe() => {
+                // o fim (`0x42b604`) pede `vx = 0`, `0 ≤ vy ≤ 16` e chão; até lá o último
+                // quadro fica e o atrito freia
+                let done = self.anim_done();
+                if done {
+                    self.anim_mode = AnimMode::Hold;
+                }
+                step(&mut self.body, world, true);
+                if self.body.on_ground && done && self.body.vx == 0 {
+                    self.set(State::Dead);
+                }
+            }
             State::Dying(_) => {
                 step(&mut self.body, world, true);
                 if self.body.on_ground {
@@ -1667,6 +1754,67 @@ impl Jake {
         self.fit_box(world);
         self.animate();
         self.finish_tick();
+    }
+
+    /// Morte adiada do Garathe (`0x428863`): com a vida a 0 fora dos estados que esperam,
+    /// a regra pelo estado: 30 → 67, 35 → 69, os demais → 63 (o veneno e as marcas da
+    /// derrubada já foram zerados no fim do tique do dano).
+    fn garathe_late_death(&mut self) {
+        if !self.health.is_dead()
+            || matches!(self.state, State::Dying(_) | State::Dead)
+            || garathe::death_waits(self.state)
+        {
+            return;
+        }
+        self.death_label = match self.state {
+            State::Land(Landing::Hard) => garathe::DIE_FORWARD,
+            State::Rise => garathe::DIE_BACK,
+            _ => garathe::DIE_DEFAULT,
+        };
+        self.set(State::Dying(self.death_label));
+    }
+
+    /// Garathe sem controle (59, 121 do choque) no ar a 5 px/tique: a queda (`0x4292d8`).
+    fn garathe_passive_fall(&mut self) -> bool {
+        let fall = self.is_garathe() && !self.body.on_ground && self.body.vy >= FALL_SPEED;
+        if fall {
+            self.set(State::Fall);
+        }
+        fall
+    }
+
+    /// Terremoto no Garathe (`+0x274`): o abalo do brutamontes (`0x418369`, 20–39 tiques) e
+    /// o especial de outro Garathe a 70–139 px (30).
+    pub fn start_quake(&mut self, ticks: u32) {
+        self.quake = ticks;
+    }
+
+    /// Tiques de terremoto que restam ao Garathe.
+    pub fn quake_ticks(&self) -> u32 {
+        self.quake
+    }
+
+    /// `0x42bcf8`: com `+0x274 > 0`, desconta um tique; com gravidade e fora dos estados
+    /// isentos, a rotina do 121 (`0x42bd73`) toma o tique: entra no 121 (velocidade
+    /// intacta) ou segue nele; zerado o contador, a rotina do parado. `true` = tomou o tique.
+    fn tick_quake(&mut self) -> bool {
+        if self.quake == 0 {
+            return false;
+        }
+        self.quake -= 1;
+        if !self.gravity_on() || moves::quake_exempt(self.state) {
+            return false;
+        }
+        if self.quake == 0 {
+            if self.state == State::Quake {
+                self.set(State::Idle);
+            }
+            return false;
+        }
+        if self.state != State::Quake {
+            self.set(State::Quake);
+        }
+        true
     }
 
     /// Rótulo em que o cadáver ficou.

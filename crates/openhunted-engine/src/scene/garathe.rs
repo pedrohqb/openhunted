@@ -79,3 +79,29 @@ impl Scene {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::jake::Jake;
+    use crate::physics::Rect;
+
+    /// O abalo do brutamontes no Garathe (`0x418369`: `+0x274 = 20 + rand % 20`) vai ao
+    /// contador dele (`0x42bcf8`, o 121), não ao terremoto do Jake na cena (choque no chão).
+    #[test]
+    fn bruiser_quake_reaches_the_garathe_counter() {
+        let mut s = Scene::empty(640, 480);
+        let boxr = Rect {
+            x: 10,
+            y: 5,
+            w: 20,
+            h: 51,
+        };
+        let j = Jake::new(100, 100, boxr, Default::default()).with_character(Character::Garathe);
+        s.jake = Some(j);
+        s.apply_quake(Some(25));
+        let j = s.jake.as_ref().unwrap();
+        assert_eq!((j.quake_ticks(), s.quake, j.pending_damage()), (25, 0, 0));
+        assert!(!matches!(j.state(), State::Shocked(_)));
+    }
+}

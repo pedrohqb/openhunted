@@ -1431,10 +1431,13 @@ impl Scene {
             for i in reached {
                 self.set_credit(i, c);
             }
+            if b.garathe {
+                self.garathe_special_on_others(b);
+            }
             self.hurt_others(|j| {
                 let r = j.body.bounds();
                 let at = (r.x + r.w / 2, r.y + r.h / 2);
-                (j.layer() == b.layer && b.reaches(at)).then(|| {
+                (!b.garathe && j.layer() == b.layer && b.reaches(at)).then(|| {
                     let dir = if r.x >= b.center.0 { 1 } else { -1 };
                     crate::damage::Pending {
                         knockdown: true,
@@ -1447,6 +1450,16 @@ impl Scene {
         for e in self.entities.iter_mut().filter(|e| {
             e.alive && e.layer == b.layer && e.flags & 0x80003 == 0x80001 && e.present()
         }) {
+            if let (true, Behaviour::AiPlayer(a)) = (b.garathe, &mut e.behaviour) {
+                // especial do Garathe num personagem da IA (`0x42c4f0`): até 140 px
+                let r = a.body.body.bounds();
+                match b.player_hit((r.x + r.w / 2, r.y + r.h / 2)) {
+                    Some(crate::jake::PlayerHit::Knock(p)) => a.body.hurt(p),
+                    Some(crate::jake::PlayerHit::Quake(t)) => a.body.start_quake(t),
+                    None => {}
+                }
+                continue;
+            }
             if !b.reaches(e.center()) {
                 continue;
             }
@@ -1472,6 +1485,40 @@ impl Scene {
                         behaviour::enemy::hurt(e, &dmg, true) || behaviour::interact::hurt(e, &dmg);
                 }
             }
+        }
+    }
+
+    /// Especial do Garathe nos outros jogadores (`0x42c4f0`): derrubada com dano a menos de
+    /// 70 px; de 70 a 139 px, `+0x274 = 30` (no Garathe, o 121; no Jake, o terremoto da
+    /// cena dele).
+    fn garathe_special_on_others(&mut self, b: SpecialBlast) {
+        let c = self.active_number();
+        let mut hit = Vec::new();
+        for s in self.parked.iter_mut() {
+            let Some(j) = s
+                .jake
+                .as_mut()
+                .filter(|j| j.is_active() && j.layer() == b.layer)
+            else {
+                continue;
+            };
+            let r = j.body.bounds();
+            match b.player_hit((r.x + r.w / 2, r.y + r.h / 2)) {
+                Some(crate::jake::PlayerHit::Knock(p)) => {
+                    j.hurt(p);
+                    hit.push(s.player);
+                }
+                Some(crate::jake::PlayerHit::Quake(t))
+                    if j.character() == crate::character::Character::Garathe =>
+                {
+                    j.start_quake(t)
+                }
+                Some(crate::jake::PlayerHit::Quake(t)) => s.quake = s.quake.max(t),
+                None => {}
+            }
+        }
+        for i in hit {
+            self.credit_player(i, c);
         }
     }
 
@@ -1833,7 +1880,19 @@ impl Scene {
 
     /// Terremoto do Bruiser: enquanto durar, o Jake no chão cambaleia (choque sem dano,
     /// estado 15).
-    fn apply_quake(&mut self, quake: Option<u32>) {
+    pub(super) fn apply_quake(&mut self, quake: Option<u32>) {
+        // o Garathe tem o próprio contador e o 121 (`0x42bcf8`); o abalo atribui
+        // `+0x274 = 20 + rand % 20` (`0x418369`)
+        if let Some(j) = self
+            .jake
+            .as_mut()
+            .filter(|j| j.character() == crate::character::Character::Garathe)
+        {
+            if let Some(q) = quake {
+                j.start_quake(q);
+            }
+            return;
+        }
         if let Some(q) = quake {
             self.quake = self.quake.max(q);
         }
