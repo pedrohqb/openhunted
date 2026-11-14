@@ -239,8 +239,10 @@ impl Scene {
     }
 
     /// Alvo de um personagem da IA com dois jogadores (`0x42c5cc`): o escolhido fica enquanto
-    /// vive; senão o mais perto dos dois primeiros vivos que está na mesma célula ou que a
-    /// busca alcança, senão o outro, senão o mais perto (o cérebro o recusa).
+    /// vive; senão, dos dois primeiros vivos, o mais perto (do centro da caixa da IA à origem
+    /// do candidato; empate → o segundo) se está na mesma célula ou a busca o alcança, senão o
+    /// outro nas mesmas condições, senão nenhum. Ruling: a ordem dos dois é a dos assentos
+    /// (o original usa a da lista de objetos).
     fn pick_target(&self, ai: &mut AiPlayer, humans: &[(usize, View)]) -> Option<View> {
         if ai.brain.target {
             if let Some(h) = humans.iter().find(|h| h.0 == ai.brain.target_of) {
@@ -251,21 +253,24 @@ impl Scene {
         let me = View::of(&ai.body);
         let c = me.center();
         let here = self.ai_grid.cell_of(c, me.layer);
-        let mut by_dist: Vec<&(usize, View)> = humans.iter().collect();
-        by_dist.sort_by_key(|h| {
-            let t = h.1.center();
+        let dist = |h: &(usize, View)| {
+            let t = self
+                .player_jake(h.0)
+                .map_or(h.1.center(), |j| (j.body.x, j.body.y));
             let (dx, dy) = (i64::from(t.0 - c.0), i64::from(t.1 - c.1));
-            (dx * dx + dy * dy, h.0)
-        });
+            dx * dx + dy * dy
+        };
+        let mut by_dist: Vec<&(usize, View)> = humans.iter().collect();
+        if let [a, b] = by_dist[..] {
+            if dist(b) <= dist(a) {
+                by_dist.swap(0, 1);
+            }
+        }
         let reach = |v: &View| {
             let goal = self.ai_grid.cell_of(v.center(), v.layer);
             goal == here || self.ai_grid.search(here, goal, c.0).is_some()
         };
-        let Some(pick) = by_dist
-            .iter()
-            .find(|h| reach(&h.1))
-            .or_else(|| by_dist.first())
-        else {
+        let Some(pick) = by_dist.iter().find(|h| reach(&h.1)) else {
             ai.brain.target = false;
             return None;
         };

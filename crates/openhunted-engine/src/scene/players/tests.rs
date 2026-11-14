@@ -351,12 +351,16 @@ fn frag(s: &mut Scene, shooter: usize, victim: usize) {
 #[test]
 fn frags_and_suicides() {
     let mut s = duo(duel([J, J]), (100, PISTOL), (400, PISTOL));
+    // uma saída desligada segura o veredito (sem saída, objetivos cumpridos dão "1")
+    exit_at(&mut s, 1500);
     frag(&mut s, 0, 1);
     assert_eq!((s.players[0].stats.frags, s.players[1].stats.frags), (1, 0));
     frag(&mut s, 1, 0);
     assert_eq!(s.players[1].stats.frags, 1);
     // autoeliminação: o 1 com o foguete na parede a 20 px; F do 1 = 1 → S = 1
     let suicide = |s: &mut Scene| {
+        // as balas que sobraram do duelo (o 1 renasceu onde morreu, na linha delas) somem
+        run(s, [0, 0], 40);
         s.place_player(0, (1170, FLOOR - 47), 0);
         let j = s.player_jake_mut(0).unwrap();
         j.health = crate::damage::Health { hp: 1, armor: 0 };
@@ -423,8 +427,11 @@ fn deathmatch_respawn_wipes_inventory_and_keeps_armor() {
     assert_eq!(j.health, crate::damage::Health { hp: 100, armor: 33 });
     assert_eq!(j.inventory.weapon, FISTS);
     assert_eq!(j.inventory.ammo(ROCKETS), 0);
-    let b = j.body.bounds();
-    assert_eq!((b.x + b.w / 2, b.y), (700, 40), "centro x e topo no ponto");
+    assert_eq!(
+        (j.body.x, j.body.y),
+        (700, 40),
+        "a origem no ponto (`0x43d300`)"
+    );
     let corpses: Vec<&Entity> = s
         .entities
         .iter()
@@ -946,4 +953,82 @@ fn only_projectiles_inherit_the_spawner_credit() {
         .expect("o par");
     assert_eq!(s.credit_of(p), 0);
     assert!(s.human_shots.iter().all(|(i, _)| *i != p));
+}
+
+/// Sem pontos de renascimento, renasce onde morreu, 20 px acima (`0x426a84`; `0x43d2b5` só
+/// troca a posição com pontos); o terremoto (`+0x274`) zera, a confusão (`+0x264`) fica.
+#[test]
+fn respawn_in_place_without_spawn_points() {
+    let mut s = duo(duel([J, J]), (100, PISTOL), (400, FISTS));
+    assert!(s.spawn_points.is_empty());
+    s.player_jake_mut(1).unwrap().health = crate::damage::Health { hp: 1, armor: 0 };
+    s.place_player(0, (340, FLOOR - 47), 0);
+    for _ in 0..30 {
+        s.tick_players([SHOOT, 0]);
+        if s.player_jake(1).unwrap().is_dead() {
+            break;
+        }
+    }
+    s.with_seat(1, |s| {
+        s.quake = 7;
+        s.confusion = 50;
+    });
+    let mut at = None;
+    for _ in 0..60 {
+        let j = s.player_jake(1).unwrap();
+        let before = (j.body.x, j.body.y);
+        s.tick_players([0, 0]);
+        if !s.player_jake(1).unwrap().is_dead() {
+            at = Some(before);
+            break;
+        }
+    }
+    let (x, y) = at.expect("renasceu");
+    let j = s.player_jake(1).unwrap();
+    assert_eq!((j.body.x, j.body.y - y), (x, -20));
+    let (q, c) = s.with_seat(1, |s| (s.quake, s.confusion));
+    assert_eq!(q, 0);
+    assert!(c > 0, "confusão fica: {c}");
+}
+
+/// O sorteio do ponto (`0x43d2de`): `r / (0x10000 / n)` com o `rand` de 16 bits.
+#[test]
+fn spawn_point_draw_divides_the_range() {
+    let mut s = duo(duel([J, J]), (100, FISTS), (400, FISTS));
+    s.spawn_points = vec![(10, 0, 0), (20, 0, 0), (30, 0, 0)];
+    let mut r = s.rng.clone();
+    for _ in 0..50 {
+        let want = (r.next_u16() / (0x10000 / 3)).min(2) as usize;
+        assert_eq!(s.spawn_point(), Some(s.spawn_points[want]));
+    }
+}
+
+/// Sorteio das vagas (`0x43ccdc`): `(r · n) >> 16` com o `rand` de 16 bits na disputa; no
+/// coop `n` vira 1, mas o `rand` é tirado do mesmo jeito.
+#[test]
+fn slot_draws_follow_0x43cbb0() {
+    let objs = [
+        obj(1, 0xd),
+        obj(1, 0xd),
+        obj(1, 0xd),
+        obj(2, 0x41),
+        obj(2, 0x41),
+    ];
+    let refs: Vec<&LevelObject> = objs.iter().collect();
+    for seed in 0..20 {
+        let mut want = Rng::new(seed);
+        // candidatos de trás para a frente: [2, 1, 0], depois [2, 1] menos o tomado
+        let mut c: Vec<usize> = vec![2, 1, 0];
+        let a = c.remove(((want.next_u16() * 3) >> 16) as usize);
+        let b = c[((want.next_u16() * 2) >> 16) as usize];
+        let mut rng = Rng::new(seed);
+        assert_eq!(assign_slots(&refs, &duel([J, J]), &mut rng), Ok(vec![a, b]));
+        assert_eq!(rng.next_u16(), want.next_u16(), "dois sorteios");
+        let mut rng = Rng::new(seed);
+        assert_eq!(assign_slots(&refs, &Mode::Coop, &mut rng), Ok(vec![4, 3]));
+        let mut want = Rng::new(seed);
+        want.next_u16();
+        want.next_u16();
+        assert_eq!(rng.next_u16(), want.next_u16(), "o coop também sorteia");
+    }
 }

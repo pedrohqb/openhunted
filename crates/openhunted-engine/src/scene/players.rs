@@ -169,8 +169,9 @@ pub(super) struct Regen {
 
 /// Vagas dos jogadores (`0x43cbb0`): índices em `objects`, um por jogador. Candidatos do
 /// jogador `i`: bit 0 e `modos & slot_mask`, tipo do personagem escolhido (coop: qualquer),
-/// fora os tomados, na lista montada de trás para a frente. Disputa: sorteio; coop: o
-/// primeiro da lista (o último dos objetos). `Err(n)` = sem vaga para o jogador `n`.
+/// fora os tomados, na lista montada de trás para a frente. Disputa: sorteio `(r · n) >> 16`;
+/// coop: o primeiro da lista (o último dos objetos), com um `rand` gasto do mesmo jeito.
+/// `Err(n)` = sem vaga para o jogador `n`.
 pub fn assign_slots(
     objects: &[&LevelObject],
     mode: &Mode,
@@ -191,11 +192,15 @@ pub fn assign_slots(
                     && !taken.contains(&k)
             })
             .collect();
-        let pick = match (mode, cands.len()) {
-            (_, 0) => return Err(i as u8 + 1),
-            (Mode::Deathmatch(_), n) => cands[rng.below(n as u32) as usize],
-            _ => cands[0],
+        if cands.is_empty() {
+            return Err(i as u8 + 1);
+        }
+        // `0x43ccdc`: `(rand · n) >> 16`; no coop `n = 1`, mas o `rand` sai do mesmo jeito
+        let n = match mode {
+            Mode::Deathmatch(_) => cands.len() as u32,
+            _ => 1,
         };
+        let pick = cands[((rng.next_u16() * n) >> 16) as usize];
         taken.push(pick);
     }
     Ok(taken)
@@ -534,27 +539,33 @@ impl Scene {
         self.players[i].credit = 0;
         self.push_corpse();
         let at = self.spawn_point();
-        let start_layer = self.players[i].start_layer;
         if let Some(j) = self.jake.as_mut() {
             match at {
                 Some((x, y, l)) => j.respawn_at(Some((x, y)), l),
-                None => j.respawn_at(None, start_layer),
+                None => {
+                    let l = j.layer();
+                    j.respawn_at(None, l);
+                }
             }
         }
+        // `0x426b09` zera o terremoto (`+0x274`), não a confusão (`+0x264`)
+        self.quake = 0;
         let layer = self.jake.as_ref().map_or(self.jake_layer, Jake::layer);
         if layer != self.jake_layer {
             self.set_jake_layer(layer);
         }
     }
 
-    /// Sorteio uniforme de um ponto de renascimento (sem olhar o rival); sem nenhum, o
-    /// início do jogador (`None`).
+    /// Sorteio de um ponto de renascimento, sem olhar o rival (`0x43d2de`: `r / (0x10000 /
+    /// n)`; o original lê além da lista quando `r` cai no resto da divisão — aqui, o último);
+    /// sem nenhum, `None` (renasce onde está).
     fn spawn_point(&mut self) -> Option<(i32, i32, i32)> {
         if self.spawn_points.is_empty() {
             return None;
         }
         let n = self.spawn_points.len() as u32;
-        Some(self.spawn_points[self.rng.below(n) as usize])
+        let k = (self.rng.next_u16() / (0x10000 / n)).min(n - 1);
+        Some(self.spawn_points[k as usize])
     }
 
     /// Cadáver clonado do jogador ativo (`0x433d80`): o sprite no último quadro da morte,
