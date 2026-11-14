@@ -226,8 +226,25 @@ impl Pilot {
             };
             let side = if dx > 0 { RIGHT } else { LEFT };
             let input = if dy < -60 && dx.abs() > 6 && self.on_ground() {
-                // bem acima: vai para baixo dele (a pistola não atira em ângulo fechado)
-                self.tick(side);
+                // bem acima: vai para baixo dele (a pistola não atira em ângulo fechado);
+                // atirando, termina a rajada antes (soltar com direção trava o tiro)
+                // sem chão logo adiante (o vão da escada), não vai
+                let b = self.s.jake.as_ref().unwrap().body.bounds();
+                let ahead = openhunted_engine::physics::Rect {
+                    x: if side == RIGHT {
+                        b.x + b.w + 24
+                    } else {
+                        b.x - 28
+                    },
+                    y: b.y + b.h + 2,
+                    w: 4,
+                    h: 6,
+                };
+                if !self.s.world.blocked(&ahead) {
+                    return;
+                }
+                let firing = self.s.jake.as_ref().unwrap().is_firing();
+                self.tick(if firing { 0 } else { side });
                 continue;
             } else if dy < -2 * dx.abs() - 20 {
                 UP
@@ -238,9 +255,11 @@ impl Pilot {
             } else {
                 side
             };
-            // alterna para recomeçar as rajadas
-            let fire = if self.t % 14 < 12 { SHOOT } else { 0 };
-            self.tick(input | fire);
+            // ATIRAR seguro: as rajadas recomeçam sozinhas (`t > +0x14`); soltá-lo com uma
+            // direção sairia do tiro e travaria 8 tiques (`0x43b591`). Fora do chão, sem CIMA
+            // (sobre o vão da escada, CIMA agarra a corda e ATIRAR a solta)
+            let input = if self.on_ground() { input } else { input & !UP };
+            self.tick(input | SHOOT);
         }
     }
 
@@ -565,7 +584,7 @@ fn i_j_002_can_be_won() {
     assert_eq!(p.feet(), 244, "corredor de cima: {:?}", p.center());
     p.go_x(960);
     assert!(jake(&p).health.armor > 100, "armadura 77");
-    p.go_x(770);
+    p.hunt_x(770, 300, robot);
     p.jump_side(LEFT);
     // se cair no vão da esquerda (uma luta, um tranco), sobe de novo pela escada dele
     let climb_back = |p: &mut Pilot, side: u32| {
@@ -595,7 +614,7 @@ fn i_j_002_can_be_won() {
     p.through_door(RIGHT);
     // o robô atrás da porta de célula fica para depois dela
     p.hunt_x(1000, 150, robot);
-    p.go_x(1150);
+    p.hunt_x(1150, 300, robot);
     p.hunt_x(1200, 300, robot);
     assert!(
         !p.s.entities

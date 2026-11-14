@@ -471,7 +471,7 @@ impl Jake {
 
     /// Caixa do estado (BRD da coluna `+0x01`): engatinhando, `JK_CRAWL`; puxando o corpo
     /// na barra, `JK_BARUP`; senão a padrão.
-    fn state_box(&self) -> Rect {
+    pub(super) fn state_box(&self) -> Rect {
         if self.is_garathe() {
             // `MN_CRAWL` em 36–38, `MN_BARUP` em 49–51, `MN_COLPS` em 29–33, 35, 59 e nas
             // mortes
