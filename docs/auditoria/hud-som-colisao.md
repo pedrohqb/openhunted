@@ -13,9 +13,9 @@ das capturas 800×600.
 |---|---|---|---|---|---|
 | igual | 5 | 2 | 2 | 4 | 13 |
 | corrigido | 0 | 6 | 4 | 0 | 10 |
-| diferente (em aberto) | 0 | 1 | 1 | 2 | 4 |
+| diferente (em aberto) | 0 | 1 | 1 | 3 | 5 |
 | não implementado (em aberto) | 0 | 2 | 1 | 0 | 3 |
-| a confirmar | 3 | 1 | 1 | 1 | 6 |
+| a confirmar | 3 | 1 | 1 | 0 | 5 |
 | decisão | 0 | 0 | 1 | 0 | 1 |
 
 ## HUD (`docs/re/hud.md`)
@@ -81,7 +81,7 @@ mudo: os disparos saem do binário e do `ohtool --sons`.
 | Parede à **esquerda** (encosta) | x 20 (`T_J_003`, `T_J_005`), 404 (`I_J_104`) | idêntico | igual |
 | Parede à **direita**: para 1 px antes | x 1749 (`T_J_001`), 853 (`I_J_104`) | 1750, 854 | diferente, em aberto (abaixo) |
 | Forma do Jake: octógono `JK_DEFLT` (arestas tipo 3) + caixas; caixas com borda inclusiva (`x + w − 1`, `0x438d55`) | `0x43339c` | caixa envolvente única | diferente, em aberto |
-| Teto | não medido | — | a confirmar |
+| Teto: a caixa de topo do Jake (8, 3) entra 1 px na caixa do teto | pulo para cima 16 na `T_J_001`: y 8 (topo 11, teto até 12) | y 9 (encosta) | diferente, em aberto (abaixo) |
 
 **A matemática da varredura** (para o núcleo): `0x438d55` (caixa × caixa) e `0x439177`/`0x439709`
 (com arestas) dão o deslocamento até o contato **em px inteiros**, com as caixas em borda
@@ -90,6 +90,12 @@ vértice (a do Jake em x + 20); `0x433999` então multiplica por 8 e encurta o v
 (`v·(L − 1)/L`, `L` = comprimento inteiro de `0x467328`), guarda em `+0x15c/+0x160` e soma
 `>> 3`. Daí: correndo (12, 1) contra o chão sai (95, 7) → 11 px para a direita e −12 para a
 esquerda; contra a parede da direita, a aresta em x + 20 para 1 px antes (1749 = 1770 − 21).
+Caixa × caixa conta como separadas as que só dividem a linha de borda (`A.y ≥ B.y + B.h − 1`):
+subindo, o encurtamento de 1/8 px arredonda para o contato e a caixa de topo para dentro da
+última linha do teto (y 8 em vez de 9, medido na auditoria do Jake); descendo e para a direita,
+a caixa encosta; para a esquerda, a aresta do octógono (x + 2) encosta antes da caixa. O porte
+usa uma caixa envolvente exclusiva para tudo: as três diferenças (teto, parede à direita,
+corrida) somem com as formas do `JK_DEFLT` e essas duas regras.
 
 ## Correções
 

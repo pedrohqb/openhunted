@@ -36,4 +36,4 @@ depois "Correções", "Em aberto". O README desta pasta lista as áreas e o plac
 | Itens, objetos de fase e colisões de objetos | `itens-objetos.md` | feito: 19 iguais, 7 corrigidos, 6 em aberto |
 | Inimigos principais | `inimigos.md` | a seguir |
 | Inimigos secundários e IA dos personagens | `inimigos-2.md` | a seguir |
-| HUD, câmera, som e geometria de colisão do cenário | `hud-som-colisao.md` | feita: 13 iguais, 10 corrigidos, 7 em aberto, 6 a confirmar, 1 decisão |
+| HUD, câmera, som e geometria de colisão do cenário | `hud-som-colisao.md` | feita: 13 iguais, 10 corrigidos, 8 em aberto, 5 a confirmar, 1 decisão |
