@@ -83,7 +83,7 @@ arma e de luta, desenhadas olhando para o outro lado): no fim do tique do Jake
 | Estado (rótulo) | Rotina | k | Uso |
 |---|---|---|---|
 | 2 (149) | `0x004261d0` | 3 | andar furtivo, só x |
-| 16, 17 (16, 17) | `0x00424ca6`, `0x00424dd0` | 3 | pulo para cima |
+| 16 (16) | `0x00424ca6` | 3 | pulo para cima (o 17, `0x00424dd0`, não usa o esqueleto) |
 | 27 (27) | `0x00424f49` | 3 | pulo parado |
 | 31 (31) | `0x00425382` | 2 | impulso do pulo estendido, só x |
 | 34, 35 (34, 35) | `0x00425946`, `0x004259c6` | 1 | aterrissagens, só x |
@@ -98,7 +98,7 @@ o esqueleto só desloca o desenho.
 Valores por tique (olhando à direita, + = para a frente / para baixo), quadro 0 → n−1:
 
 - **27**: vy = 0 ×9, −18, −18, −12, −3, +6, +12, +27, +6, 0 ×10 (mais a gravidade).
-- **16/17**: vy = 0 ×10, −15, −42, −21, −9, 0, +6, +18, +42, +24, 0 ×7.
+- **16**: vy = 0 ×10, −15, −42, −21, −9, 0, +6, +18, +42, +24, 0 ×7.
 - **31**: vx = 0, 16 (dois tiques; depois o pulo 80).
 - **34**: 0, 4, 3, 2, 2, 3, 2, 2, 2 (mas anima dois quadros por tique, ver
   `jake-movimentos.md`); **35**: 0, 5, 5.

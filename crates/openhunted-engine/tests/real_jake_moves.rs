@@ -467,108 +467,89 @@ fn shove_only_when_standing_or_hiding() {
     assert_eq!(r.j.state(), State::Run);
 }
 
+/// Subindo além do alto da corda: sai da zona → 8 (`0x4270e5`), cuja decisão
+/// (`0x00423b2b`) com CIMA sobre a zona 4 volta direto a escalar (no oráculo, T_J_003:
+/// 30 → 8 por 3 tiques → 30, e segura no alto com CIMA). Não há queda nem o 3.
 #[test]
-#[ignore]
-fn scratch_fuzz() {
-    use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, STEALTH, UP};
-    let p = std::env::var_os("OPENHUNTED_DATA").unwrap();
-    let gd = open_data(std::path::Path::new(&p)).unwrap();
-    let l = Level::parse(
-        &gd.levels()
-            .unwrap()
-            .get(&std::env::var("LV").unwrap())
-            .unwrap(),
-    )
-    .unwrap();
-    let mut a = Assets::new(gd.resources().unwrap());
-    let mut s = Scene::build(&l, &mut a).unwrap();
-    let choices = [
-        0,
-        LEFT,
-        RIGHT,
-        UP,
-        DOWN,
-        UP | LEFT,
-        UP | RIGHT,
-        DOWN | LEFT,
-        DOWN | RIGHT,
-        LEFT | STEALTH,
-        RIGHT | STEALTH,
-        JUMP,
-        UP | JUMP,
-        LEFT | JUMP,
-        RIGHT | UP | JUMP,
-        DOWN | SHOOT,
-        JUMP | DOWN,
-    ];
-    let mut seed: u32 = 0x9e37_79b9;
-    let mut input = 0;
-    let from: usize = std::env::var("FROM").unwrap().parse().unwrap();
-    for t in 0..1500 {
-        if t % 9 == 0 {
-            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
-            input = choices[(seed >> 16) as usize % choices.len()];
-        }
-        s.tick(input);
-        let j = s.jake.as_ref().unwrap();
-        if t >= from {
-            println!(
-                "{t} {input:#x} {:?} q{} {:?} {:?}",
-                j.state(),
-                j.frame(),
-                j.body,
-                j.character()
-            );
-        }
-        if t == from {
-            for r in s.world.solids() {
-                if r.x < 1300 && r.x + r.w > 1200 && r.y < 140 && r.y + r.h > 40 {
-                    println!("  sólido {r:?}");
-                }
-            }
-        }
-    }
-}
-
-/// A caixa do Jake vem da tabela de estados (`0x00422878`: `0x42318e(jake, 1)` põe o
-/// `JK_DEFLT.BRD`), não do BRD do objeto da fase (`JK_EXTND.BRD` na M_2_048).
-#[test]
-fn default_box_is_jk_deflt_even_if_the_level_says_otherwise() {
-    let Some(p) = std::env::var_os("OPENHUNTED_DATA") else {
-        return;
-    };
-    let gd = open_data(std::path::Path::new(&p)).unwrap();
-    let l = Level::parse(&gd.levels().unwrap().get("M_2_048.LEV").unwrap()).unwrap();
-    let mut a = Assets::new(gd.resources().unwrap());
-    let s = Scene::build(&l, &mut a).unwrap();
-    let j = s.jake.as_ref().unwrap();
-    assert_eq!(
-        j.body.boxr,
-        Rect {
-            x: 2,
-            y: 3,
-            w: 18,
-            h: 44
-        }
+fn climbing_past_the_top_regrabs_from_let_go() {
+    let Some(mut r) = on_rope(150) else { return };
+    r.ticks(UP, 120);
+    assert!(r.first(|s| s == State::LetGo).is_some(), "{}", r.dump());
+    assert!(r.first(|s| s == State::Fall).is_none(), "{}", r.dump());
+    assert!(r.first(|s| s == State::Grab).is_none(), "{}", r.dump());
+    assert!(
+        matches!(r.j.state(), State::Climb(_) | State::LetGo),
+        "{}",
+        r.dump()
     );
 }
 
+/// Fim do especial sem ATIRAR: o `0x0043b43e` põe a pose de arma pronta (no oráculo, com a
+/// pistola: 9 por 5 tiques, então 18 por 10 e 19).
 #[test]
-#[ignore]
-fn scratch_zones() {
-    let p = std::env::var_os("OPENHUNTED_DATA").unwrap();
-    let gd = open_data(std::path::Path::new(&p)).unwrap();
-    let l = Level::parse(&gd.levels().unwrap().get("I_J_002.LEV").unwrap()).unwrap();
-    let mut a = Assets::new(gd.resources().unwrap());
-    let s = Scene::build(&l, &mut a).unwrap();
-    for z in &s.prop_zones {
-        if z.layer == 1 && z.rect.x < 1000 {
-            println!("{z:?}");
-        }
-    }
-    for r in s.world.solids() {
-        if r.x < 1000 && r.y > 150 && r.y < 400 {
-            println!("{r:?}");
-        }
-    }
+fn special_ends_in_the_ready_pose() {
+    let Some(mut r) = Run::flat(0) else { return };
+    r.tick(DOWN | SHOOT);
+    assert!(matches!(r.j.state(), State::Special(_)), "{}", r.dump());
+    r.ticks(0, 6);
+    assert!(matches!(r.j.state(), State::Ready(..)), "{}", r.dump());
+}
+
+/// Choque elétrico (`0x00423577` → 15, contador `+0x284 = 10`): o pré-tratamento
+/// `0x004235c4` consome o tique enquanto conta, então o rótulo 15 fica no quadro 0 os 9
+/// tiques e o Jake volta ao parado.
+#[test]
+fn shock_holds_frame_zero() {
+    let Some(mut r) = Run::flat(0) else { return };
+    r.j.hurt(Pending {
+        amount: 1,
+        electric: true,
+        ..Default::default()
+    });
+    r.ticks(0, 10);
+    let shocked: Vec<usize> = r
+        .log
+        .iter()
+        .filter(|e| matches!(e.0, State::Shocked(_)))
+        .map(|e| e.3)
+        .collect();
+    assert_eq!(shocked, vec![0; 9], "{}", r.dump());
+    assert_eq!(r.j.state(), State::Idle);
+}
+
+/// Atrasos `+0x18` da tabela nas poses de arma do Jake (punhos: pronto 146 e guardar 147
+/// com atraso 1): no oráculo (`P` na T_J_001) o 147 leva 16 tiques.
+#[test]
+fn weapon_poses_follow_the_table_delay() {
+    let Some(mut r) = Run::flat(0) else { return };
+    r.tick(PUNCH);
+    r.ticks(0, 60);
+    let holster = r
+        .log
+        .iter()
+        .filter(|e| matches!(e.0, State::Holster(_)))
+        .count();
+    assert_eq!(holster, 16, "{}", r.dump());
+}
+
+/// Escolha do pulo (`0x00425144`): procura chão numa faixa de meia largura e 3 px logo
+/// abaixo dos pés (y + h + 1), a ¼ da largura + alcance (110, 150, 255) à frente. Um chão
+/// 6 px mais baixo a 110 px não conta para o médio.
+#[test]
+fn jump_choice_probes_a_thin_strip_under_the_feet() {
+    use openhunted_engine::JumpKind;
+    // a 110 px, chão 6 px abaixo (fora da faixa); a 150, no mesmo nível → longo
+    let Some(mut r) = Run::new(
+        vec![
+            slab(-5000, 40, FLOOR),
+            slab(100, 140, FLOOR + 6),
+            slab(160, 5000, FLOOR),
+        ],
+        0,
+    ) else {
+        return;
+    };
+    r.tick(RIGHT);
+    r.tick(RIGHT | JUMP);
+    assert_eq!(r.j.state(), State::Jump(JumpKind::Long), "{}", r.dump());
 }

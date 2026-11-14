@@ -573,6 +573,47 @@ impl Jake {
         false
     }
 
+    /// Decisão diante da corda do Jake (`0x00423b2b`, estados 3, 7 e 8): quatro direções →
+    /// pose; CIMA/BAIXO nas portas de camada; CIMA na corda → escalar direto; lados →
+    /// correr ou andar. Sem pulo, sem agachar, sem esconder.
+    fn decide_rope(&mut self, input: u32, env: &Env, side: Option<bool>) -> bool {
+        let pressed = |bit: u32| input & bit != 0;
+        if input == super::TAUNT_INPUT {
+            self.body.vx = 0;
+            self.set(State::Taunt);
+            return true;
+        }
+        if pressed(UP) || pressed(DOWN) {
+            let z = self.zones_under(env);
+            let layer_up = pressed(UP) && z & zone::LAYER_UP != 0 && self.layer > 0;
+            let layer_down =
+                pressed(DOWN) && z & zone::LAYER_DOWN != 0 && self.layer < env.layers - 1;
+            if layer_up || layer_down {
+                return self.zone_action(input, env);
+            }
+            if pressed(UP) && z & zone::ROPE != 0 {
+                self.body.vx = 0;
+                self.body.vy = 0;
+                self.set(State::Climb(Climb::Vertical));
+                return true;
+            }
+            return false;
+        }
+        if side.is_some() {
+            let next = if pressed(STEALTH) {
+                State::Stealth
+            } else {
+                State::Run
+            };
+            if next == State::Run {
+                self.body.vx = self.profile().run * SUB * self.dir();
+            }
+            self.set(next);
+            return true;
+        }
+        false
+    }
+
     /// Decisão em pé ou repouso.
     fn decide_or_idle(&mut self, input: u32, env: &Env, jump_edge: bool, side: Option<bool>) {
         if !self.decide(input, env, jump_edge, side) {
@@ -973,6 +1014,15 @@ impl Jake {
             }
             State::Stealth => self.decide_or_idle(input, env, jump_edge, side),
             State::Special(_) => self.tick_special(input, world),
+            State::Grab if !self.is_garathe() => {
+                // 3 (`0x427089`): ATIRAR/SOCO ataca; no fim, a decisão diante da corda
+                // (`0x4270c9` → `0x423b2b`), senão o 8
+                self.body.vx = 0;
+                if pressed(SHOOT | PUNCH) && self.start_fire(input, world) {
+                } else if self.anim_done() && !self.decide_rope(input, env, side) {
+                    self.set(State::LetGo);
+                }
+            }
             State::Grab => {
                 self.body.vx = 0;
                 if pressed(SHOOT) {
@@ -982,6 +1032,17 @@ impl Jake {
                         self.set(State::Climb(Climb::Vertical));
                     } else {
                         self.set(State::LetGo);
+                    }
+                }
+            }
+            State::LetGo if !self.is_garathe() => {
+                // 8 (`0x4270e5`): a decisão diante da corda (`0x423b2b`), senão o 3 ao
+                // contrário até o fim → parado
+                if pressed(SHOOT | PUNCH) && self.start_fire(input, world) {
+                } else if !self.decide_rope(input, env, side) {
+                    self.body.vx = 0;
+                    if self.anim_done() {
+                        self.set(State::Idle);
                     }
                 }
             }
@@ -1059,8 +1120,13 @@ impl Jake {
         if input & UP != 0 || one_side || t > self.profile().special.end {
             self.state = State::Special(t);
             let shoot = input & SHOOT != 0 && self.body.on_ground;
-            if !(shoot && self.start_fire(input, world)) {
+            if shoot && self.start_fire(input, world) {
+            } else if self.is_garathe() {
                 self.set(State::Idle);
+            } else {
+                // Jake: sem tiro, o `0x43b43e` põe a pose de arma pronta (oráculo: 9 → 18)
+                let w = self.inventory.weapon as u8;
+                self.set(State::Ready(0, w));
             }
             return;
         }
@@ -1090,7 +1156,9 @@ impl Jake {
         let world = env.world;
         self.body.vx = 0;
         self.body.vy = 0;
-        if self.zones_under(env) & zone::ROPE == 0 || pressed(SHOOT) {
+        // ATIRAR/SOCO solta (Jake `0x427161`: `0x40100`)
+        let attack = pressed(SHOOT) || (!self.is_garathe() && pressed(PUNCH));
+        if self.zones_under(env) & zone::ROPE == 0 || attack {
             self.set(State::LetGo);
             return;
         }
@@ -2241,9 +2309,9 @@ mod tests {
             assert_eq!(j.state(), State::Special(t));
             assert!(j.special.is_some(), "efeito no t = {t}");
         }
-        // t = 6 > 5 (`+0x18`): volta ao `0x43b43e`; sem ATIRAR, parado
+        // t = 6 > 5 (`+0x18`): volta ao `0x43b43e`; sem ATIRAR, a pose de arma pronta
         j.tick(0, &w);
-        assert_eq!(j.state(), State::Idle);
+        assert!(matches!(j.state(), State::Ready(..)), "{:?}", j.state());
         assert!(j.special.is_none());
         j.tick(0, &w);
         assert_eq!(

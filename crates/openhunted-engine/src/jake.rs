@@ -379,20 +379,16 @@ fn jake_anim(s: State) -> (u16, u32) {
         State::Pushed => (168, 0),
         State::KnockedDown(true) => (81, 0),
         State::KnockedDown(false) => (82, 0),
-        State::Shocked(_) => (15, 0),
+        State::Shocked(_) => (15, 1),
         State::Dying(label) => (label, 0),
         State::Dead => (0, 0),
         State::EnteringExit(_) => (12, 0),
-        State::Fire { aim, w, alt, .. } => (
-            weapon(w as usize).states[weapons::aim_slot(aim)][usize::from(alt)].0,
-            0,
-        ),
-        State::Recover(w) => {
-            let wp = weapon(w as usize);
-            (wp.states[2][0].1.recover, 0)
+        State::Fire { aim, w, alt, .. } => {
+            jake_pose(weapon(w as usize).states[weapons::aim_slot(aim)][usize::from(alt)].0)
         }
-        State::Ready(_, w) => (weapon(w as usize).ready, 0),
-        State::Holster(w) => (weapon(w as usize).holster, 0),
+        State::Recover(w) => jake_pose(weapon(w as usize).states[2][0].1.recover),
+        State::Ready(_, w) => jake_pose(weapon(w as usize).ready),
+        State::Holster(w) => jake_pose(weapon(w as usize).holster),
         State::Stealth => (149, 0),
         State::JumpUp(false) => (16, 0),
         State::JumpUp(true) => (17, 0),
@@ -417,6 +413,16 @@ fn jake_anim(s: State) -> (u16, u32) {
         State::Jolted => (173, 0),
         State::Taunt => (18, 0),
     }
+}
+
+/// Poses de arma do Jake: o estado é o rótulo; atraso 1 nos da tabela (49, 73, 109, 112,
+/// 128, 131, 146, 147, 187, 188), 0 nos demais.
+fn jake_pose(label: u16) -> (u16, u32) {
+    let slow = matches!(
+        label,
+        49 | 73 | 109 | 112 | 128 | 131 | 146 | 147 | 187 | 188
+    );
+    (label, u32::from(slow))
 }
 
 /// Estados que tocam o rótulo de trás para a frente (`0x00423894`).
@@ -1281,14 +1287,25 @@ impl Jake {
 
     fn choose_jump(&self, world: &World) -> JumpKind {
         let b = self.body.bounds();
+        let g = self.is_garathe();
         let ahead = |d: i32| {
-            world.floor_at(
-                &Rect {
-                    x: b.x.saturating_add(d * self.dir()),
-                    ..b
-                },
-                8,
-            )
+            if g {
+                return world.floor_at(
+                    &Rect {
+                        x: b.x.saturating_add(d * self.dir()),
+                        ..b
+                    },
+                    8,
+                );
+            }
+            // Jake (`0x00425144`): chão (cenário ou objeto) numa faixa de meia largura e
+            // 3 px logo abaixo dos pés, a ¼ da largura + alcance para o lado em que olha
+            world.blocked(&Rect {
+                x: b.x + b.w / 4 + d * self.dir(),
+                y: b.y + b.h + 1,
+                w: b.w / 2,
+                h: 3,
+            })
         };
         let p = self.profile();
         if ahead(p.probe_medium) {
@@ -1680,6 +1697,10 @@ impl Jake {
                 }
             }
             State::Shocked(n) => {
+                // o pré-tratamento `0x4235c4` consome o tique: o rótulo 15 não anda (Jake)
+                if !self.is_garathe() {
+                    self.anim_mode = AnimMode::Hold;
+                }
                 self.body.vx = 0;
                 step(&mut self.body, world, true);
                 if n <= 1 {
