@@ -474,3 +474,55 @@ fn holster_plays_backwards() {
     run(&mut j, &w, 0, 2);
     assert!(j.frame() < first || j.state() != State::Holster(1));
 }
+
+/// 49 (`0x42a4af`): sem CIMA nem lado (PULAR+BAIXO, PULAR sozinho) solta a mão (51), não
+/// cai; só PULAR na borda com CIMA ou lado cai. Andando, a cada 2 tiques (`atraso + 1`)
+/// avança dois quadros (`0x428a9f` + `0x406c71(9)`) e pede o esqueleto (k = 6); no tique do
+/// meio a velocidade fica (oráculo: 49 avança um quadro por tique em média).
+#[test]
+fn hand_over_hand_two_frames_every_other_tick() {
+    let w = World::new(vec![
+        crate::physics::Rect {
+            x: -1000,
+            y: 300,
+            w: 3000,
+            h: 20,
+        },
+        crate::physics::Rect {
+            x: -1000,
+            y: 30,
+            w: 3000,
+            h: 19,
+        },
+    ]);
+    let hang = || {
+        let mut j = Jake::new(100, 44, super::tests::BOX, super::tests::lengths())
+            .with_skeleton(super::tests::skeleton())
+            .with_character(crate::character::Character::Garathe);
+        j.set(State::BarHang);
+        j.tick(0, &w);
+        for _ in 0..12 {
+            j.tick(UP, &w);
+        }
+        assert_eq!(j.state(), State::BarMove);
+        j
+    };
+    let mut j = hang();
+    j.tick(JUMP | crate::input::DOWN, &w);
+    assert_eq!(j.state(), State::BarDown, "PULAR+BAIXO no 49: 51");
+    let mut j = hang();
+    j.tick(JUMP | RIGHT, &w);
+    assert_eq!(j.state(), State::Fall, "PULAR (borda) com lado: cai");
+    let mut j = hang();
+    let mut frames = vec![];
+    let mut moved = vec![];
+    for _ in 0..6 {
+        let x = j.body.x;
+        j.tick(RIGHT, &w);
+        frames.push(j.frame());
+        moved.push(j.body.x - x);
+    }
+    let adv: Vec<usize> = frames.windows(2).map(|p| (p[1] + 10 - p[0]) % 10).collect();
+    assert!(adv.contains(&2) && adv.contains(&0), "{frames:?}");
+    assert!(moved[2..].iter().all(|&d| d != 0), "{moved:?}");
+}

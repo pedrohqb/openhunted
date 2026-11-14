@@ -617,6 +617,7 @@ impl Jake {
         self.health = Health { hp: 100, armor };
         self.pending = Pending::default();
         self.poison = 0;
+        self.quake = 0;
         self.flash = crate::tint::Flash::default();
         self.teleport = None;
         self.exit_scale = None;

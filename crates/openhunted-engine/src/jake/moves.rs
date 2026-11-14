@@ -1307,16 +1307,27 @@ impl Jake {
     /// soltar a mão (51: o 50 ao contrário) → 47. Não há "subir na barra".
     fn tick_bar_garathe(&mut self, input: u32, world: &World, side: Option<bool>) {
         let pressed = |bit: u32| input & bit != 0;
+        let kept_vx = self.body.vx;
         self.body.vx = 0;
         self.body.vy = 0;
-        if self.probe(world, 0, -1) & CONTACT_SCENERY == 0 || input == JUMP | DOWN {
+        let moving = self.state == State::BarMove;
+        if self.probe(world, 0, -1) & CONTACT_SCENERY == 0 || (input == JUMP | DOWN && !moving) {
             self.fall();
             return;
         }
         if self.bar_attack(input, world) {
             return;
         }
-        if pressed(JUMP) || (pressed(DOWN) && self.state == State::BarHang) {
+        if moving && input & (UP | LEFT | RIGHT) == 0 {
+            // 49 (`0x42a573`): sem CIMA nem lado, solta a mão (51), PULAR ou não
+            self.set(State::BarDown);
+            return;
+        }
+        let jump_edge = pressed(JUMP) && self.prev_input & JUMP == 0;
+        if (moving && jump_edge)
+            || (!moving && pressed(JUMP))
+            || (pressed(DOWN) && self.state == State::BarHang)
+        {
             self.fall();
             return;
         }
@@ -1352,13 +1363,19 @@ impl Jake {
                     self.anim_mode = AnimMode::Hold;
                 } else if !self.bar_at(world, front) && !self.bar_at(world, ahead) {
                     self.fall();
-                } else {
+                } else if !self.label_changed && self.ticks % 2 == 0 {
+                    // a cada `atraso + 1` tiques: dois quadros (`0x428a9f` e `0x406c71(9)`)
+                    // e o esqueleto com k = 6; no tique do meio, a velocidade fica
+                    let n = self.len_of(self.anim_of(self.state).0);
+                    self.anim_mode = AnimMode::Target((self.frame + 2) % n);
                     self.ske_req = Some(SkeReq {
                         k: self.profile().k.bar,
                         x: true,
                         y: false,
                         diag: 0,
                     });
+                } else {
+                    self.body.vx = kept_vx;
                 }
             }
             _ => {
