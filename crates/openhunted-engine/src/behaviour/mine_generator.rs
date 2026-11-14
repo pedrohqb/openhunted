@@ -234,7 +234,6 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         }
     }
     // próxima leva
-    let mut opened = false;
     if st.state != OPENING && seen && st.stock > 0 && st.live < SLOTS {
         st.countdown -= 1;
         if st.countdown <= 0 {
@@ -242,11 +241,12 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             st.stock -= 1;
             st.countdown = iv + ctx.rng.below(iv as u32) as i32 / 2 - iv / 4;
             st.set(OPENING);
-            opened = true;
         }
     }
     let (_, _, len) = enemy::label(&LABELS, st.clip.label);
-    if !opened && st.clip.advance(len) {
+    // o rótulo toca no mesmo tique em que abre: o primeiro quadro mostrado é o 1 (oráculo
+    // `H_J_013`: q1…q7, depois o fechar q7…q0)
+    if st.clip.advance(len) {
         // fim da animação (`0x41e33b`)
         if st.state == OPENING {
             let n = st.variant().per_wave.min(SLOTS.saturating_sub(st.live));
@@ -315,7 +315,11 @@ mod tests {
             tick(&mut g, &mut c, &mut out);
             t += 1;
         }
-        assert_eq!(t, 30 + 8, "intervalo e abertura");
+        assert_eq!(
+            t,
+            30 + 7,
+            "intervalo e abertura (q1…q7: o quadro 0 não aparece)"
+        );
         assert_eq!(mines(&out), 3);
         let Spawn::Mine { at, owner, .. } = out.enemy_spawns[0].clone() else {
             panic!()
@@ -339,6 +343,27 @@ mod tests {
             panic!()
         };
         assert_eq!((s.tag, s.live), (1, 1));
+    }
+
+    /// Oráculo `H_J_013` (Alpha): conta 20 tiques com o alvo e abre no 20º já mostrando o
+    /// quadro 1 do rótulo 2 (q1…q7), solta a mina e fecha (q7…q0).
+    #[test]
+    fn opens_on_the_twentieth_tick_showing_frame_one() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(130, 0);
+        let mut c = ctx(&j, &w, &on);
+        let mut g = generator(100, 0, 0);
+        let mut first = None;
+        for t in 0..30 {
+            c.tick = t;
+            tick(&mut g, &mut c, &mut Out::default());
+            if let Behaviour::MineGenerator(st) = &g.behaviour {
+                if st.state == OPENING && first.is_none() {
+                    first = Some((t, st.clip.offset(8)));
+                }
+            }
+        }
+        assert_eq!(first, Some((19, 1)));
     }
 
     #[test]
