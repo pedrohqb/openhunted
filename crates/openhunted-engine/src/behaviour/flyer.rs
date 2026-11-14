@@ -128,6 +128,8 @@ pub struct FlyerState {
     pub clip: Clip,
     /// Etapa da perseguição (`+0x273`; 0 = nenhuma).
     pub stage: u8,
+    /// `+0x272`: o ataque é o mergulho (senão, a perseguição).
+    pub dive: bool,
     pub vx: i32,
     pub vy: i32,
     pub seed: u32,
@@ -155,6 +157,7 @@ impl FlyerState {
             rest: (s % r.max(1) as u32) as i32 + r,
             clip: Clip::new(if manta { 3 } else { 1 }, false),
             stage: 0,
+            dive: (s >> 1) & 1 != 0,
             vx: 0,
             vy: 0,
             seed: s,
@@ -178,11 +181,12 @@ impl FlyerState {
     fn set_mode(&mut self, mode: u8) {
         self.mode = mode;
         self.ticks = 0;
+        // Anticorpo: rótulo 2 do ataque (`0x411538`) até voltar ao descanso (1); Manta: 2 no
+        // ataque, 4 no bote
         let label = match (self.manta, mode) {
-            (false, LUNGE) => 2,
-            (false, _) => 1,
+            (false, REST) => 1,
+            (false, _) => 2,
             (true, LUNGE) => 4,
-            (true, REST) => 1,
             (true, _) => 2,
         };
         if self.clip.label != label {
@@ -190,12 +194,32 @@ impl FlyerState {
         }
     }
 
-    /// Recomeça o passeio (`0x42250b`): casa nova, ângulo sorteado.
-    fn wander(&mut self, at: (i32, i32), ctx: &mut Ctx) {
-        self.home = at;
+    /// Fim do ataque (`0x41184a`/`0x4118f9` do Anticorpo, `0x42250b` da Manta): de volta ao
+    /// descanso, com casa nova (`at`, se dada), ângulo, giro e `+0x272` sorteados (a Manta
+    /// zera o `+0x272`) e a espera `rand % r + r`.
+    fn rest_again(&mut self, at: Option<(i32, i32)>, ctx: &mut Ctx) {
+        if let Some(at) = at {
+            self.home = at;
+        }
         self.angle = ctx.rng.below(65536) as i32;
+        self.dive = !self.manta && ctx.rng.below(2) == 1;
+        self.stage = 0;
         self.spin = if ctx.rng.below(2) == 0 { 1 } else { -1 };
-        self.set_mode(WANDER);
+        self.set_mode(REST);
+        let r = self.variant().rest.max(1);
+        self.rest = ctx.rng.below(r as u32) as i32 + r;
+    }
+
+    /// O ataque escolhido pelo `+0x272`: mergulho, ou perseguição com a etapa pelo lado do
+    /// alvo.
+    fn attack(&mut self, target_x: i32, own_x: i32) {
+        if self.dive {
+            self.set_mode(DIVE);
+            self.stage = 0;
+        } else {
+            self.set_mode(CHASE);
+            self.stage = first_stage(target_x, own_x);
+        }
     }
 }
 
@@ -365,7 +389,9 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     st.ticks += 1;
     let (mut vx, mut vy) = (0, 0);
     let (_, _, len) = enemy::label(st.labels(), st.clip.label);
-    let ended = st.clip.advance(len);
+    // descanso contando: o tique sai antes da animação (`0x41148a`/`0x42168b`)
+    let resting = st.mode == REST && st.rest > 0;
+    let ended = !resting && st.clip.advance(len);
     // rótulo cujo fim se viu neste tique (o modo pode trocar o rótulo abaixo)
     let ended_label = st.clip.label;
     match st.mode {
@@ -385,50 +411,59 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             if st.rest > 0 {
                 st.rest -= 1;
             } else if ctx.rng.below(100) < v.rest_again + ctx.rng.below(5) {
+                // descansa de novo: Anticorpo rótulo 1, Manta 3 ("on wall")
                 st.rest = ctx.rng.below(v.rest.max(1) as u32) as i32 + v.rest;
-            } else if jake.is_some() {
-                if ctx.rng.below(100) < v.attack {
-                    let mode = if ctx.rng.below(2) == 0 { DIVE } else { CHASE };
-                    st.set_mode(mode);
-                    let jx = ctx.jake.map_or(e.x, |j| j.body.x);
-                    st.stage = if mode == CHASE {
-                        first_stage(jx, e.x)
-                    } else {
-                        0
-                    };
+                st.clip = Clip::new(if st.manta { 3 } else { 1 }, false);
+            } else if jake.is_some() && ctx.rng.below(100) < v.attack {
+                // sem alvo, nada: não há passeio (oráculo `I_J_107`, `I_M_011`)
+                let jx = ctx.jake.map_or(e.x, |j| j.body.x);
+                if st.manta {
+                    st.attack(jx, e.x);
+                } else {
+                    // Anticorpo: os laços do modo 1 antes do ataque
+                    st.set_mode(WANDER);
                 }
-            } else {
-                st.wander(c, ctx);
             }
         }
         WANDER => {
-            let (cos, sin) = super::cos_sin14(st.angle);
-            vx = ((cos * v.speed) >> 11).min(v.dive);
-            vy = ((sin * v.speed) >> 11).min(v.dive);
-            st.angle = (st.angle + st.spin * 0x1000) & 0xffff;
-            // 16 tiques = uma volta do passeio
-            if st.ticks >= v.max_ticks || st.ticks >= 16 * v.loops {
-                st.set_mode(REST);
-                st.rest = ctx.rng.below(v.rest.max(1) as u32) as i32 + v.rest;
+            if st.ticks >= v.max_ticks || st.ticks > 16 * v.loops {
+                match jake {
+                    Some(_) => {
+                        let jx = ctx.jake.map_or(e.x, |j| j.body.x);
+                        st.attack(jx, e.x);
+                    }
+                    None if st.manta => st.rest_again(Some((e.x, e.y)), ctx),
+                    None => st.set_mode(RETURN),
+                }
+            } else {
+                let (cos, sin) = super::cos_sin14(st.angle);
+                vx = ((cos * v.speed) >> 11).min(v.dive);
+                vy = ((sin * v.speed) >> 11).min(v.dive);
+                st.angle = (st.angle + st.spin * 0x1000) & 0xffff;
             }
         }
         DIVE | CHASE => {
+            let give_up = |st: &mut FlyerState, ctx: &mut Ctx, at| {
+                if st.manta {
+                    st.rest_again(Some(at), ctx);
+                } else {
+                    st.set_mode(RETURN);
+                }
+            };
             let Some(j) = jake else {
-                st.set_mode(RETURN);
+                give_up(&mut st, ctx, (e.x, e.y));
                 e.behaviour = Behaviour::Flyer(Box::new(st));
                 return;
             };
             let jc = enemy::center(&j);
-            if st.mode == DIVE {
+            if st.ticks >= v.max_ticks {
+                give_up(&mut st, ctx, (e.x, e.y));
+            } else if st.mode == DIVE {
                 let (d, arrived) = steer(c, jc, me.w, v.dive);
                 (vx, vy) = d;
                 if arrived {
                     st.set_mode(LUNGE);
-                } else if st.ticks >= 2 * v.max_ticks {
-                    st.set_mode(RETURN);
                 }
-            } else if st.ticks >= v.max_ticks {
-                st.set_mode(RETURN);
             } else {
                 // Manta a menos de 40 px (`0x4225ab`): rótulo do bote, sem sair da perseguição
                 if st.manta
@@ -482,9 +517,15 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             if st.manta && st.clip.label == 5 && ended {
                 st.clip = Clip::new(2, false);
             }
-            match steer(c, st.home, me.w, v.dive) {
-                (d, false) if st.ticks < 4 * v.max_ticks => (vx, vy) = d,
-                _ => st.wander(c, ctx),
+            // volta à casa até `+0x30` tiques: chegando, descansa ali; esgotado, descansa
+            // onde estiver (casa nova)
+            if st.ticks >= v.max_ticks {
+                st.rest_again(Some((e.x, e.y)), ctx);
+            } else {
+                match steer(c, st.home, me.w, v.dive) {
+                    (d, false) => (vx, vy) = d,
+                    _ => st.rest_again(None, ctx),
+                }
             }
         }
     }
@@ -497,7 +538,9 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         st.clip = Clip::new(st.clip.label, false);
     }
     vx = vx.clamp(VX_RANGE.0, VX_RANGE.1);
-    // sem gravidade: a velocidade pedida a compensa
+    // a velocidade pedida compensa a gravidade (`0x404bc7`); no oráculo quase todos os que
+    // descansam ficam parados (`I_J_107`, `I_M_011`), um desce 2 px/tique até o chão (id 35
+    // da `I_J_107`): a confirmar
     let boxr = e.boxes.first().copied().unwrap_or(Rect {
         x: 0,
         y: 0,
@@ -560,25 +603,53 @@ mod tests {
         }
     }
 
+    /// Oráculo `I_J_107`/`I_M_011` (300 tiques, Jake parado): sem alvo nenhum voador sai do
+    /// descanso (`0x411504`/`0x421705`: sem `+0x27c` não há passeio) nem se move.
     #[test]
-    fn wander_loops_and_comes_back_to_rest() {
+    fn without_target_flyers_stay_resting() {
         let on = |_: i32| None;
-        let (j, w) = ctx_with_jake(5000, 600);
+        let (j, w) = ctx_with_jake(5000, 300);
         let mut c = ctx(&j, &w, &on);
-        let mut a = flyer(ANTIBODY, 500, 300, 0, 1);
-        let mut modes = vec![];
-        let mut xs = vec![];
-        for _ in 0..120 {
-            tick(&mut a, &mut c, &mut Out::default());
-            modes.push(st(&a).mode);
-            xs.push(a.x);
+        for kind in [ANTIBODY, MANTA] {
+            let mut a = flyer(kind, 500, 300 - 40, 0, 1);
+            let mut ys = vec![];
+            for _ in 0..300 {
+                tick(&mut a, &mut c, &mut Out::default());
+                assert_eq!(st(&a).mode, REST, "tipo {kind}");
+                assert_eq!((a.x, a.y), (500, 260));
+                ys.push(a.y);
+            }
         }
-        assert!(modes.contains(&WANDER) && modes.contains(&REST));
-        let spread = xs.iter().max().unwrap() - xs.iter().min().unwrap();
-        assert!(
-            spread > 10 && spread < 200,
-            "laços em volta da casa: {spread}"
-        );
+    }
+
+    /// Com alvo, o Anticorpo sai do descanso para o modo 1 (rótulo 2, laços: `0x411538`) e
+    /// só depois mergulha ou persegue (`0x4115c3`); a Manta vai direto (`0x421739`).
+    #[test]
+    fn antibody_winds_up_in_loops_before_attacking() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(300, 600);
+        let mut c = ctx(&j, &w, &on);
+        let mut a = flyer(ANTIBODY, 200, 560, 0, 1);
+        let mut modes = vec![];
+        for _ in 0..600 {
+            tick(&mut a, &mut c, &mut Out::default());
+            if modes.last() != Some(&st(&a).mode) {
+                modes.push(st(&a).mode);
+            }
+        }
+        let first = modes.iter().position(|&m| m != REST).expect("atacou");
+        assert_eq!(modes[first], WANDER, "{modes:?}");
+        assert!(modes.contains(&DIVE) || modes.contains(&CHASE), "{modes:?}");
+        let mut m = flyer(MANTA, 200, 560, 0, 0);
+        let mut first = None;
+        for _ in 0..600 {
+            tick(&mut m, &mut c, &mut Out::default());
+            if st(&m).mode != REST {
+                first = Some(st(&m).mode);
+                break;
+            }
+        }
+        assert!(matches!(first, Some(DIVE | CHASE)), "{first:?}");
     }
 
     #[test]
@@ -737,7 +808,8 @@ mod tests {
     #[test]
     fn manta_chase_aims_above_the_target_centre() {
         let (path, s, _) = run_chase(MANTA, 200, 560, 1);
-        assert_eq!(s.mode, RETURN);
+        // fim da passagem → volta (5); `+0x30` esgotado → descanso (`0x42250b`)
+        assert!(matches!(s.mode, RETURN | REST), "{}", s.mode);
         assert!(
             *path
                 .iter()
