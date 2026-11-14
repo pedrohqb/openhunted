@@ -35,5 +35,5 @@ depois "Correções", "Em aberto". O README desta pasta lista as áreas e o plac
 | Armas, projéteis e reações a dano | `armas.md` | em andamento |
 | Itens, objetos de fase e colisões de objetos | `itens-objetos.md` | feito: 19 iguais, 7 corrigidos, 6 em aberto |
 | Inimigos principais | `inimigos.md` | a seguir |
-| Inimigos secundários e IA dos personagens | `inimigos-2.md` | a seguir |
+| Inimigos secundários e IA dos personagens | `inimigos-2.md` | feita: 11 igual, 17 corrigidas, 7 em aberto, 4 a confirmar |
 | Física e colisão do cenário, HUD e som | `fisica-hud-som.md` | a seguir |
