@@ -71,12 +71,13 @@ pub fn border_name(kind: u32, label: i32) -> String {
 
 pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     let trig = satisfied(&e.triggers, ctx.on);
-    let (touching, inside) = match (e.bounds(), ctx.jake_bounds()) {
-        (Some(d), Some(j)) if ctx.jake_layer == e.layer => {
-            (grow(d, 1).overlaps(&j), d.overlaps(&j))
-        }
-        _ => (false, false),
-    };
+    // qualquer jogador em jogo encostado ou dentro (com dois, os dois)
+    let (touching, inside) = e.bounds().map_or((false, false), |d| {
+        ctx.active_in(e.layer)
+            .fold((false, false), |(t, i), (_, j)| {
+                (t || grow(d, 1).overlaps(&j), i || d.overlaps(&j))
+            })
+    });
     let secret = e.objective & 1 != 0;
     let Behaviour::Door(st) = &mut e.behaviour else {
         return;

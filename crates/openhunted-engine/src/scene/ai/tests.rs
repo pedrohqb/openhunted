@@ -280,3 +280,38 @@ fn ai_targets_the_nearer_of_two_humans_and_keeps_it() {
     }
     assert_eq!(brain(&s), (true, 0), "morto o 2, o 1");
 }
+
+/// `0x42c5cc`: nenhum dos dois alcançável (outra célula, sem caminho) → sem alvo.
+#[test]
+fn ai_without_a_reachable_human_has_no_target() {
+    use crate::scene::players::Seat;
+    let mut s = arena(1500);
+    s.mode = crate::scene::Mode::Coop;
+    for n in 1..=2u8 {
+        s.players.push(crate::scene::Player {
+            number: n,
+            character: Character::Jake,
+            colour: 0,
+            stats: Default::default(),
+            credit: 0,
+            start_layer: 0,
+        });
+    }
+    let solids = s.cell_solids.clone();
+    s.parked.push(Seat {
+        player: 1,
+        jake: Some(Jake::new(700, 53, BOX, std::collections::HashMap::new()).with_health(100, 0)),
+        sprite: Some(sprite(700)),
+        cell_solids: solids.clone(),
+        cell_world: World::new(solids),
+        ..Default::default()
+    });
+    s.ai_grid = CellGrid::empty((16, 8, 1));
+    s.entities
+        .push(ai_at(Character::Garathe, 300, 100, &[(0, 0), (1, 20)], 1));
+    s.tick_players([0, 0]);
+    match &s.entities[0].behaviour {
+        Behaviour::AiPlayer(a) => assert!(!a.brain.target, "sem alvo"),
+        _ => unreachable!(),
+    }
+}

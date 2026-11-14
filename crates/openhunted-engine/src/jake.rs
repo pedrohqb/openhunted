@@ -590,13 +590,13 @@ impl Jake {
         self.colour
     }
 
-    /// Renasce na disputa (estados 181 `0x426b09` / 80 `0x42b861`): de pé com o centro x da
-    /// caixa e o topo dela em `at` (`None` = o ponto de renascimento `+0x29c`) na camada
-    /// `layer`, sem armas, munição, chaves, bandeiras, veneno, dano pendente nem piscar, com a
-    /// melhor arma (punhos/garras) e vida 100; a armadura fica.
+    /// Renasce na disputa (estados 181 `0x426b09` / 80 `0x42b861`): de pé com a origem em
+    /// `at` (`0x43d300`: `+0x14c/+0x150` = o ponto) ou, sem ponto (`None`), onde está 20 px
+    /// acima (`0x426a84`), na camada `layer`, sem armas, munição, chaves, bandeiras, veneno,
+    /// dano pendente nem piscar, com a melhor arma (punhos/garras) e vida 100; a armadura fica.
     pub fn respawn_at(&mut self, at: Option<(i32, i32)>, layer: i32) {
         let bx = self.box_default;
-        let (x, y) = at.map_or(self.start, |(px, py)| (px - bx.x - bx.w / 2, py - bx.y));
+        let (x, y) = at.unwrap_or((self.body.x, self.body.y - 20));
         let armor = self.health.armor;
         self.body = Body::new(x, y, bx);
         self.start = (x, y);

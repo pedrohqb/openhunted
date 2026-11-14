@@ -351,12 +351,16 @@ fn frag(s: &mut Scene, shooter: usize, victim: usize) {
 #[test]
 fn frags_and_suicides() {
     let mut s = duo(duel([J, J]), (100, PISTOL), (400, PISTOL));
+    // uma saída desligada segura o veredito (sem saída, objetivos cumpridos dão "1")
+    exit_at(&mut s, 1500);
     frag(&mut s, 0, 1);
     assert_eq!((s.players[0].stats.frags, s.players[1].stats.frags), (1, 0));
     frag(&mut s, 1, 0);
     assert_eq!(s.players[1].stats.frags, 1);
     // autoeliminação: o 1 com o foguete na parede a 20 px; F do 1 = 1 → S = 1
     let suicide = |s: &mut Scene| {
+        // as balas que sobraram do duelo (o 1 renasceu onde morreu, na linha delas) somem
+        run(s, [0, 0], 40);
         s.place_player(0, (1170, FLOOR - 47), 0);
         let j = s.player_jake_mut(0).unwrap();
         j.health = crate::damage::Health { hp: 1, armor: 0 };
@@ -423,8 +427,11 @@ fn deathmatch_respawn_wipes_inventory_and_keeps_armor() {
     assert_eq!(j.health, crate::damage::Health { hp: 100, armor: 33 });
     assert_eq!(j.inventory.weapon, FISTS);
     assert_eq!(j.inventory.ammo(ROCKETS), 0);
-    let b = j.body.bounds();
-    assert_eq!((b.x + b.w / 2, b.y), (700, 40), "centro x e topo no ponto");
+    assert_eq!(
+        (j.body.x, j.body.y),
+        (700, 40),
+        "a origem no ponto (`0x43d300`)"
+    );
     let corpses: Vec<&Entity> = s
         .entities
         .iter()
@@ -518,8 +525,10 @@ fn deathmatch_ends_by_points_time_or_exit() {
     run(&mut s, [0, 0], 39);
     assert_eq!(s.outcome, Some(Outcome::Defeat));
     assert_eq!(s.winner(), Some(1));
-    // tempo (relógio de quem chama)
+    // tempo (relógio de quem chama); a saída desligada segura o veredito (sem saída na
+    // fase, objetivos cumpridos já dariam "1", `0x43cf36`)
     let mut s = duo(with(0, 60_000), (100, PISTOL), (400, PISTOL));
+    exit_at(&mut s, 900);
     s.elapsed_ms = 60_000;
     run(&mut s, [0, 0], 50);
     assert_eq!(s.outcome, None);
@@ -527,15 +536,43 @@ fn deathmatch_ends_by_points_time_or_exit() {
     run(&mut s, [0, 0], 39);
     assert_eq!(s.outcome, Some(Outcome::Defeat));
     assert_eq!(s.winner(), None, "empate");
-    // saída, sem objetivos
+    // sem limite de pontos: a saída liga sem testar os objetivos, mas o veredito os testa
+    // (`0x43cdf0`/`0x43cf4c`): objetivo "acionar" pendente → "2"; cumprido → "1"
+    for done in [false, true] {
+        let mut s = duo(with(0, 0), (100, PISTOL), (400, PISTOL));
+        exit_at(&mut s, 95);
+        let mut piece = logic(crate::entity::CAR_PIECE, 900, 0, &[]);
+        piece.objective = crate::verdict::OBJ_ACTIVATE;
+        piece.behaviour = Behaviour::CarPiece;
+        piece.on = done;
+        piece.alive = !done;
+        s.entities.push(piece);
+        run(&mut s, [0, 0], 60);
+        assert_eq!(s.outcome, None, "saída desligada: nada");
+        run(&mut s, [UP, 0], 60);
+        let want = if done {
+            Outcome::Victory
+        } else {
+            Outcome::Defeat
+        };
+        assert_eq!(s.outcome, Some(want), "objetivo cumprido: {done}");
+    }
+    // os dois mortos contam antes da saída (no laço dos objetos): "2" com a saída ligada e
+    // os objetivos cumpridos
     let mut s = duo(with(0, 0), (100, PISTOL), (400, PISTOL));
     exit_at(&mut s, 95);
-    let mut piece = logic(crate::entity::CAR_PIECE, 900, 0, &[]);
-    piece.objective = crate::verdict::OBJ_ACTIVATE;
-    piece.behaviour = Behaviour::CarPiece;
-    s.entities.push(piece);
-    run(&mut s, [UP, 0], 60);
-    assert_eq!(s.outcome, Some(Outcome::Victory));
+    s.entities.last_mut().unwrap().on = true;
+    assert_eq!(s.evaluate_players(), Some(Outcome::Victory));
+    for i in 0..2 {
+        s.player_jake_mut(i).unwrap().health.hp = 0;
+    }
+    assert_eq!(s.evaluate_players(), Some(Outcome::Defeat));
+    s.player_jake_mut(0).unwrap().health.hp = 1;
+    assert_eq!(
+        s.evaluate_players(),
+        Some(Outcome::Victory),
+        "um vivo basta"
+    );
 }
 
 /// Item de vida em `x` (só o Jake o pega: 0x100).
@@ -688,4 +725,310 @@ fn coop_friendly_fire_and_timer() {
     s.timer = 1;
     run(&mut s, [0, 0], 40);
     assert_eq!(s.outcome, Some(Outcome::Defeat));
+}
+
+/// Foguete à queima-roupa (o 2 colado à boca, a 2 px do atirador): acerta já no tique em
+/// que nasce (antes de voar) e a explosão (dano de área, efeito `OEX`) não se perde.
+#[test]
+fn point_blank_rocket_explodes_with_area_damage() {
+    let mut s = duo(duel([J, J]), (100, ROCKETS), (400, PISTOL));
+    let b0 = s.player_jake(0).unwrap().body.bounds();
+    s.place_player(1, (b0.x + b0.w, FLOOR - 47), 0);
+    // uma mina saltadora logo atrás do 2, fora da linha do foguete: só a área a fere
+    s.entities.push(hop_mine(b0.x + b0.w + 40));
+    let m = s.entities.len() - 1;
+    let hp0 = s.entities[m].health;
+    let mut hit_at = None;
+    for t in 0..12 {
+        s.tick_players([SHOOT, 0]);
+        if s.player_jake(1).unwrap().health.hp < 100 && hit_at.is_none() {
+            hit_at = Some(t);
+        }
+        if hit_at.is_some() {
+            break;
+        }
+    }
+    assert!(hit_at.is_some(), "o 2 levou o foguete");
+    run(&mut s, [0, 0], 2);
+    assert!(
+        s.entities
+            .iter()
+            .any(|e| matches!(e.behaviour, Behaviour::Explosion(_))),
+        "a explosão aparece"
+    );
+    assert!(
+        s.player_jake(1).unwrap().health.hp < 100 - crate::behaviour::rocket::DAMAGE,
+        "dano direto e de área: {}",
+        s.player_jake(1).unwrap().health.hp
+    );
+    assert!(s.entities[m].health < hp0, "a área fere a mina atrás");
+}
+
+fn hp(s: &Scene, i: usize) -> i32 {
+    s.player_jake(i).unwrap().health.hp
+}
+
+/// Os dois jogadores no mesmo ponto (o 2 sobre o 1), parados.
+fn stacked(mode: Mode, x: i32) -> Scene {
+    let mut s = duo(mode, (100, FISTS), (700, FISTS));
+    s.place_player(0, (x, FLOOR - 47), 0);
+    s.place_player(1, (x, FLOOR - 47), 0);
+    run(&mut s, [0, 0], 2);
+    s
+}
+
+/// Fogo (`0x4104a3`): queima todo objeto presente na caixa, os dois jogadores inclusive.
+#[test]
+fn fire_burns_both_players_inside() {
+    use crate::behaviour::fire::FireState;
+    let mut s = duo(Mode::Coop, (100, FISTS), (700, FISTS));
+    s.place_player(0, (100, FLOOR - 47), 0);
+    s.place_player(1, (150, FLOOR - 47), 0);
+    run(&mut s, [0, 0], 2);
+    // altura 32 (caixa 96 × 32) ancorada em (140, chão): cobre os dois
+    let vals = [0, 0, 0, 32, 32, 0, 0, 0, 0, 0, 140, FLOOR, 0, 1000];
+    let mut f = logic(crate::entity::FIRE, 92, FLOOR - 32, &vals);
+    f.flags = 0x8002d;
+    f.behaviour = Behaviour::Fire(FireState::new(&vals, (92, FLOOR - 32), (96, 32), 32));
+    s.entities.push(f);
+    run(&mut s, [0, 0], 4);
+    assert!(hp(&s, 0) < 100, "o 1 queima: {}", hp(&s, 0));
+    assert!(hp(&s, 1) < 100, "o 2 queima: {}", hp(&s, 1));
+}
+
+/// Cerca (`0x41494b`): a faísca fere todas as vítimas ao alcance; uma recarga só.
+#[test]
+fn fence_zaps_both_players_in_the_spark() {
+    use crate::behaviour::fence::{FenceState, SPARKING};
+    let mut s = stacked(Mode::Coop, 300);
+    // centro x dos dois = 300 + 2 + 9; a faísca anda 1 px antes do choque
+    let cx = 300 + 2 + 9;
+    let mut f = logic(crate::entity::FENCE, cx - 5 - 1, FLOOR - 45, &[0]);
+    f.flags = 0xa4829;
+    f.boxes = vec![Rect {
+        x: 0,
+        y: 0,
+        w: 5,
+        h: 5,
+    }];
+    let mut st = FenceState::new(0);
+    st.state = SPARKING;
+    st.partner = true;
+    f.on = true;
+    f.behaviour = Behaviour::Fence(st);
+    s.entities.push(f);
+    let k = s.entities.len() - 1;
+    run(&mut s, [0, 0], 0);
+    assert!(
+        matches!(&s.entities[k].behaviour, Behaviour::Fence(st) if st.recharge == crate::behaviour::fence::RECHARGE),
+        "uma recarga"
+    );
+    run(&mut s, [0, 0], 3);
+    assert!(
+        hp(&s, 0) < 100 && hp(&s, 1) < 100,
+        "{} {}",
+        hp(&s, 0),
+        hp(&s, 1)
+    );
+}
+
+/// Raio laser: fere o que atravessa — os dois jogadores no caminho.
+#[test]
+fn laser_bolt_hits_both_players_it_crosses() {
+    let mut s = stacked(Mode::Coop, 300);
+    s.entities.push(crate::behaviour::laser::bolt(
+        (280, FLOOR - 30),
+        (24, 0),
+        0,
+        0,
+    ));
+    run(&mut s, [0, 0], 4);
+    assert!(hp(&s, 0) < 100, "o 1: {}", hp(&s, 0));
+    assert!(hp(&s, 1) < 100, "o 2: {}", hp(&s, 1));
+}
+
+/// Coleta (`0x40b3f5`): o item lê um contato só (`+0x21c`, o último que se moveu contra ele,
+/// `0x437350`); com os dois na caixa, fica com o 2 (o que se move depois), mesmo mais longe.
+#[test]
+fn item_both_touch_goes_to_the_last_mover() {
+    let mut s = duo(Mode::Coop, (100, FISTS), (700, FISTS));
+    s.place_player(0, (300, FLOOR - 47), 0);
+    s.place_player(1, (310, FLOOR - 47), 0);
+    run(&mut s, [0, 0], 2);
+    for i in 0..2 {
+        s.player_jake_mut(i).unwrap().health.hp = 50;
+    }
+    // caixa 300..320: o 1 (centro 311) dentro, o 2 (centro 321) a 1 px — o 1 é o mais perto
+    s.entities.push(health_item(300));
+    let k = s.entities.len() - 1;
+    assert_eq!(s.entity_targets()[k], 1, "o alvo é quem toca por último");
+    run(&mut s, [0, 0], 1);
+    assert!(!s.entities[k].alive);
+    assert_eq!((hp(&s, 0), hp(&s, 1)), (50, 75));
+}
+
+/// Zona (`0x40e14e`): conta qualquer jogador vivo na caixa, mesmo o que entra na porta (fora
+/// de jogo para os alvos), e não só o mais perto.
+#[test]
+fn zone_counts_any_player_inside() {
+    use crate::behaviour::test_support::zone;
+    let mut s = duo(Mode::Coop, (100, FISTS), (700, FISTS));
+    exit_at(&mut s, 95);
+    // dura enquanto ocupada (`values[3] = 0`)
+    s.entities
+        .push(zone(80, FLOOR - 60, 70, 60, &[0, 0, 0, 0, 0, 0]));
+    let k = s.entities.len() - 1;
+    run(&mut s, [0, 0], 2);
+    assert!(s.entities[k].on, "o 1 na zona");
+    run(&mut s, [UP, 0], 0);
+    for _ in 0..10 {
+        s.tick_players([0, 0]);
+        assert!(!s.player_jake(0).unwrap().is_active(), "o 1 entra na porta");
+        assert!(s.entities[k].on, "o 1 ainda conta");
+    }
+    // o 2 sozinho também liga uma zona
+    s.entities
+        .push(zone(690, FLOOR - 60, 50, 60, &[0, 0, 0, 0, 0, 0]));
+    let z = s.entities.len() - 1;
+    run(&mut s, [0, 0], 1);
+    assert!(s.entities[z].on, "o 2 na zona dele");
+}
+
+/// Barril de vida 1 pousado no chão em `x`.
+fn barrel(x: i32) -> Entity {
+    use crate::behaviour::barrel::BarrelState;
+    let mut b = logic(crate::entity::BARREL, x, FLOOR - 32, &[]);
+    b.flags = 0x80181;
+    b.health = 1;
+    b.solid_shapes = true;
+    b.behaviour = Behaviour::Barrel(BarrelState::new(1, vec![]));
+    b
+}
+
+/// Fogo e raio põem o crédito deles (0) na vítima viva, como todo golpe (`0x43d708`–
+/// `0x43d71b`): o barril que o 2 marcou deixa de ser dele.
+#[test]
+fn zero_credit_attackers_overwrite_the_victims_credit() {
+    use crate::behaviour::fire::FireState;
+    let mut s = duo(duel([J, J]), (100, FISTS), (900, FISTS));
+    s.entities.push(barrel(400));
+    let b = s.entities.len() - 1;
+    let vals = [0, 0, 0, 32, 32, 0, 0, 0, 0, 0, 416, FLOOR, 0, 1000];
+    let mut f = logic(crate::entity::FIRE, 368, FLOOR - 32, &vals);
+    f.flags = 0x8002d;
+    f.behaviour = Behaviour::Fire(FireState::new(&vals, (368, FLOOR - 32), (96, 32), 32));
+    s.entities.push(f);
+    s.set_credit(b, 2);
+    run(&mut s, [0, 0], 0);
+    assert_eq!(s.credit_of(b), 0, "fogo");
+    s.entities.push(barrel(600));
+    let c = s.entities.len() - 1;
+    s.set_credit(c, 2);
+    s.entities.push(crate::behaviour::laser::bolt(
+        (560, FLOOR - 20),
+        (24, 0),
+        0,
+        0,
+    ));
+    run(&mut s, [0, 0], 4);
+    assert_eq!(s.credit_of(c), 0, "raio");
+}
+
+/// Só os projéteis que um objeto com crédito cria (o chumbo que se divide) herdam o crédito;
+/// o par da cerca, os raios do olho e afins não.
+#[test]
+fn only_projectiles_inherit_the_spawner_credit() {
+    use crate::behaviour::fence::FenceState;
+    let mut s = duo(duel([J, J]), (100, FISTS), (900, FISTS));
+    let mut f = logic(crate::entity::FENCE, 500, FLOOR - 45, &[0]);
+    f.flags = 0xa4829;
+    f.behaviour = Behaviour::Fence(FenceState::new(0));
+    s.entities.push(f);
+    let k = s.entities.len() - 1;
+    s.set_credit(k, 2);
+    let n = s.entities.len();
+    run(&mut s, [0, 0], 0);
+    let p = (n..s.entities.len())
+        .find(|&i| matches!(s.entities[i].behaviour, Behaviour::Fence(_)))
+        .expect("o par");
+    assert_eq!(s.credit_of(p), 0);
+    assert!(s.human_shots.iter().all(|(i, _)| *i != p));
+}
+
+/// Sem pontos de renascimento, renasce onde morreu, 20 px acima (`0x426a84`; `0x43d2b5` só
+/// troca a posição com pontos); o terremoto (`+0x274`) zera, a confusão (`+0x264`) fica.
+#[test]
+fn respawn_in_place_without_spawn_points() {
+    let mut s = duo(duel([J, J]), (100, PISTOL), (400, FISTS));
+    assert!(s.spawn_points.is_empty());
+    s.player_jake_mut(1).unwrap().health = crate::damage::Health { hp: 1, armor: 0 };
+    s.place_player(0, (340, FLOOR - 47), 0);
+    for _ in 0..30 {
+        s.tick_players([SHOOT, 0]);
+        if s.player_jake(1).unwrap().is_dead() {
+            break;
+        }
+    }
+    s.with_seat(1, |s| {
+        s.quake = 7;
+        s.confusion = 50;
+    });
+    let mut at = None;
+    for _ in 0..60 {
+        let j = s.player_jake(1).unwrap();
+        let before = (j.body.x, j.body.y);
+        s.tick_players([0, 0]);
+        if !s.player_jake(1).unwrap().is_dead() {
+            at = Some(before);
+            break;
+        }
+    }
+    let (x, y) = at.expect("renasceu");
+    let j = s.player_jake(1).unwrap();
+    assert_eq!((j.body.x, j.body.y - y), (x, -20));
+    let (q, c) = s.with_seat(1, |s| (s.quake, s.confusion));
+    assert_eq!(q, 0);
+    assert!(c > 0, "confusão fica: {c}");
+}
+
+/// O sorteio do ponto (`0x43d2de`): `r / (0x10000 / n)` com o `rand` de 16 bits.
+#[test]
+fn spawn_point_draw_divides_the_range() {
+    let mut s = duo(duel([J, J]), (100, FISTS), (400, FISTS));
+    s.spawn_points = vec![(10, 0, 0), (20, 0, 0), (30, 0, 0)];
+    let mut r = s.rng.clone();
+    for _ in 0..50 {
+        let want = (r.next_u16() / (0x10000 / 3)).min(2) as usize;
+        assert_eq!(s.spawn_point(), Some(s.spawn_points[want]));
+    }
+}
+
+/// Sorteio das vagas (`0x43ccdc`): `(r · n) >> 16` com o `rand` de 16 bits na disputa; no
+/// coop `n` vira 1, mas o `rand` é tirado do mesmo jeito.
+#[test]
+fn slot_draws_follow_0x43cbb0() {
+    let objs = [
+        obj(1, 0xd),
+        obj(1, 0xd),
+        obj(1, 0xd),
+        obj(2, 0x41),
+        obj(2, 0x41),
+    ];
+    let refs: Vec<&LevelObject> = objs.iter().collect();
+    for seed in 0..20 {
+        let mut want = Rng::new(seed);
+        // candidatos de trás para a frente: [2, 1, 0], depois [2, 1] menos o tomado
+        let mut c: Vec<usize> = vec![2, 1, 0];
+        let a = c.remove(((want.next_u16() * 3) >> 16) as usize);
+        let b = c[((want.next_u16() * 2) >> 16) as usize];
+        let mut rng = Rng::new(seed);
+        assert_eq!(assign_slots(&refs, &duel([J, J]), &mut rng), Ok(vec![a, b]));
+        assert_eq!(rng.next_u16(), want.next_u16(), "dois sorteios");
+        let mut rng = Rng::new(seed);
+        assert_eq!(assign_slots(&refs, &Mode::Coop, &mut rng), Ok(vec![4, 3]));
+        let mut want = Rng::new(seed);
+        want.next_u16();
+        want.next_u16();
+        assert_eq!(rng.next_u16(), want.next_u16(), "o coop também sorteia");
+    }
 }

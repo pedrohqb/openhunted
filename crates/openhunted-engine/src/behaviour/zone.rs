@@ -25,18 +25,21 @@ fn occupied(e: &Entity, ctx: &Ctx) -> bool {
     if who == 2 {
         return true;
     }
-    let player = ctx
-        .jake
-        .filter(|j| !j.is_dead() && !j.is_teleporting())
-        .map(|j| j.body.bounds());
-    let (Some(zone), Some(j)) = (e.bounds(), player) else {
+    let Some(zone) = e.bounds() else {
         return false;
     };
-    if ctx.jake_layer != e.layer {
-        return false;
-    }
-    // desigualdades estritas
-    j.x < zone.x + zone.w && j.x + j.w > zone.x && j.y < zone.y + zone.h && j.y + j.h > zone.y
+    // `0x40e14e` percorre os objetos: qualquer jogador conta (com dois, os dois)
+    ctx.players().any(|(_, j, layer)| {
+        let b = j.body.bounds();
+        layer == e.layer
+            && !j.is_dead()
+            && !j.is_teleporting()
+            // desigualdades estritas
+            && b.x < zone.x + zone.w
+            && b.x + b.w > zone.x
+            && b.y < zone.y + zone.h
+            && b.y + b.h > zone.y
+    })
 }
 
 pub fn tick(e: &mut Entity, ctx: &Ctx, _out: &mut Out) {

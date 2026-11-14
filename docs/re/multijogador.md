@@ -50,9 +50,10 @@ disputa conforme o par; as saídas das `C_*` são `0xe2`/`0xe0`.
 
 Para cada jogador `i`, candidatos (`0x43cd91`): bit 0 de `+0x1a8`, `+0x1a8 & m ≠ 0` (solo 2,
 disputa **0x1c**, coop 0xe0) e tipo = `0x497318[i]` (0 aceita 1 ou 2), menos os já tomados.
-Nenhum → caixa "Unable to find a human object to assign to player %d!". Disputa: sorteio; coop:
-os personagens são **zerados antes** e fica o primeiro da lista montada (o último na ordem da
-lista de objetos). Grava `0x497318[i]` = tipo, `+0x19c = i+1`, `+0x198` = dispositivo
+Nenhum → caixa "Unable to find a human object to assign to player %d!". Disputa: sorteio
+`(rand · n) >> 16` (`0x43ccdc`); coop: os personagens são **zerados antes**, `n` vira 1 (o
+`rand` sai do mesmo jeito) e fica o primeiro da lista montada (o último na ordem da lista de
+objetos). Grava `0x497318[i]` = tipo, `+0x19c = i+1`, `+0x198` = dispositivo
 (`0x43edc1(i+1)`), na disputa `+0x280 = 0x497320[i]` (a cor da `SEGOC`), `+0x27c = +0x280`,
 `+0x1ac |= 8`. Depois `0x43cb28` remove o que não está no modo e as vagas sem jogador.
 
@@ -97,7 +98,15 @@ dispositivo (`+0x198`) a cada tique (`0x407e2d`).
 - Fogo amigo: nenhum dos 30 usos de `0x497304` está no dano ou nos projéteis → no coop
   os jogadores se ferem como na disputa [inferido pela ausência].
 - Coleta (`0x40b43a`): solo e coop só com `0x100`/`0x200` do personagem; disputa, qualquer
-  um (a aceitação `0x40b6ed` vale igual).
+  um (a aceitação `0x40b6ed` vale igual). O item vê um contato só (`0x4076d0` → `+0x21c`,
+  posto por `0x437350` com quem se moveu contra ele; `0x4347cf` zera os campos no primeiro
+  contato do tique): com os dois na caixa, vale o último a se mover [inferido].
+- Fogo (`0x4104a3`), cerca (`0x41494b`) e zona (`0x40e14e`) percorrem os objetos: ferem ou
+  contam os dois jogadores. A cerca: qualquer acerto → uma recarga e um som.
+- IA (`0x42c5cc`): candidatos os dois primeiros objetos com `+0x19c`, `0x80003 → 0x80001`,
+  presentes e sem `+0x178 & 0x8000`; o mais perto (centro da caixa da IA → origem
+  `+0x14c/+0x150`; empate → o segundo) se na mesma célula ou alcançável, senão o outro,
+  senão nenhum.
 
 ## Cooperativo [confirmado]
 
@@ -113,9 +122,12 @@ dispositivo (`+0x198`) a cada tique (`0x407e2d`).
   0x2b0 bytes; `+0x178 |= 0x8038`, sem colisão, `+0x19c = +0x198 = +0x1a8 = 0`, sem rotinas,
   ordem 0x27). Crédito `c`: 0 → nada; `c` = vítima → `S_c += 1`, limitado a `F_c`; outro →
   `F_c += 1`.
-- Renascer: `y −= 20`, apaga `0x200008`, ordem 0x78/0x79, posição `0x43d2b5`, estado 181
-  (`0x426b09`) / 80 (`0x42b861`): zera os 30 pares (armas, munição, chaves, bandeiras),
-  veneno, atordoamento, choque e piscar; melhor arma (punhos/garras); **vida 100**; a
+- Renascer: `y −= 20` (`0x426a84`), apaga `0x200008`, ordem 0x78/0x79, posição `0x43d2b5`
+  (só na disputa com pontos: sorteia `r / (0x10000 / n)` — passa do fim da lista quando `r`
+  cai no resto — e põe `+0x14c/+0x150` = o ponto, `+0x17c` = a camada; sem pontos, fica onde
+  morreu, 20 px acima), estado 181 (`0x426b09`) / 80 (`0x42b861`): zera os 30 pares (armas,
+  munição, chaves, bandeiras), veneno `+0x270`, terremoto `+0x274`, `+0x284`, piscar
+  `+0x28c/+0x290`; a confusão `+0x264` não; melhor arma (punhos/garras); **vida 100**; a
   armadura fica a de antes. Barra redesenhada, vista recentrada na hora. Sem invencibilidade
   vista.
 - Pontos de renascimento (`0x43d22a`, no início): células com bit 4 do `+0x38` (`fields[14]`
@@ -127,8 +139,12 @@ dispositivo (`+0x198`) a cada tique (`0x407e2d`).
 - Saída: interruptor comum, sem teste de objetivos.
 - Fim (`0x43cdf0`): limite de pontos ≠ 0 → ignora objetivos; fim quando `F_k − S_k ≥` limite.
   Limite de tempo ≠ 0 → fim quando `timeGetTime > início + min·60 000` (relógio real).
-  Sem limite de pontos valem os objetivos: ligar a saída dá 1; os dois mortos juntos, 2.
-  Sem limite e sem saída ligada, só o menu encerra. A espera de 40 tiques vale.
+  O laço dos objetos dá 2 com todos os jogadores mortos (antes de tudo), senão 1 com os
+  objetivos (`+0x1ac & 2` ligados, `& 4` mortos) cumpridos, 0 sem eles. Com o resultado ≠ 2,
+  a última saída da lista desligada dá 0 (`0x43cf36`); ligada (ou sem saída), sem limite de
+  pontos (e no solo e coop), 0 vira **2** (`0x43cf68`): **ligar a saída com objetivos
+  pendentes é derrota** (`M_2_012`, `M_2_015`, `M_M_033`, `M_M_045`). Sem limite e sem saída
+  ligada, só o menu encerra. A espera de 40 tiques vale.
 - Resultado: limite → 2 (`MH2H_FAILURE`); saída → 1. Anúncio pelo `F − S`: J1 maior 3790,
   J2 maior 3792, empate 3773 [inferido: "jogador 1/2 vence", "empate"].
 - Barra (`0x40b089`): no lugar do cronômetro, quadro 194 à direita e `max(0, F − S)` no

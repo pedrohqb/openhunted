@@ -169,8 +169,9 @@ pub(super) struct Regen {
 
 /// Vagas dos jogadores (`0x43cbb0`): índices em `objects`, um por jogador. Candidatos do
 /// jogador `i`: bit 0 e `modos & slot_mask`, tipo do personagem escolhido (coop: qualquer),
-/// fora os tomados, na lista montada de trás para a frente. Disputa: sorteio; coop: o
-/// primeiro da lista (o último dos objetos). `Err(n)` = sem vaga para o jogador `n`.
+/// fora os tomados, na lista montada de trás para a frente. Disputa: sorteio `(r · n) >> 16`;
+/// coop: o primeiro da lista (o último dos objetos), com um `rand` gasto do mesmo jeito.
+/// `Err(n)` = sem vaga para o jogador `n`.
 pub fn assign_slots(
     objects: &[&LevelObject],
     mode: &Mode,
@@ -191,11 +192,15 @@ pub fn assign_slots(
                     && !taken.contains(&k)
             })
             .collect();
-        let pick = match (mode, cands.len()) {
-            (_, 0) => return Err(i as u8 + 1),
-            (Mode::Deathmatch(_), n) => cands[rng.below(n as u32) as usize],
-            _ => cands[0],
+        if cands.is_empty() {
+            return Err(i as u8 + 1);
+        }
+        // `0x43ccdc`: `(rand · n) >> 16`; no coop `n = 1`, mas o `rand` sai do mesmo jeito
+        let n = match mode {
+            Mode::Deathmatch(_) => cands.len() as u32,
+            _ => 1,
         };
+        let pick = cands[((rng.next_u16() * n) >> 16) as usize];
         taken.push(pick);
     }
     Ok(taken)
@@ -323,9 +328,15 @@ impl Scene {
             .collect()
     }
 
-    /// Contra quem cada entidade age neste tique (índice do jogador). Ruling (M15a): o
-    /// jogador ativo mais perto da caixa da entidade, preferindo a mesma camada; empate → o de
-    /// menor número; sem ativo, o 1.
+    /// Contra quem cada entidade age neste tique (índice do jogador).
+    ///
+    /// - Quem lê um contato só (`0x4076d0`: o `+0x21c` do objeto, o último que se moveu contra
+    ///   ele no tique, `0x437350`) — itens, peça do carro, estrela cravada, teletransporte e
+    ///   mina — age contra o último jogador (os assentos se movem em ordem) que o toca.
+    /// - Ruling (M15a): os demais, e esses sem contato, contra o jogador ativo mais perto da
+    ///   caixa da entidade, preferindo a mesma camada; empate → o de menor número; sem ativo,
+    ///   o 1. Quem fere ou conta todo objeto que toca (fogo, cerca, raio, pistão, zona, porta)
+    ///   vê os dois pelo `Ctx::players`.
     pub(super) fn entity_targets(&self) -> Vec<usize> {
         let humans = self.human_boxes();
         if humans.len() < 2 {
@@ -340,6 +351,9 @@ impl Scene {
                     w: 0,
                     h: 0,
                 });
+                if let Some(i) = self.contact_seat(e, &r) {
+                    return i;
+                }
                 humans
                     .iter()
                     .filter(|h| h.3)
@@ -347,6 +361,21 @@ impl Scene {
                     .map_or(0, |h| h.0)
             })
             .collect()
+    }
+
+    /// O último jogador que toca a entidade `e` (caixa `r`), para quem lê um contato só.
+    fn contact_seat(&self, e: &Entity, r: &Rect) -> Option<usize> {
+        let in_play: fn(&Jake) -> bool = match &e.behaviour {
+            Behaviour::Pickup(_) | Behaviour::CarPiece | Behaviour::Mine(_) => Jake::is_active,
+            Behaviour::Star(s) if !s.in_flight() => Jake::is_active,
+            // o passageiro conta pela caixa do corpo mesmo em viagem
+            Behaviour::Teleporter(_) => |j| !j.is_dead(),
+            _ => return None,
+        };
+        (0..self.players.len()).rev().find(|&i| {
+            self.player_jake(i)
+                .is_some_and(|j| j.layer() == e.layer && in_play(j) && j.body.bounds().overlaps(r))
+        })
     }
 
     /// Crédito da entidade `i` (`+0x1b0`; 0 = ninguém).
@@ -373,6 +402,13 @@ impl Scene {
             .is_some_and(|e| e.alive && e.health > 0);
         if alive {
             self.set_credit(victim, self.credit_of(attacker));
+        }
+    }
+
+    /// As vítimas (vivas ao levar o golpe) herdam o crédito dos atacantes: (vítima, atacante).
+    pub(super) fn pass_credits(&mut self, hits: &[(usize, usize)]) {
+        for &(v, a) in hits {
+            self.set_credit(v, self.credit_of(a));
         }
     }
 
@@ -503,27 +539,33 @@ impl Scene {
         self.players[i].credit = 0;
         self.push_corpse();
         let at = self.spawn_point();
-        let start_layer = self.players[i].start_layer;
         if let Some(j) = self.jake.as_mut() {
             match at {
                 Some((x, y, l)) => j.respawn_at(Some((x, y)), l),
-                None => j.respawn_at(None, start_layer),
+                None => {
+                    let l = j.layer();
+                    j.respawn_at(None, l);
+                }
             }
         }
+        // `0x426b09` zera o terremoto (`+0x274`), não a confusão (`+0x264`)
+        self.quake = 0;
         let layer = self.jake.as_ref().map_or(self.jake_layer, Jake::layer);
         if layer != self.jake_layer {
             self.set_jake_layer(layer);
         }
     }
 
-    /// Sorteio uniforme de um ponto de renascimento (sem olhar o rival); sem nenhum, o
-    /// início do jogador (`None`).
+    /// Sorteio de um ponto de renascimento, sem olhar o rival (`0x43d2de`: `r / (0x10000 /
+    /// n)`; o original lê além da lista quando `r` cai no resto da divisão — aqui, o último);
+    /// sem nenhum, `None` (renasce onde está).
     fn spawn_point(&mut self) -> Option<(i32, i32, i32)> {
         if self.spawn_points.is_empty() {
             return None;
         }
         let n = self.spawn_points.len() as u32;
-        Some(self.spawn_points[self.rng.below(n) as usize])
+        let k = (self.rng.next_u16() / (0x10000 / n)).min(n - 1);
+        Some(self.spawn_points[k as usize])
     }
 
     /// Cadáver clonado do jogador ativo (`0x433d80`): o sprite no último quadro da morte,
@@ -687,6 +729,12 @@ impl Scene {
             .entities
             .iter()
             .any(|e| matches!(e.behaviour, Behaviour::Exit(_)) && e.alive && e.on);
+        // a saída do laço (`edi`): a última da lista; sem ela, nada a esperar
+        let last_exit = self
+            .entities
+            .iter()
+            .rev()
+            .find(|e| matches!(e.behaviour, Behaviour::Exit(_)) && e.alive);
         match &self.mode {
             Mode::Solo => None,
             Mode::Coop => {
@@ -698,20 +746,38 @@ impl Scene {
                     .then_some(Outcome::Victory)
             }
             Mode::Deathmatch(d) => {
-                if d.time_limit_ms != 0 && self.elapsed_ms > d.time_limit_ms {
-                    return Some(Outcome::Defeat);
-                }
+                // o laço dos objetos: todos mortos → "2"; senão "1" com os objetivos
+                // ("acionar" ligado, "destruir" morto) cumpridos, "0" sem eles
+                let mut r = if all_dead {
+                    Some(Outcome::Defeat)
+                } else if crate::verdict::objectives_met(&self.entities, None) {
+                    Some(Outcome::Victory)
+                } else {
+                    None
+                };
+                // com limite de pontos, só o `F − S` decide
                 if d.points_limit != 0 {
                     let reached = self
                         .players
                         .iter()
                         .any(|p| p.stats.score() >= d.points_limit);
-                    return reached.then_some(Outcome::Defeat);
+                    r = reached.then_some(Outcome::Defeat);
                 }
-                if exit_on {
-                    return Some(Outcome::Victory);
+                if d.time_limit_ms != 0 && self.elapsed_ms > d.time_limit_ms {
+                    r = Some(Outcome::Defeat);
                 }
-                all_dead.then_some(Outcome::Defeat)
+                if r == Some(Outcome::Defeat) {
+                    return r;
+                }
+                // `0x43cf36`: com a saída desligada, nada; ligada (ou sem saída), sem limite
+                // de pontos, objetivos pendentes → "2" (`0x43cf68`)
+                if last_exit.is_some_and(|e| !e.on) {
+                    return None;
+                }
+                if d.points_limit == 0 && r.is_none() {
+                    return Some(Outcome::Defeat);
+                }
+                r
             }
         }
     }

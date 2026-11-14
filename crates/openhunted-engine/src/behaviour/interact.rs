@@ -55,6 +55,11 @@ pub fn blast(b: &Blast, e: &mut Entity) {
     }
 }
 
+/// A vítima está viva ao levar o golpe: herda o crédito do atacante (`0x43d6e3`).
+pub fn credited(e: &Entity) -> bool {
+    e.alive && e.health > 0
+}
+
 /// O objeto barra raios e balas: presente, sólido (`0x80003 → 0x80001`, sem `0x20`) e com
 /// caixas do BRD.
 fn solid(e: &Entity) -> bool {
@@ -62,8 +67,10 @@ fn solid(e: &Entity) -> bool {
 }
 
 /// Raios em voo contra os objetos sólidos da camada (só o olho que atirou fica de fora): a
-/// vítima leva o dano do raio (natureza explosão: barril explode) e o raio para.
-pub fn laser_hits(entities: &mut [Entity], out: &mut Out) {
+/// vítima leva o dano do raio (natureza explosão: barril explode) e o raio para. Devolve
+/// (vítima, raio) das vítimas vivas: elas herdam o crédito do raio (`0x43d708`).
+pub fn laser_hits(entities: &mut [Entity], out: &mut Out) -> Vec<(usize, usize)> {
+    let mut hits = Vec::new();
     let bolts: Vec<usize> = (0..entities.len())
         .filter(|&i| {
             entities[i].alive && matches!(&entities[i].behaviour, Behaviour::Laser(s) if s.moving())
@@ -98,6 +105,9 @@ pub fn laser_hits(entities: &mut [Entity], out: &mut Out) {
         };
         let p = st.damage();
         st.stop();
+        if credited(&entities[vi]) {
+            hits.push((vi, bi));
+        }
         hurt(&mut entities[vi], &p);
         let c = entities[bi].center();
         out.effects.push((
@@ -111,16 +121,21 @@ pub fn laser_hits(entities: &mut [Entity], out: &mut Out) {
             super::laser::HIT_LABEL,
         ));
     }
+    hits
 }
 
 /// Fogo e cerca contra os demais objetos que cruzam a área (o Jake já foi tratado).
 /// A faísca da cerca pega pelo centro x (como no Jake) e, com acerto, recarrega a cerca.
-pub fn apply_hazards(entities: &mut [Entity], hazards: &[Hazard]) {
+/// Devolve (vítima, `Hazard::from`) das vítimas vivas: elas herdam o crédito de quem fere
+/// (`0x43d708`; o do fogo e da cerca é 0).
+pub fn apply_hazards(entities: &mut [Entity], hazards: &[Hazard]) -> Vec<(usize, usize)> {
+    let mut hits = Vec::new();
     for h in hazards {
         let mut hit = false;
-        for e in entities
+        for (i, e) in entities
             .iter_mut()
-            .filter(|e| e.alive && e.layer == h.layer)
+            .enumerate()
+            .filter(|(_, e)| e.alive && e.layer == h.layer)
         {
             if !matches!(e.behaviour, Behaviour::Barrel(_) | Behaviour::AiPlayer(_)) {
                 continue;
@@ -134,6 +149,9 @@ pub fn apply_hazards(entities: &mut [Entity], hazards: &[Hazard]) {
                 let mut p = h.damage;
                 if p.electric {
                     p.explosion = true;
+                }
+                if credited(e) {
+                    hits.push((i, h.from));
                 }
                 hurt(e, &p);
                 hit = true;
@@ -150,6 +168,7 @@ pub fn apply_hazards(entities: &mut [Entity], hazards: &[Hazard]) {
             }
         }
     }
+    hits
 }
 
 /// O par da cerca mostra os rótulos 3/4 conforme o estado do poste principal.
@@ -236,6 +255,7 @@ mod tests {
                 ..Default::default()
             },
             source: None,
+            from: 0,
         };
         apply_hazards(&mut ents, &[fire]);
         let fired: Vec<bool> = ents
@@ -266,6 +286,7 @@ mod tests {
                 ..Default::default()
             },
             source: Some((500, 0)),
+            from: 1,
         };
         // caixa cruza a faixa, mas o centro (26) está a 14 px do ponto (40): não pega
         let mut ents = vec![barrel(10), fence];

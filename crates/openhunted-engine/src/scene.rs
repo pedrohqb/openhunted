@@ -801,8 +801,8 @@ impl Scene {
             self.ai_shots_hit_human(&mut pre);
             self.bullet_hits(&mut pre);
             self.resolve_impacts(&mut pre);
-            self.entities.extend(pre.spawn);
-            self.events.extend(pre.events);
+            self.entities.extend(std::mem::take(&mut pre.spawn));
+            self.events.append(&mut pre.events);
             for i in 0..seats {
                 self.with_seat(i, |s| {
                     let up = crate::input::UP;
@@ -812,7 +812,7 @@ impl Scene {
                     }
                 });
             }
-            self.tick_entities();
+            self.tick_entities(pre);
             if self.timer > 0 {
                 self.timer -= 1;
             }
@@ -1216,8 +1216,12 @@ impl Scene {
     /// objetos, fogo e cerca contra barris, o par da cerca, os efeitos `oex` fixos e o
     /// teletransporte do Jake.
     fn object_interactions(&mut self, out: &mut Out) {
-        behaviour::interact::laser_hits(&mut self.entities, out);
-        behaviour::interact::apply_hazards(&mut self.entities, &out.hazards);
+        // fogo, cerca, raios e tiros inimigos também passam o crédito deles (0 em geral)
+        // à vítima (`0x43d708`–`0x43d71b`)
+        let hits = behaviour::interact::laser_hits(&mut self.entities, out);
+        self.pass_credits(&hits);
+        let hits = behaviour::interact::apply_hazards(&mut self.entities, &out.hazards);
+        self.pass_credits(&hits);
         behaviour::interact::sync_fences(&mut self.entities);
         for (b, label) in std::mem::take(&mut out.effects) {
             if let Some(e) = self.effect_entity(&b, label) {
@@ -1494,7 +1498,9 @@ impl Scene {
 
     /// Tique das entidades: estado dos gatilhos congelado antes do tique; cada entidade age
     /// em ordem de lista; depois as saídas (dano ao Jake, novas entidades, eventos).
-    fn tick_entities(&mut self) {
+    /// O tique das entidades; `pre` traz o que a passada à queima-roupa (balas e projéteis
+    /// que acertam ao nascer) deixou: explosões com crédito, efeitos e perigos entram aqui.
+    fn tick_entities(&mut self, mut pre: Out) {
         behaviour::mine_generator::sync(&mut self.entities);
         behaviour::chameleon::sync(&mut self.entities);
         behaviour::catapult::sync(&mut self.entities);
@@ -1537,6 +1543,19 @@ impl Scene {
                     });
                 views.push(v);
             }
+            // os outros jogadores de cada alvo (só os assentos que existem)
+            let bodies: Vec<(usize, &Jake, i32)> = (0..seats)
+                .filter_map(|i| {
+                    if i == 0 {
+                        return self.jake.as_ref().map(|j| (0, j, self.jake_layer));
+                    }
+                    let p = self.parked.iter().find(|p| p.player == i)?;
+                    p.jake.as_ref().map(|j| (i, j, p.layer))
+                })
+                .collect();
+            let others: Vec<Vec<(usize, &Jake, i32)>> = (0..seats)
+                .map(|t| bodies.iter().copied().filter(|b| b.0 != t).collect())
+                .collect();
             let any_taker = self.mode.duel().is_some();
             for (k, e) in self.entities.iter_mut().enumerate() {
                 if !e.alive {
@@ -1557,9 +1576,11 @@ impl Scene {
                     level: (self.width, self.height),
                     difficulty: self.difficulty,
                     any_taker,
+                    others: &others[t],
                 };
                 let out = &mut outs[t];
-                let (blasts, spawns) = (out.blasts.len(), out.spawn.len());
+                let (blasts, spawns, hazards) =
+                    (out.blasts.len(), out.spawn.len(), out.hazards.len());
                 match e.behaviour {
                     Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, out),
                     Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, out),
@@ -1606,14 +1627,30 @@ impl Scene {
                     Behaviour::Ant(_) => behaviour::ant::tick(e, &mut ctx, out),
                     _ => {}
                 }
+                for h in &mut out.hazards[hazards..] {
+                    h.from = k;
+                }
                 if multi {
                     // explosões que a entidade criou herdam o crédito dela (`0x40d649`)
                     let c = self.credits.get(k).copied().unwrap_or(0);
                     out.blast_credits
                         .extend((blasts..out.blasts.len()).map(|b| (b, c)));
+                    // só os projéteis que ela cria (o chumbo que se divide) herdam o dela
                     if c != 0 {
-                        out.spawn_credits
-                            .extend((spawns..out.spawn.len()).map(|n| (n, c)));
+                        out.spawn_credits.extend(
+                            (spawns..out.spawn.len())
+                                .filter(|&n| {
+                                    matches!(
+                                        out.spawn[n].behaviour,
+                                        Behaviour::Bullet(_)
+                                            | Behaviour::Pellet(_)
+                                            | Behaviour::Rocket(_)
+                                            | Behaviour::Grenade(_)
+                                            | Behaviour::Star(_)
+                                    )
+                                })
+                                .map(|n| (n, c)),
+                        );
                     }
                 }
             }
@@ -1641,10 +1678,38 @@ impl Scene {
             out.launches.append(&mut o.launches);
             extra.push(o);
         }
+        // a explosão do foguete ou da granada à queima-roupa (`weapon_impact` na passada
+        // antes do voo) e as faíscas dela entram nas do tique
+        let off = out.blasts.len();
+        out.blast_credits
+            .extend(pre.blast_credits.drain(..).map(|(b, c)| (b + off, c)));
+        out.blasts.append(&mut pre.blasts);
+        out.effects.append(&mut pre.effects);
+        out.hazards.append(&mut pre.hazards);
+        if !pre.jake_damage.is_empty() {
+            out.jake_damage.add(&pre.jake_damage);
+        }
+        // o dano que um objeto pôs nos outros jogadores (fogo, cerca, raio, pistão) vai às
+        // saídas deles
+        let mut routed = std::mem::take(&mut out.seat_damage);
+        for o in extra.iter_mut() {
+            routed.append(&mut o.seat_damage);
+        }
+        for (i, p) in routed {
+            match i.checked_sub(1) {
+                None => out.jake_damage.add(&p),
+                Some(k) => {
+                    if let Some(o) = extra.get_mut(k) {
+                        o.jake_damage.add(&p);
+                    }
+                }
+            }
+        }
         self.schedule_regen(&alive_before);
         self.ai_shots_hit_human(&mut out);
         self.bullet_hits(&mut out);
-        behaviour::enemy_shot::object_hits(&mut self.entities, &mut self.rng, &mut out);
+        let hits = behaviour::enemy_shot::object_hits(&mut self.entities, &mut self.rng, &mut out);
+        self.pass_credits(&hits);
         self.weapon_hits(&mut out);
         self.resolve_impacts(&mut out);
         self.object_interactions(&mut out);
