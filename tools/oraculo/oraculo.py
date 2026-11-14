@@ -298,6 +298,10 @@ def cmd_run(a):
         dev = mem.u32(0x499014 + 4 * mem.i32(jogador + 0x198))
         if a.inicial:
             print(json.dumps(memoria.quadro(mem, -1, None, ids, a.todos)), file=saida)
+        if not a.tempo_real:
+            # 0x471988 = 0: a espera do fim do laço (0x404580) passa a ser 0 ms em vez de
+            # "prazo anterior + 50 ms"; o passo do jogo continua fixo (um tique por volta)
+            mem.w32(0x471988, 0)
         # o estado do `rand` no tique 0 também é fixado: o briefing sorteia conforme o
         # tempo que fica aberto
         memoria.escrever_rng(mem, rng_ini)
@@ -399,6 +403,8 @@ def main():
     r.add_argument("--shots", help="pasta para capturas de tela")
     r.add_argument("--shot-every", type=int, default=10)
     r.add_argument("--timeout", type=float, default=120, help="limite dos menus (s)")
+    r.add_argument("--tempo-real", action="store_true",
+                   help="mantém os 50 ms por tique (padrão: sem espera, o mais rápido possível)")
     r.add_argument("--keep", action="store_true", help="deixa o jogo aberto no fim")
     a = ap.parse_args()
     if a.cmd == "setup":
