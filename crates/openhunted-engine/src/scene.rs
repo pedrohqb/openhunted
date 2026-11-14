@@ -1070,8 +1070,8 @@ impl Scene {
                 layer,
             },
             Behaviour::Bullet(behaviour::bullet::BulletState {
-                vx: s.vx * SUB,
-                vy: s.vy * SUB,
+                vx: s.vx * SUB + s.nudge.0,
+                vy: s.vy * SUB + s.nudge.1,
                 prev: None,
                 spent: false,
                 // `spawn_shots` só cria as balas do Jake
@@ -2482,8 +2482,7 @@ mod tests {
             s.tick(0);
         }
         s.tick(crate::input::RIGHT);
-        s.tick(SHOOT);
-        s.tick(SHOOT); // t = 1: 1ª bala + cápsula
+        s.tick(SHOOT); // t = 1 no tique do aperto: 1ª bala + cápsula
         let bullets = |s: &Scene| {
             s.entities
                 .iter()
@@ -2608,10 +2607,11 @@ mod tests {
             s.tick(0);
         }
         s.tick(RIGHT);
+        // ATIRAR seguro nas três balas: soltá-lo com a direção sai do tiro na hora
         s.tick(DOWN | RIGHT | SHOOT);
         let mut sparks = 0;
-        for _ in 0..12 {
-            s.tick(DOWN | RIGHT);
+        for k in 0..12 {
+            s.tick(DOWN | RIGHT | if k < 2 { SHOOT } else { 0 });
             sparks += s
                 .events
                 .drain(..)

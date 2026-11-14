@@ -111,7 +111,11 @@ fn check_weapon(exe: &Exe, name: &str, addr: u32, w: &Weapon) {
         (kind(w.shot), kind(w.casing)),
         "{name}: projétil/cápsula"
     );
-    assert_eq!(d[29] != 0, w.spread, "{name}: rotina própria (desvio da rajada)");
+    assert_eq!(
+        d[29] != 0,
+        w.spread,
+        "{name}: rotina própria (desvio da rajada)"
+    );
     // dez estados: cima ×2, diag. cima ×2, frente ×2, diag. baixo ×2, baixo ×2; o port junta
     // diag. baixo e baixo (iguais em todas as armas)
     for k in 0..10 {
@@ -120,7 +124,11 @@ fn check_weapon(exe: &Exe, name: &str, addr: u32, w: &Weapon) {
         assert_eq!(d[8 + k], i32::from(label), "{name}: estado {k}");
         let raw = exe.i32s(d[18 + k] as u32, 18);
         let variant = w.blow.map_or(0, |b| b[slot]);
-        assert_eq!(raw, port_reg(&r, variant), "{name}: registro do estado {label}");
+        assert_eq!(
+            raw,
+            port_reg(&r, variant),
+            "{name}: registro do estado {label}"
+        );
     }
 }
 
@@ -164,7 +172,11 @@ fn weapon_orders_and_special_registers_match_the_executable() {
     ] {
         let p = ch.profile();
         let order: Vec<i32> = p.order.iter().map(|&w| w as i32).collect();
-        assert_eq!(exe.i32s(list, 7), [&order[..], &[0]].concat(), "{ch:?}: lista");
+        assert_eq!(
+            exe.i32s(list, 7),
+            [&order[..], &[0]].concat(),
+            "{ch:?}: lista"
+        );
         // registro do especial: janela `+0x04..+0x08` (com `t` já somado: o port guarda o
         // primeiro tique útil, 1 quando a janela começa em 0) e fim `+0x18`
         let r = exe.i32s(special, 18);
