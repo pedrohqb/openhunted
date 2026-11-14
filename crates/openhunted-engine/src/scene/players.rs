@@ -687,6 +687,12 @@ impl Scene {
             .entities
             .iter()
             .any(|e| matches!(e.behaviour, Behaviour::Exit(_)) && e.alive && e.on);
+        // a saída do laço (`edi`): a última da lista; sem ela, nada a esperar
+        let last_exit = self
+            .entities
+            .iter()
+            .rev()
+            .find(|e| matches!(e.behaviour, Behaviour::Exit(_)) && e.alive);
         match &self.mode {
             Mode::Solo => None,
             Mode::Coop => {
@@ -698,20 +704,38 @@ impl Scene {
                     .then_some(Outcome::Victory)
             }
             Mode::Deathmatch(d) => {
-                if d.time_limit_ms != 0 && self.elapsed_ms > d.time_limit_ms {
-                    return Some(Outcome::Defeat);
-                }
+                // o laço dos objetos: todos mortos → "2"; senão "1" com os objetivos
+                // ("acionar" ligado, "destruir" morto) cumpridos, "0" sem eles
+                let mut r = if all_dead {
+                    Some(Outcome::Defeat)
+                } else if crate::verdict::objectives_met(&self.entities, None) {
+                    Some(Outcome::Victory)
+                } else {
+                    None
+                };
+                // com limite de pontos, só o `F − S` decide
                 if d.points_limit != 0 {
                     let reached = self
                         .players
                         .iter()
                         .any(|p| p.stats.score() >= d.points_limit);
-                    return reached.then_some(Outcome::Defeat);
+                    r = reached.then_some(Outcome::Defeat);
                 }
-                if exit_on {
-                    return Some(Outcome::Victory);
+                if d.time_limit_ms != 0 && self.elapsed_ms > d.time_limit_ms {
+                    r = Some(Outcome::Defeat);
                 }
-                all_dead.then_some(Outcome::Defeat)
+                if r == Some(Outcome::Defeat) {
+                    return r;
+                }
+                // `0x43cf36`: com a saída desligada, nada; ligada (ou sem saída), sem limite
+                // de pontos, objetivos pendentes → "2" (`0x43cf68`)
+                if last_exit.is_some_and(|e| !e.on) {
+                    return None;
+                }
+                if d.points_limit == 0 && r.is_none() {
+                    return Some(Outcome::Defeat);
+                }
+                r
             }
         }
     }

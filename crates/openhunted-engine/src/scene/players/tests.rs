@@ -518,8 +518,10 @@ fn deathmatch_ends_by_points_time_or_exit() {
     run(&mut s, [0, 0], 39);
     assert_eq!(s.outcome, Some(Outcome::Defeat));
     assert_eq!(s.winner(), Some(1));
-    // tempo (relógio de quem chama)
+    // tempo (relógio de quem chama); a saída desligada segura o veredito (sem saída na
+    // fase, objetivos cumpridos já dariam "1", `0x43cf36`)
     let mut s = duo(with(0, 60_000), (100, PISTOL), (400, PISTOL));
+    exit_at(&mut s, 900);
     s.elapsed_ms = 60_000;
     run(&mut s, [0, 0], 50);
     assert_eq!(s.outcome, None);
@@ -527,15 +529,43 @@ fn deathmatch_ends_by_points_time_or_exit() {
     run(&mut s, [0, 0], 39);
     assert_eq!(s.outcome, Some(Outcome::Defeat));
     assert_eq!(s.winner(), None, "empate");
-    // saída, sem objetivos
+    // sem limite de pontos: a saída liga sem testar os objetivos, mas o veredito os testa
+    // (`0x43cdf0`/`0x43cf4c`): objetivo "acionar" pendente → "2"; cumprido → "1"
+    for done in [false, true] {
+        let mut s = duo(with(0, 0), (100, PISTOL), (400, PISTOL));
+        exit_at(&mut s, 95);
+        let mut piece = logic(crate::entity::CAR_PIECE, 900, 0, &[]);
+        piece.objective = crate::verdict::OBJ_ACTIVATE;
+        piece.behaviour = Behaviour::CarPiece;
+        piece.on = done;
+        piece.alive = !done;
+        s.entities.push(piece);
+        run(&mut s, [0, 0], 60);
+        assert_eq!(s.outcome, None, "saída desligada: nada");
+        run(&mut s, [UP, 0], 60);
+        let want = if done {
+            Outcome::Victory
+        } else {
+            Outcome::Defeat
+        };
+        assert_eq!(s.outcome, Some(want), "objetivo cumprido: {done}");
+    }
+    // os dois mortos contam antes da saída (no laço dos objetos): "2" com a saída ligada e
+    // os objetivos cumpridos
     let mut s = duo(with(0, 0), (100, PISTOL), (400, PISTOL));
     exit_at(&mut s, 95);
-    let mut piece = logic(crate::entity::CAR_PIECE, 900, 0, &[]);
-    piece.objective = crate::verdict::OBJ_ACTIVATE;
-    piece.behaviour = Behaviour::CarPiece;
-    s.entities.push(piece);
-    run(&mut s, [UP, 0], 60);
-    assert_eq!(s.outcome, Some(Outcome::Victory));
+    s.entities.last_mut().unwrap().on = true;
+    assert_eq!(s.evaluate_players(), Some(Outcome::Victory));
+    for i in 0..2 {
+        s.player_jake_mut(i).unwrap().health.hp = 0;
+    }
+    assert_eq!(s.evaluate_players(), Some(Outcome::Defeat));
+    s.player_jake_mut(0).unwrap().health.hp = 1;
+    assert_eq!(
+        s.evaluate_players(),
+        Some(Outcome::Victory),
+        "um vivo basta"
+    );
 }
 
 /// Item de vida em `x` (só o Jake o pega: 0x100).
@@ -688,4 +718,41 @@ fn coop_friendly_fire_and_timer() {
     s.timer = 1;
     run(&mut s, [0, 0], 40);
     assert_eq!(s.outcome, Some(Outcome::Defeat));
+}
+
+/// Foguete à queima-roupa (o 2 colado à boca, a 2 px do atirador): acerta já no tique em
+/// que nasce (antes de voar) e a explosão (dano de área, efeito `OEX`) não se perde.
+#[test]
+fn point_blank_rocket_explodes_with_area_damage() {
+    let mut s = duo(duel([J, J]), (100, ROCKETS), (400, PISTOL));
+    let b0 = s.player_jake(0).unwrap().body.bounds();
+    s.place_player(1, (b0.x + b0.w, FLOOR - 47), 0);
+    // uma mina saltadora logo atrás do 2, fora da linha do foguete: só a área a fere
+    s.entities.push(hop_mine(b0.x + b0.w + 40));
+    let m = s.entities.len() - 1;
+    let hp0 = s.entities[m].health;
+    let mut hit_at = None;
+    for t in 0..12 {
+        s.tick_players([SHOOT, 0]);
+        if s.player_jake(1).unwrap().health.hp < 100 && hit_at.is_none() {
+            hit_at = Some(t);
+        }
+        if hit_at.is_some() {
+            break;
+        }
+    }
+    assert!(hit_at.is_some(), "o 2 levou o foguete");
+    run(&mut s, [0, 0], 2);
+    assert!(
+        s.entities
+            .iter()
+            .any(|e| matches!(e.behaviour, Behaviour::Explosion(_))),
+        "a explosão aparece"
+    );
+    assert!(
+        s.player_jake(1).unwrap().health.hp < 100 - crate::behaviour::rocket::DAMAGE,
+        "dano direto e de área: {}",
+        s.player_jake(1).unwrap().health.hp
+    );
+    assert!(s.entities[m].health < hp0, "a área fere a mina atrás");
 }
