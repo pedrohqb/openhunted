@@ -5,6 +5,7 @@
 
 use openhunted_engine::render::Framebuffer;
 use openhunted_engine::scene::light::{Look, MAX_SHADE};
+use openhunted_engine::scene::view::ViewState;
 use openhunted_engine::{Assets, Scene};
 use openhunted_formats::{Level, open_data};
 
@@ -42,6 +43,9 @@ fn h_j_006_dark_rooms_hide_and_fade_in_through_the_shadow_tables() {
     assert!(!target.on, "a sala começa apagada");
     assert_eq!((c.visible, c.shade), (false, MAX_SHADE));
     let cam = c.origin;
+    // a vista na camada da sala (só a camada da vista sai inteira, `camadas-desenho.md`)
+    s.views = vec![ViewState::new(c.layer)];
+    scenery.views = s.views.clone();
     // apagada: o cenário da célula não aparece
     let dark = draw(&s, &mut a, cam);
     let mut lit = s.clone();
@@ -73,10 +77,15 @@ fn h_j_006_dark_rooms_hide_and_fade_in_through_the_shadow_tables() {
         sp.x = e.x;
         sp.y = e.y;
     }
-    assert!(draw(&probe, &mut a, cam).pixels.iter().any(|&p| p != 0));
+    let mut none = probe.clone();
+    none.entities.clear();
+    let empty = draw(&none, &mut a, cam);
+    assert_ne!(draw(&probe, &mut a, cam), empty);
     probe.lights.init(&|_| Some(false));
-    assert!(
-        draw(&probe, &mut a, cam).pixels.iter().all(|&p| p == 0),
+    none.lights.init(&|_| Some(false));
+    assert_eq!(
+        draw(&probe, &mut a, cam),
+        draw(&none, &mut a, cam),
         "objeto na célula invisível"
     );
     // acende: sombra 7 (tabela 25) no primeiro tique, 0 depois de mais 7

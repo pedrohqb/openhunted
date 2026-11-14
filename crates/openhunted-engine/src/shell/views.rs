@@ -7,9 +7,9 @@ use super::hud::BAR_H;
 use crate::physics::Rect;
 use crate::render::{SCREEN_H, SCREEN_W};
 
-/// Barra achatada (37 px) e altura de referência da escala de cada metade (`0x436a70`).
+/// Barra achatada (37 px). A altura de referência da escala de cada metade (240,
+/// `0x436a70`) é a da `View` da cena (`scene/view.rs`).
 pub const HALF_BAR_H: i32 = BAR_H / 2;
-pub const SPLIT_REFERENCE_H: i32 = 240;
 
 /// Retângulos de uma vista na tela 640×480: o jogo e a barra logo abaixo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -390,6 +390,7 @@ mod tests {
     use super::super::{END_DELAY_MS, JoyRaw, Key, Mode};
     use super::*;
     use crate::storage::{Storage, tests::temp};
+    use openhunted_engine::Framebuffer;
     use openhunted_engine::devices::Device;
     use openhunted_engine::input::{JUMP, LEFT, RIGHT, SHOOT};
     use openhunted_engine::shell::choose::ids as segoc;
@@ -577,6 +578,50 @@ mod tests {
         assert_eq!(a.mode(), Mode::Menu);
         assert!(a.records.iter().all(|&r| r == 0));
         assert!(a.save_path().is_none(), "sem jogo salvo");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn split_views_draw_each_half_through_the_scene_view() {
+        let Some((mut a, root)) = app("duo-views") else {
+            return;
+        };
+        coop(&mut a);
+        run(&mut a, 4);
+        let v = a.viewer_mut().unwrap();
+        // afasta as câmeras para que as metades mostrem pontos diferentes da fase
+        let s = v.scene_mut();
+        let f0 = s.focus_of(0).unwrap();
+        let (w, layer) = (s.width, s.layer_of(1).unwrap());
+        s.place_player(1, (if f0.0 > w / 2 { 200 } else { w - 200 }, f0.1), layer);
+        v.follow();
+        let fb = v.render().clone();
+        for (i, r) in views::layout(2).iter().enumerate() {
+            // a vista de cada metade: 640×203 no lugar dela, duas vistas (referência 240)
+            let view = v.view(i);
+            assert_eq!(view.screen, r.game);
+            assert_eq!(view.size, (640, 203));
+            assert_eq!((view.views, view.player), (2, Some(i)));
+            let l = view.state.layer;
+            if view.state.counter == 0 && l > 0 {
+                let raw = i64::from(view.state.raw_distance(l - 1));
+                let want = (raw * 240 / 203) as i32;
+                assert_eq!(view.layer_distance(l - 1), if want == 0 { 1 } else { want });
+            }
+            // o quadro da metade é o da `Scene::draw_view` direto no quadro, sem cópia
+            let mut want = Framebuffer::new(640, 480);
+            want.fill_rect(r.game.x, r.game.y, r.game.w, r.game.h, v.background());
+            let (scene, assets) = v.parts();
+            scene.draw_view(assets, &mut want, &view, false);
+            for y in r.game.y..r.game.y + r.game.h {
+                let row = y as usize * 640;
+                assert_eq!(
+                    fb.pixels[row..row + 640],
+                    want.pixels[row..row + 640],
+                    "vista {i}, linha {y}"
+                );
+            }
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

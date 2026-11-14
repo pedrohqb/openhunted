@@ -5,6 +5,7 @@
 
 use openhunted_engine::behaviour::chameleon::FADE_TICKS;
 use openhunted_engine::render::Framebuffer;
+use openhunted_engine::scene::view::ViewState;
 use openhunted_engine::{Assets, Behaviour, Scene, tint};
 use openhunted_formats::{Level, open_data};
 
@@ -20,9 +21,11 @@ fn load(level: &str) -> Option<(Scene, Assets)> {
     Some((s, a))
 }
 
-/// Desenha só a entidade `e` (sem cenário nem jogador) com a câmera sobre ela.
+/// Desenha só a entidade `e` (sem cenário nem jogador) com a câmera sobre ela, numa vista
+/// da camada dela; `None` desenha o fundo vazio (células vazias, cor 245).
 fn draw_alone(s: &Scene, a: &mut Assets, e: &openhunted_engine::Entity) -> Framebuffer {
     let mut only = s.clone();
+    only.views = vec![ViewState::new(e.layer)];
     // sem a luz por célula: a cor da rotina, isolada (o objeto pode estar numa sala apagada)
     only.lights = Default::default();
     only.sprites.clear();
@@ -43,14 +46,34 @@ fn assert_tinted(s: &Scene, a: &mut Assets, i: usize, what: &str) -> usize {
     let mut raw_e = e.clone();
     raw_e.behaviour = Behaviour::Static;
     let raw = draw_alone(s, a, &raw_e);
+    let mut none = e.clone();
+    none.alive = false;
+    let bg = draw_alone(s, a, &none);
     let mut high = 0;
-    for (k, (&p, &q)) in raw.pixels.iter().zip(&tinted.pixels).enumerate() {
-        let want = if p == 0 { 0 } else { map[usize::from(p)] };
-        assert_eq!(q, want, "{what}: pixel {k} (cru {p})");
+    for (k, ((&p, &q), &b)) in raw
+        .pixels
+        .iter()
+        .zip(&tinted.pixels)
+        .zip(&bg.pixels)
+        .enumerate()
+    {
+        // o 0 remapeado é transparente: fica o fundo; a arte com o índice do fundo (245)
+        // não se distingue dele no desenho cru
+        let m = map[usize::from(p)];
+        let want = if m == 0 { b } else { m };
+        assert!(
+            q == want || (p == b && q == b),
+            "{what}: pixel {k} (cru {p}): {q} em vez de {want}"
+        );
         high += usize::from(p >= 128);
     }
     assert!(high > 0, "{what}: a arte deveria usar a metade alta");
-    tinted.pixels.iter().filter(|&&p| p != 0).count()
+    tinted
+        .pixels
+        .iter()
+        .zip(&bg.pixels)
+        .filter(|(p, b)| p != b)
+        .count()
 }
 
 fn find(s: &Scene, kind: u32) -> usize {
@@ -102,8 +125,11 @@ fn invisible_chameleon_keeps_only_low_source_indices() {
     raw_e.behaviour = Behaviour::Static;
     let raw = draw_alone(&s2, &mut a, &raw_e);
     let tinted = draw_alone(&s2, &mut a, &s2.entities[i]);
-    for (&p, &q) in raw.pixels.iter().zip(&tinted.pixels) {
-        if q != 0 {
+    let mut none = s2.entities[i].clone();
+    none.alive = false;
+    let bg = draw_alone(&s2, &mut a, &none);
+    for ((&p, &q), &b) in raw.pixels.iter().zip(&tinted.pixels).zip(&bg.pixels) {
+        if q != b {
             assert!(p < 0x91, "sobrou o índice {p}");
         }
     }
@@ -124,6 +150,10 @@ fn player_tinted(level: &str, table: i32) {
     only.lights = Default::default();
     only.sprites.clear();
     only.entities.clear();
+    let mut bg = Framebuffer::new(320, 240);
+    let mut empty = only.clone();
+    empty.jake_sprite = None;
+    empty.draw(&mut a, &mut bg, camera, false);
     let mut tinted = Framebuffer::new(320, 240);
     only.draw(&mut a, &mut tinted, camera, false);
     // cru: o mesmo sprite como decoração (sem rotina de desenho)
@@ -134,8 +164,13 @@ fn player_tinted(level: &str, table: i32) {
     raw_scene.draw(&mut a, &mut raw, camera, false);
     let map = a.dls().unwrap().table(tint::Tint::new(table, 0), 0);
     let mut high = 0;
-    for (&p, &q) in raw.pixels.iter().zip(&tinted.pixels) {
-        assert_eq!(q, if p == 0 { 0 } else { map[usize::from(p)] });
+    for ((&p, &q), &b) in raw.pixels.iter().zip(&tinted.pixels).zip(&bg.pixels) {
+        let m = map[usize::from(p)];
+        let want = if m == 0 { b } else { m };
+        assert!(
+            q == want || (p == b && q == b),
+            "{q} em vez de {want} (cru {p})"
+        );
         high += usize::from(p >= 128);
     }
     assert!(high > 0);

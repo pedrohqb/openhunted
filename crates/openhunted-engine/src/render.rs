@@ -3,9 +3,33 @@
 
 use openhunted_formats::Frame;
 
+use crate::physics::Rect;
+
 /// Resolução da tela original.
 pub const SCREEN_W: usize = 640;
 pub const SCREEN_H: usize = 480;
+
+/// Modo de escrita dos pixels (`docs/re/camadas-desenho.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Blend {
+    /// Escreve tudo, inclusive o índice 0 (cenário da camada da vista).
+    Opaque,
+    /// Pula o índice 0 (objetos, decalques).
+    Transparent,
+    /// Modo `0x80`: só escreve onde o destino é 0 e a origem não é (camadas de trás).
+    Behind,
+}
+
+/// Recorte (x0, y0, x1, y1) de `r` nos limites do quadro.
+fn clip_to(r: Rect, width: usize, height: usize) -> (i64, i64, i64, i64) {
+    let (w, h) = (width as i64, height as i64);
+    (
+        i64::from(r.x).clamp(0, w),
+        i64::from(r.y).clamp(0, h),
+        (i64::from(r.x) + i64::from(r.w)).clamp(0, w),
+        (i64::from(r.y) + i64::from(r.h)).clamp(0, h),
+    )
+}
 
 /// Framebuffer de 8 bits (índices de paleta).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +158,104 @@ impl Framebuffer {
                     self.pixels[(dy * w + dx) as usize] = p;
                 }
             }
+        }
+    }
+
+    /// Estica `frame` ao retângulo `dst` (vizinho mais próximo), recortado por `clip`, com o
+    /// modo de `blend`; com `map`, cada pixel passa pela tabela antes do teste de
+    /// transparência (`0x44f641`) e do modo atrás (`0x44f6d4`).
+    pub fn blit_view(
+        &mut self,
+        frame: &Frame,
+        dst: Rect,
+        mirror: bool,
+        map: Option<&[u8; 256]>,
+        blend: Blend,
+        clip: Rect,
+    ) {
+        let ratio = (
+            (i64::from(dst.w), i64::from(frame.width)),
+            (i64::from(dst.h), i64::from(frame.height)),
+        );
+        self.blit_ratio(frame, dst, ratio, mirror, map, blend, clip);
+    }
+
+    /// Como `blit_view`, amostrando pela escala `num/den` de cada eixo (`((num, den), (num,
+    /// den))`): o pixel `d` do destino vem de `d·den/num` (como `blit_scaled`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn blit_ratio(
+        &mut self,
+        frame: &Frame,
+        dst: Rect,
+        ratio: ((i64, i64), (i64, i64)),
+        mirror: bool,
+        map: Option<&[u8; 256]>,
+        blend: Blend,
+        clip: Rect,
+    ) {
+        let (fw, fh) = (i64::from(frame.width), i64::from(frame.height));
+        let ((nx, dxr), (ny, dyr)) = ratio;
+        if frame.pixels.len() < (fw * fh) as usize
+            || fw == 0
+            || fh == 0
+            || dst.w <= 0
+            || dst.h <= 0
+            || nx <= 0
+            || ny <= 0
+        {
+            return;
+        }
+        let (dw, dh) = (i64::from(dst.w), i64::from(dst.h));
+        let (x, y) = (i64::from(dst.x), i64::from(dst.y));
+        let c = clip_to(clip, self.width, self.height);
+        let (x0, x1) = (x.max(c.0), (x + dw).min(c.2));
+        let (y0, y1) = (y.max(c.1), (y + dh).min(c.3));
+        let w = self.width as i64;
+        for dy in y0..y1 {
+            let sy = ((dy - y) * dyr / ny).clamp(0, fh - 1);
+            for dx in x0..x1 {
+                let mut sx = ((dx - x) * dxr / nx).clamp(0, fw - 1);
+                if mirror {
+                    sx = fw - 1 - sx;
+                }
+                let src = frame.pixels[(sy * fw + sx) as usize];
+                let p = map.map_or(src, |m| m[usize::from(src)]);
+                let o = &mut self.pixels[(dy * w + dx) as usize];
+                match blend {
+                    Blend::Opaque => *o = p,
+                    Blend::Transparent if p != 0 => *o = p,
+                    Blend::Behind if p != 0 && *o == 0 => *o = p,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Ponto na cor `color`, recortado por `clip`, com o modo de `blend`.
+    pub fn plot(&mut self, x: i32, y: i32, color: u8, blend: Blend, clip: Rect) {
+        let c = clip_to(clip, self.width, self.height);
+        let (x, y) = (i64::from(x), i64::from(y));
+        if x < c.0 || x >= c.2 || y < c.1 || y >= c.3 {
+            return;
+        }
+        let o = &mut self.pixels[(y * self.width as i64 + x) as usize];
+        if blend != Blend::Behind || *o == 0 {
+            *o = color;
+        }
+    }
+
+    /// Preenche `r ∩ clip`.
+    pub fn fill_clipped(&mut self, r: Rect, color: u8, clip: Rect) {
+        let c = clip_to(clip, self.width, self.height);
+        let (x0, y0) = (i64::from(r.x).max(c.0), i64::from(r.y).max(c.1));
+        let x1 = (i64::from(r.x) + i64::from(r.w)).min(c.2);
+        let y1 = (i64::from(r.y) + i64::from(r.h)).min(c.3);
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        for row in y0..y1 {
+            let base = (row * self.width as i64) as usize;
+            self.pixels[base + x0 as usize..base + x1 as usize].fill(color);
         }
     }
 
@@ -360,6 +482,105 @@ mod tests {
             height: 2,
             pixels: vec![0, 5, 6, 7, 0, 8],
         }
+    }
+
+    #[test]
+    fn view_blit_modes_and_clip() {
+        let all = Rect {
+            x: 0,
+            y: 0,
+            w: 4,
+            h: 2,
+        };
+        let at = Rect {
+            x: 0,
+            y: 0,
+            w: 3,
+            h: 2,
+        };
+        // opaco escreve o 0; transparente o pula
+        let mut fb = Framebuffer::new(4, 2);
+        fb.clear(9);
+        fb.blit_view(&sprite(), at, false, None, Blend::Opaque, all);
+        assert_eq!(fb.pixels, vec![0, 5, 6, 9, 7, 0, 8, 9]);
+        // atrás: só onde o destino é 0, e a origem (remapeada) não é 0
+        let mut map: [u8; 256] = std::array::from_fn(|i| (i as u8).wrapping_add(100));
+        map[0] = 0;
+        let mut back = Frame {
+            width: 3,
+            height: 2,
+            pixels: vec![1, 1, 1, 0, 2, 2],
+        };
+        fb.blit_view(&back, at, false, Some(&map), Blend::Behind, all);
+        assert_eq!(fb.pixels, vec![101, 5, 6, 9, 7, 102, 8, 9]);
+        // recorte: só a coluna 1
+        back.pixels = vec![3; 6];
+        let mut fb = Framebuffer::new(4, 2);
+        fb.blit_view(
+            &back,
+            at,
+            false,
+            None,
+            Blend::Transparent,
+            Rect {
+                x: 1,
+                y: 0,
+                w: 1,
+                h: 9,
+            },
+        );
+        assert_eq!(fb.pixels, vec![0, 3, 0, 0, 0, 3, 0, 0]);
+        // esticado ao dobro, espelhado
+        let mut fb = Framebuffer::new(6, 4);
+        fb.blit_view(
+            &sprite(),
+            Rect {
+                x: 0,
+                y: 0,
+                w: 6,
+                h: 4,
+            },
+            true,
+            None,
+            Blend::Opaque,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 6,
+                h: 4,
+            },
+        );
+        assert_eq!(&fb.pixels[..6], &[6, 6, 5, 5, 0, 0]);
+        fb.fill_clipped(
+            Rect {
+                x: -5,
+                y: 3,
+                w: 100,
+                h: 9,
+            },
+            4,
+            Rect {
+                x: 2,
+                y: 0,
+                w: 2,
+                h: 9,
+            },
+        );
+        assert_eq!(&fb.pixels[18..], &[8, 8, 4, 4, 7, 7]);
+        fb.plot(0, 0, 1, Blend::Behind, all);
+        fb.plot(
+            4,
+            0,
+            1,
+            Blend::Behind,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 6,
+                h: 4,
+            },
+        );
+        assert_eq!(&fb.pixels[..6], &[6, 6, 5, 5, 1, 0]);
     }
 
     #[test]

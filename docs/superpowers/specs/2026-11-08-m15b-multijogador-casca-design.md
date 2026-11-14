@@ -58,9 +58,9 @@ joystick: o mapa `Joystick1/2` do jogador. Um `InputReader` por jogador. As bati
   640×203, andando no máximo 18 px por eixo e tique. **Ruling: um salto do foco > 64 px num
   tique (renascimento, teletransporte) recentra na hora; a carga também. O solo segue
   centrando direto, como antes.**
-- Desenho: um ponto só, `draw_view(scene, assets, fb, camera, layer)` no `viewer.rs`, que hoje
-  desenha com `Scene::draw` num quadro 640×203 e o copia; quando a `Scene::draw_view` da
-  M16 chegar, só essa função muda.
+- Desenho (depois do merge da M16): cada metade é `Scene::view_of(i, câmera, retângulo,
+  (640, 203))` desenhada por `Scene::draw_view` direto no quadro (`Viewer::view`); a vista
+  conta duas vistas, e a normalização do `+0x4c` e das camadas usa a referência 240.
 - Barra achatada (`0x471cd0`, `0x45aee4`): **Ruling: a barra inteira desenhada em 640×75 e
   copiada uma linha sim, outra não** (difere do original em no máximo 1 linha de fase).
 - Disputa (`0x40b089`): no lugar do cronômetro, quadro 194 em `(x + w − largura, y + 30/2)`

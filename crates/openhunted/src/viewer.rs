@@ -7,12 +7,13 @@ use std::path::Path;
 use std::rc::Rc;
 
 use openhunted_engine::scene::Mode;
+use openhunted_engine::scene::view::View;
 use openhunted_engine::shell::hud::{self, Character, HudState, VIEW_H};
 use openhunted_engine::shell::views::{self, ViewRect};
 use openhunted_engine::sound::Cue;
 use openhunted_engine::{
-    Assets, Event, Framebuffer, Outcome, Rect, SCREEN_H, SCREEN_W, Scene, TICK_MS,
-    background_index, clamp_camera, display_palette, draw_text, measure_text,
+    Assets, Event, Framebuffer, Outcome, SCREEN_H, SCREEN_W, Scene, TICK_MS, background_index,
+    clamp_camera, display_palette, draw_text, measure_text,
 };
 use openhunted_formats::{Bitmap, Font, Frame, Level, Palette, open_data};
 
@@ -79,8 +80,6 @@ pub struct Viewer {
     taps2: u32,
     /// Relógio real da partida em ms (só enquanto o jogo anda): o limite de tempo da disputa.
     clock_ms: u64,
-    /// Quadro de uma vista da tela dividida (640×203).
-    view_fb: Framebuffer,
     /// Foco de cada vista no tique anterior (salto → recentrar na hora).
     last_focus: [Option<(i32, i32)>; 2],
 }
@@ -106,38 +105,6 @@ fn chase(cur: (i32, i32), target: (i32, i32), jump: i32) -> (i32, i32) {
 fn follow_camera(scene: &Scene, view: (i32, i32), focus: (i32, i32)) -> (i32, i32) {
     let want = (focus.0 - view.0 / 2, focus.1 - view.1 / 2);
     clamp_camera((scene.width, scene.height), view, want)
-}
-
-/// Desenha a vista de um jogador no retângulo `view` de `out`, com a câmera dela e a camada
-/// do jogador. Ponto único da troca pela `Scene::draw_view` da M16: até lá, `Scene::draw`
-/// num quadro do tamanho da vista (`scratch`) copiado para o lugar dela.
-#[allow(clippy::too_many_arguments)]
-fn draw_view(
-    scene: &Scene,
-    assets: &mut Assets,
-    out: &mut Framebuffer,
-    view: Rect,
-    camera: (i32, i32),
-    _layer: i32,
-    overlay: bool,
-    scratch: &mut Framebuffer,
-    background: u8,
-) {
-    if scratch.width != view.w as usize || scratch.height != view.h as usize {
-        *scratch = Framebuffer::new(view.w.max(1) as usize, view.h.max(1) as usize);
-    }
-    scratch.clear(background);
-    scene.draw(assets, scratch, camera, overlay);
-    for r in 0..scratch.height {
-        let y = view.y as usize + r;
-        if y >= out.height {
-            break;
-        }
-        let x = view.x.max(0) as usize;
-        let n = scratch.width.min(out.width.saturating_sub(x));
-        out.pixels[y * out.width + x..][..n]
-            .copy_from_slice(&scratch.pixels[r * scratch.width..][..n]);
-    }
 }
 
 impl Viewer {
@@ -209,7 +176,6 @@ impl Viewer {
             input2: 0,
             taps2: 0,
             clock_ms: 0,
-            view_fb: Framebuffer::new(1, 1),
             last_focus: [None; 2],
         }
     }
@@ -616,24 +582,33 @@ impl Viewer {
         self.fb.blit(br, x + w - bw, y + h - bh, true);
     }
 
-    /// Tela dividida: as duas vistas (cada uma com a sua câmera) e as barras achatadas.
+    /// A vista do jogador `i` na tela dividida (`Scene::view_of`): a metade dele no quadro,
+    /// 640×203, normalizada pela referência 240 de duas vistas (`camadas-desenho.md`).
+    pub fn view(&self, i: usize) -> View {
+        let g = self.views()[i.min(1)].game;
+        self.scene.view_of(i, self.camera_of(i), g, (g.w, g.h))
+    }
+
+    /// Índice da cor de fundo da paleta.
+    pub fn background(&self) -> u8 {
+        self.background
+    }
+
+    #[cfg(test)]
+    pub fn parts(&mut self) -> (&Scene, &mut Assets) {
+        (&self.scene, &mut self.assets)
+    }
+
+    /// Tela dividida: cada metade desenhada pela `Scene::draw_view` com a vista do jogador
+    /// dela (câmera, camada e transição próprias) e a barra achatada embaixo.
     fn render_split(&mut self) {
         self.fb.clear(0);
-        let views = self.views();
-        for (i, v) in views.iter().enumerate() {
-            let layer = self.scene.layer_of(i).unwrap_or(0);
-            let camera = self.camera_of(i);
-            draw_view(
-                &self.scene,
-                &mut self.assets,
-                &mut self.fb,
-                v.game,
-                camera,
-                layer,
-                self.overlay,
-                &mut self.view_fb,
-                self.background,
-            );
+        for (i, v) in self.views().iter().enumerate() {
+            let g = v.game;
+            self.fb.fill_rect(g.x, g.y, g.w, g.h, self.background);
+            let view = self.view(i);
+            self.scene
+                .draw_view(&mut self.assets, &mut self.fb, &view, self.overlay);
             if let Some(bar) = self.bar.clone() {
                 let state = self.hud_state_of(i);
                 hud::draw_half_hud(&mut self.fb, &bar, v.bar.x, v.bar.y, v.bar.w, &state);
