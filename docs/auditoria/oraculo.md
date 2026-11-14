@@ -47,8 +47,8 @@ O que o script faz (Ubuntu 24.04, root), e por quê:
   eixos `+0x94/+0x96` = ±128, botões `+0x98…+0x9d` (atirar, pular, furtivo, próxima,
   anterior, soco). `0x407e2d` os converte em `0x487a2c` dentro da atualização do Jake;
   como o jogo copia `+0x8c…+0x9f` para `+0xa0` antes de ler, as bordas (0x10…0x80,
-  0x2000…) saem certas. O teclado real é lido pelo jogo (`GetAsyncKeyState`) mas
-  sobrescrito antes do uso. Mesma sintaxe de letras do `ohtool render --input`.
+  0x2000…) saem certas. O teclado real é lido pelo jogo (`0x449e38`:
+  `GetAsyncKeyState`/`GetKeyState`) mas sobrescrito antes do uso. Mesma sintaxe de letras do `ohtool render --input`.
 - **Reprodutível.** O `rand` (`0x460a74`, aditivo atrasado de 56 palavras em `0x483920`,
   índices `0x483918/0x48391c`) nunca é semeado pelo relógio: o oráculo grava nele o estado
   do arquivo na carga da fase **e** no tique 0 (o briefing sorteia conforme o tempo aberto).
@@ -56,9 +56,11 @@ O que o script faz (Ubuntu 24.04, root), e por quê:
   dica modal e minas explodindo no meio).
 - **Rápido.** `0x471988 = 0` zera a espera de 50 ms do fim do laço (`0x404580`); o passo
   continua um tique por volta e o rastro é idêntico ao do tempo real (`--tempo-real`
-  mantém os 50 ms). ~4–8 s de menus + ~1 ms por tique.
-- **Menus.** Esc até o menu aparecer (o menu e o briefing põem o ponteiro no centro do
-  botão padrão: é o sinal), clique em New Game, DR1 troca a fase, clique em GO.
+  mantém os 50 ms). 5–30 s de menus (conforme a carga da máquina) + ~5 ms por tique.
+- **Menus.** Return a cada segundo: interrompe a abertura (qualquer tecla) e aciona o botão
+  padrão do menu (New Game). DR1 troca a fase; o briefing põe o ponteiro no centro do GO
+  (`briefing.md`) e o oráculo clica ali (Return a cada 3 s de reserva) até o tique 0.
+  Falha nos menus deixa a tela em `/tmp/oraculo-falha.png`.
 - **Objetos.** Como `0x43cfcf`: a lista global `0x488e7c` (ordenada por `+0x1b4`,
   `"lista": "g"`), as listas das células (`[0x488e84]` com `gx·gy·gz` ponteiros, lista em
   `+0xd0`, `"c"`: itens, decoração animada) e a dos destruídos `0x488e80` (`"m"`). Item
@@ -151,9 +153,9 @@ Leitura:
    vai ao rótulo 29 (pulo correndo, vx −80) e o porte ao 27 (pulo parado).
 5. **Garathe** (`T_M_002`, `10*,20*R`): o original corre 14 px/tique (vx 120), o porte 15
    (vx 113), também um tique antes.
-6. **Objetos.** Minas (102) e itens (79, 32) começam em quadros sorteados no original (11,
-   5, 10, 2, 8…; vida 6, cristal 4) e no 1 no porte; posições das minas divergem depois
-   (sorteio do rumo).
+6. **Objetos.** Minas (102) e itens (tipos 79 e 32) começam em quadros sorteados no
+   original (minas 11, 5, 10, 2, 8…; tipo 32 no 6, 79 no 4) e no 1 no porte; posições de
+   algumas minas divergem depois (sorteio do rumo).
 
 Os itens 1–6 são entradas para as áreas `jake-movimentos.md`, `garathe-movimentos.md` e
 `itens-objetos.md`: o oráculo só mede.
