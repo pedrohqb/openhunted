@@ -52,7 +52,7 @@ pub(super) fn anim(s: State) -> (u16, u32) {
     match s {
         State::Idle | State::Teleporting(_) | State::Shake => (1, 1),
         State::Run => (10, 0),
-        State::Push => (46, 1),
+        State::Push | State::PushEnd => (46, 1),
         State::StandJump => (21, 0),
         State::RunUp => (24, 1),
         State::Jump(JumpKind::Medium) => (22, 1),
@@ -64,7 +64,7 @@ pub(super) fn anim(s: State) -> (u16, u32) {
         State::Land(Landing::Long) => (24, 2),
         State::Land(Landing::Hard) => (30, 0),
         State::GetUp => (31, 0),
-        State::Rise => (35, 0),
+        State::Rise | State::SitUp => (35, 0),
         State::Jolted => (63, 0),
         State::Taunt => (76, 0),
         State::Pushed => (58, 0),

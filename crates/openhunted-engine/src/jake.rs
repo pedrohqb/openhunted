@@ -20,6 +20,8 @@ use crate::physics::{Body, Rect, SUB, World, step};
 pub use weapons::{FISTS, GRENADES, PISTOL, ROCKETS, SHOTGUN, STARS, ShotKind, weapon};
 
 // Corrida, pulos e sondas: no perfil do personagem (`crate::character`).
+/// Fim do pulo médio/longo contra a parede (`0x004255c4`, `0xe80`).
+const SOUND_JUMP_WALL: u16 = 3712;
 /// Queda: descendo a 5 px/tique ou mais sem chão (`0x0042416f`).
 const FALL_SPEED: i32 = 5 * SUB;
 
@@ -97,6 +99,8 @@ pub enum State {
     BarPull,
     BarUp,
     BarDown,
+    /// Fim do empurrar (Jake 102, `0x00425ced`: o 100 ao contrário, depois parado).
+    PushEnd,
     /// Empurrado (estado 168, `0x00423366`).
     Pushed,
     /// Derrubado em voo (estados 81/82, `0x004235fc`); `true` = jogado para a direita.
@@ -126,8 +130,11 @@ pub enum State {
     /// Levado por um teletransporte (`0x4136ef`): invisível, sem entrada nem dano; tiques
     /// desde a partida.
     Teleporting(u32),
-    /// Só o Garathe: levantar depois de derrubado para trás ou do tranco (35 `MNBLGTUP`).
+    /// Levantar: Garathe 35 `MNBLGTUP` (derrubado para trás ou tranco); Jake 84 (depois do
+    /// 83 ou do tranco, `0x00425bdf`).
     Rise,
+    /// Só o Jake: sentar depois de derrubado para trás (83 `BK2STAND`, `0x00425b99`).
+    SitUp,
     /// Só o Garathe: tranco (59, rótulo 63; desliza pelo esqueleto com k = 2).
     Jolted,
     /// Pose de provocação com a entrada exatamente 0xf (Jake: estado 4, rótulo 18,
@@ -285,8 +292,8 @@ impl Inventory {
 /// Rótulos das animações de morte (`docs/re/dano-vida.md`). O estado 177 do original toca o
 /// rótulo `J077`: o rótulo 177 não existe no `JAKE.ANM`.
 pub const DIE_DEFAULT: u16 = 173;
-pub const DIE_KNOCKED_RIGHT: u16 = 77;
-pub const DIE_KNOCKED_LEFT: u16 = 179;
+pub const DIE_KNOCKED_FORWARD: u16 = 77;
+pub const DIE_KNOCKED_BACK: u16 = 179;
 pub const DIE_POISON: u16 = 171;
 /// Todos os rótulos usados pelos estados (para conferir contra o `JAKE.ANM` real).
 pub const ALL_LABELS: [u16; 48] = [
@@ -312,8 +319,8 @@ pub const ALL_LABELS: [u16; 48] = [
     15,
     12,
     DIE_DEFAULT,
-    DIE_KNOCKED_RIGHT,
-    DIE_KNOCKED_LEFT,
+    DIE_KNOCKED_FORWARD,
+    DIE_KNOCKED_BACK,
     23,
     56,
     54,
@@ -355,6 +362,7 @@ fn jake_anim(s: State) -> (u16, u32) {
         State::Idle => (1, 1),
         State::Run => (10, 0),
         State::Push => (100, 0),
+        State::PushEnd => (100, 0),
         State::StandJump => (27, 0),
         State::RunUp => (31, 0),
         State::Jump(JumpKind::Medium) => (29, 0),
@@ -403,8 +411,10 @@ fn jake_anim(s: State) -> (u16, u32) {
         State::BarPull | State::BarDown => (105, 0),
         State::BarUp => (104, 0),
         State::Teleporting(_) => (1, 1),
-        State::Rise => (78, 0),
-        State::Jolted => (168, 0),
+        State::Rise => (84, 0),
+        State::SitUp => (83, 0),
+        // tranco: estado 169, rótulo 173 (`0x00426c5e`)
+        State::Jolted => (173, 0),
         State::Taunt => (18, 0),
     }
 }
@@ -413,7 +423,7 @@ fn jake_anim(s: State) -> (u16, u32) {
 fn jake_reversed(s: State) -> bool {
     matches!(
         s,
-        State::LetGo | State::StandUp | State::Unhide | State::BarDown
+        State::LetGo | State::StandUp | State::Unhide | State::BarDown | State::PushEnd
     )
 }
 
@@ -475,6 +485,8 @@ pub struct Jake {
     /// Jake: controle no ar (`0x00408205`) pedido neste tique, com o lado das setas; vale
     /// depois da velocidade do esqueleto (que ele sobrepõe), como no original.
     air_side: Option<Option<bool>>,
+    /// Deslocamento horizontal real do último tique, em 1/8 px (`+0x15c`).
+    moved: i32,
     /// Esqueleto (`JAKE.SKE`) com a escala do Jake; sem ele, nada se move pelo esqueleto.
     skel: Option<Skel>,
     /// Camada (`+0x17c`).
@@ -542,6 +554,7 @@ impl Jake {
             anim_mode: AnimMode::Auto,
             ske_req: None,
             air_side: None,
+            moved: 0,
             skel: None,
             layer: 0,
             box_default: boxr,
@@ -626,6 +639,8 @@ impl Jake {
     /// Rótulo e atraso do estado `s` para este personagem.
     fn anim_of(&self, s: State) -> (u16, u32) {
         match (self.character, s) {
+            // empurrar: 100 até o fim, depois o laço 101
+            (Character::Jake, State::Push) if self.push_loop => (101, 0),
             (Character::Jake, _) => jake_anim(s),
             (Character::Garathe, State::KnockedDown(right)) => {
                 (garathe::knocked_label(right, self.facing_right), 1)
@@ -1033,23 +1048,42 @@ impl Jake {
         }
         let g = self.is_garathe();
         let layering = matches!(self.state, State::LayerUp(_) | State::LayerDown(_));
-        // empurrão: Jake em 1/10/101; Garathe em 1, 54–56 e 58 (`0x428531`)
+        // empurrão: Jake em 1, 6, 79 e 164–166 (`0x00423366`); Garathe em 1, 54–56 e 58
+        // (`0x428531`)
         let shovable = if g {
             matches!(
                 self.state,
                 State::Idle | State::Hide | State::Hidden | State::Unhide | State::Pushed
             )
         } else {
-            matches!(self.state, State::Idle | State::Run | State::Push)
+            matches!(
+                self.state,
+                State::Idle | State::Shake | State::Hide | State::Hidden | State::Unhide
+            )
         };
-        if p.knockdown && !(g && layering) {
+        if p.knockdown && !layering {
+            // Garathe: o lado do empurrão; Jake: empurrado para onde olha (81) ou não (82)
+            // (`0x0042365e`)
             let right = p.push.0 >= 0;
+            let flag = if g {
+                right
+            } else {
+                right == self.facing_right && p.push.0 != 0
+            };
             self.body.vx = p.push.0 * SUB;
             self.body.vy = p.push.1 * SUB;
-            self.set(State::KnockedDown(right));
+            self.set(State::KnockedDown(flag));
         } else if p.shove && shovable {
             self.body.vx = p.push.0 * SUB;
             self.set(State::Pushed);
+        } else if !g && p.jolt && moves::jake_joltable(self.state) {
+            // tranco do Jake (`0x004233e3`): 169 e levantar (84); na corda, queda
+            self.body.vx = 0;
+            if matches!(self.state, State::Climb(_)) {
+                self.set(State::Fall);
+            } else {
+                self.set(State::Jolted);
+            }
         } else if g && p.jolt && moves::joltable(self.state) {
             // tranco (`0x42859e`): 59, ou queda na corda
             self.body.vx = 0;
@@ -1079,8 +1113,8 @@ impl Jake {
                 State::Rise if g => garathe::DIE_BACK,
                 _ if g && p.poison => garathe::DIE_POISON,
                 _ if g => garathe::DIE_DEFAULT,
-                State::KnockedDown(true) => DIE_KNOCKED_RIGHT,
-                State::KnockedDown(false) => DIE_KNOCKED_LEFT,
+                State::KnockedDown(true) => DIE_KNOCKED_FORWARD,
+                State::KnockedDown(false) => DIE_KNOCKED_BACK,
                 _ if p.poison => DIE_POISON,
                 _ => DIE_DEFAULT,
             };
@@ -1405,6 +1439,13 @@ impl Jake {
                 }
                 self.body.vx = 0;
             }
+            State::Push if !self.is_garathe() => self.tick_push(input, env, side),
+            State::PushEnd => {
+                self.body.vx = 0;
+                if self.anim_done() {
+                    self.set(State::Idle);
+                }
+            }
             State::Idle | State::Run | State::Push => {
                 self.decide_standing(input, env, jump, side);
             }
@@ -1443,9 +1484,10 @@ impl Jake {
                     // fim do 80 ainda no ar → queda descontrolada (76)
                     self.set(State::WildFall);
                 } else {
-                    if self.is_garathe() && self.anim_done() {
-                        // 22/25: a animação toca uma vez e para no último quadro; só então
-                        // vê chão, parede e contato (`0x429e46`, `0x429c6c`)
+                    if (self.is_garathe() || kind != JumpKind::Extended) && self.anim_done() {
+                        // Garathe 22/25, Jake 28/29: a animação toca uma vez e para no último
+                        // quadro; só então vê chão, parede e contato (`0x429e46`, `0x429c6c`;
+                        // `0x42557d`, `0x42572a`)
                         self.anim_mode = AnimMode::Hold;
                         jump_over = true;
                     }
@@ -1479,10 +1521,6 @@ impl Jake {
                 self.frame = 0;
                 self.label_changed = true;
             }
-        } else {
-            let (push_label, push_c) = self.anim_of(State::Push);
-            self.door_push = self.state == State::Push
-                && self.ticks + 1 == self.len_of(push_label) as u32 * (push_c + 1);
         }
         // a caixa do estado vale já para a física deste tique (o BRD troca com o estado)
         self.fit_box(world);
@@ -1504,7 +1542,9 @@ impl Jake {
         let was_rising = self.body.vy < 0;
         let y0 = self.body.y;
         let gravity = self.gravity_on();
+        let x0 = self.body.x;
         step(&mut self.body, world, gravity);
+        self.moved = (self.body.x - x0) * SUB;
         let attacking = pressed(SHOOT | PUNCH);
         match self.state {
             // Garathe no meio do pulo: nada decide até a animação acabar
@@ -1522,6 +1562,23 @@ impl Jake {
                 self.body.vx = 0;
                 self.set(State::Fall);
             }
+            // Jake 28/29 antes do fim do rótulo: nada (pousar num degrau não interrompe)
+            State::Jump(JumpKind::Medium | JumpKind::Long) if !jump_over => {}
+            // fim do 28/29 contra a parede no ar: som 3712 e queda (`0x4255a8`, `0x425755`)
+            State::Jump(JumpKind::Medium | JumpKind::Long)
+                if !self.is_garathe() && self.body.hit_wall && !self.body.on_ground =>
+            {
+                self.sound = Some(SOUND_JUMP_WALL);
+                self.set(State::Fall);
+            }
+            // 80 no ar com contato que não é chão: pose 1 (`0x4254c7`)
+            State::Jump(JumpKind::Extended)
+                if !self.is_garathe()
+                    && !self.body.on_ground
+                    && (self.body.hit_wall || self.body.hit_ceiling) =>
+            {
+                self.set(State::Idle);
+            }
             State::Jump(_) | State::Fall | State::WildFall
                 if self.body.on_ground && !was_rising =>
             {
@@ -1537,6 +1594,12 @@ impl Jake {
                 if landing == Landing::Long && self.is_garathe() {
                     self.sound = Some(garathe::SOUND_LONG_LANDING);
                 }
+            }
+            // fim do 28/29 com outro contato (teto): pose 1 (`0x4255ef`, `0x42579c`)
+            State::Jump(JumpKind::Medium | JumpKind::Long)
+                if !self.is_garathe() && self.body.hit_ceiling =>
+            {
+                self.set(State::Idle);
             }
             State::JumpUp(_) if self.body.hit_ceiling && self.ceiling_is_bar(world) => {
                 self.body.vx = 0;
@@ -1651,6 +1714,32 @@ impl Jake {
                     self.body.vx = 0;
                     self.set(State::Idle);
                 }
+            }
+            State::KnockedDown(forward) if !self.is_garathe() => {
+                // 81/82 (`0x00425a46`, `0x00425af4`): corda; o rótulo toca uma vez e só no
+                // fim olha o chão: 81 → 77 (no ar, 76); 82 → 83 (no ar, segue no último
+                // quadro)
+                if self.try_grab_in_air(input, env) {
+                    self.fit_box(world);
+                    self.animate();
+                    self.finish_tick();
+                    return;
+                }
+                if self.anim_done() {
+                    self.anim_mode = AnimMode::Hold;
+                    if self.body.on_ground {
+                        self.body.vx = 0;
+                        self.body.vy = 0;
+                        self.set(if forward {
+                            State::Land(Landing::Hard)
+                        } else {
+                            State::SitUp
+                        });
+                    } else if forward {
+                        self.set(State::WildFall);
+                    }
+                }
+                step(&mut self.body, world, true);
             }
             State::KnockedDown(_) => {
                 // arremessado (81/82): agarra a corda como nos pulos (`jake-escalada.md`)
@@ -2039,7 +2128,8 @@ mod tests {
         assert_eq!(j.state(), State::Shocked(1));
         j.tick(0, &w);
         assert_eq!((j.state(), j.body.x), (State::Idle, x));
-        // derrubada para a direita: voa e aterrissa
+        // derrubada para a direita, olhando para a esquerda: para trás (82, `0x0042365e`);
+        // voa, aterrissa, senta (83) e levanta (84)
         j.hurt(Pending {
             amount: 5,
             explosion: true,
@@ -2048,9 +2138,9 @@ mod tests {
             ..Default::default()
         });
         j.tick(0, &w);
-        assert_eq!((j.state(), j.label()), (State::KnockedDown(true), 81));
+        assert_eq!((j.state(), j.label()), (State::KnockedDown(false), 82));
         assert!(j.body.x > x && j.body.vy < 0);
-        for _ in 0..40 {
+        for _ in 0..80 {
             j.tick(0, &w);
         }
         assert_eq!(j.state(), State::Idle);
@@ -2069,7 +2159,8 @@ mod tests {
         }
         assert_eq!((j.state(), j.label(), j.body.x), (State::Dead, 173, x));
         assert!(!j.advance());
-        // derrubado e morto na mesma pancada: rótulo 177/179 pelo lado
+        // derrubado e morto na mesma pancada: 177 (rótulo 77) se empurrado para onde olha,
+        // 179 se para trás (`0x0042368d`)
         let mut j = jake_on(&w, 0).with_health(1, 0);
         j.hurt(Pending {
             amount: 9,
@@ -2078,7 +2169,16 @@ mod tests {
             ..Default::default()
         });
         j.tick(0, &w);
-        assert_eq!(j.state(), State::Dying(DIE_KNOCKED_LEFT));
+        assert_eq!(j.state(), State::Dying(DIE_KNOCKED_FORWARD));
+        let mut j = jake_on(&w, 0).with_health(1, 0);
+        j.hurt(Pending {
+            amount: 9,
+            push: (8, -8),
+            knockdown: true,
+            ..Default::default()
+        });
+        j.tick(0, &w);
+        assert_eq!(j.state(), State::Dying(DIE_KNOCKED_BACK));
     }
 
     #[test]

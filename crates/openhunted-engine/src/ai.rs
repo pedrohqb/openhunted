@@ -105,12 +105,15 @@ pub fn class_of(s: State, ch: Character) -> u8 {
         State::LayerUp(_) | State::LayerDown(_) if ch == Character::Garathe => WALK,
         State::LayerUp(_) | State::LayerDown(_) => LAYER,
         State::StandJump | State::RunUp | State::JumpUp(_) | State::Jump(_) => RISE,
-        State::Land(_) | State::WildFall | State::GetUp | State::KnockedDown(_) | State::Rise => {
-            LAND
-        }
+        State::Land(_)
+        | State::WildFall
+        | State::GetUp
+        | State::KnockedDown(_)
+        | State::Rise
+        | State::SitUp => LAND,
         State::Fall => FALL,
         State::Crouch | State::Crawl | State::StandUp => CROUCH,
-        State::Push => PUSH,
+        State::Push | State::PushEnd => PUSH,
         State::Hide | State::Hidden | State::Unhide => HIDDEN,
         State::BarHang | State::BarMove | State::BarPull | State::BarUp | State::BarDown => BAR,
         State::Climb(_) => CLIMB,

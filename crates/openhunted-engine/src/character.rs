@@ -47,7 +47,7 @@ pub struct Profile {
     pub kind: u32,
     /// Corrida em px/tique (Jake `0x00478928`; Garathe `0x0047d144`).
     pub run: i32,
-    /// Velocidade ao empurrar a parede (Garathe `vx = ±8`, `0x0042a9a4`).
+    /// Velocidade ao empurrar a parede (Jake ±4, `0x00425c9b`; Garathe ±8, `0x0042a9a4`).
     pub push: i32,
     /// Lançamento (vx, vy) dos pulos médio e longo e, no Jake, do estendido.
     pub medium: (i32, i32),
@@ -78,7 +78,8 @@ pub struct Profile {
 pub const JAKE: Profile = Profile {
     kind: 1,
     run: 12,
-    push: 12,
+    // `0x00425c9b`: ±32 em 1/8 px
+    push: 4,
     medium: (10, -11),
     long: (10, -15),
     extended: Some((17, -15)),

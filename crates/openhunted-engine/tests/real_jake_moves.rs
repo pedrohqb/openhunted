@@ -4,6 +4,7 @@
 //! sintéticos, medindo alturas, distâncias, durações em tiques e velocidades. Os valores
 //! esperados são os do executável (endereços nos comentários).
 
+use openhunted_engine::damage::Pending;
 use openhunted_engine::input::{DOWN, JUMP, LEFT, PUNCH, RIGHT, SHOOT, STEALTH, UP};
 use openhunted_engine::jake::{Env, Zone, zone};
 use openhunted_engine::{Assets, Jake, Rect, Scene, State, World};
@@ -162,7 +163,6 @@ fn stand_jump_air_control_only_in_the_air() {
     let xs: Vec<i32> = r.log.iter().map(|e| e.1).collect();
     assert_eq!(&xs[..10], &[100; 10], "agachado não desliza: {}", r.dump());
     assert_eq!(xs[10] - xs[9], 8, "{}", r.dump());
-    assert_eq!(xs[13] - xs[12], 8, "{}", r.dump());
 }
 
 /// Queda controlada (25, `0x0042424d`): chama o controle no ar, ±8 px/tique para o lado
@@ -252,6 +252,221 @@ fn rope_jump_waits_nine_frames_then_vy_minus_20() {
     assert!(land.is_some() && land < idle, "{}", r.dump());
 }
 
+/// PULAR + CIMA + lado é o pulo longo direto (28, `0x00423f35`), parado ou correndo;
+/// correndo (ou andando), PULAR sem CIMA escolhe pela sonda mesmo sem seta
+/// (`0x00423f4d` → `0x425144`): no oráculo, `5*L,J` dá o 29 com vx −80.
+#[test]
+fn up_side_jump_is_long_and_running_jump_needs_no_arrow() {
+    use openhunted_engine::JumpKind;
+    let Some(mut r) = Run::flat(0) else { return };
+    r.tick(LEFT | UP | JUMP);
+    assert_eq!(r.j.state(), State::Jump(JumpKind::Long), "{}", r.dump());
+    let Some(mut r) = Run::flat(0) else { return };
+    r.ticks(LEFT, 5);
+    r.tick(LEFT | UP | JUMP);
+    assert_eq!(r.j.state(), State::Jump(JumpKind::Long), "{}", r.dump());
+    let Some(mut r) = Run::flat(0) else { return };
+    r.ticks(LEFT, 5);
+    r.tick(JUMP);
+    assert_eq!(r.j.state(), State::Jump(JumpKind::Medium), "{}", r.dump());
+    assert_eq!(r.j.body.vx, -80);
+}
+
+/// O controle no ar compara a seta com o deslocamento real do tique anterior (`+0x15c`):
+/// depois de andar 8 px no ar ele não age e a velocidade do esqueleto (0) fica; no
+/// oráculo (`J,9*,15*L` na T_J_001) o Jake anda 8 px a cada dois tiques no pulo 27.
+#[test]
+fn air_control_alternates_after_moving_eight_pixels() {
+    let Some(mut r) = Run::flat(1000) else { return };
+    r.tick(JUMP);
+    r.ticks(0, 9);
+    r.ticks(LEFT, 6);
+    let xs: Vec<i32> = r.log[10..].iter().map(|e| e.1).collect();
+    assert_eq!(xs, vec![992, 992, 984, 984, 976, 976], "{}", r.dump());
+}
+
+/// Empurrar (`0x00425c34`, `0x00425d04`, `0x00425ced`), medido no oráculo (`25*R` contra a
+/// parede da T_J_001): 100 uma vez (6 tiques) com vx = 4 px/tique, então som 5043
+/// (`0x13b3`) e o laço 101 (5 quadros); PULAR não faz nada; soltar a seta toca o 102 (o
+/// 100 ao contrário, 6 tiques) e só então parado.
+#[test]
+fn push_plays_100_then_loops_101_and_ends_with_102() {
+    let wall = Rect {
+        x: 200,
+        y: FLOOR - 200,
+        w: 40,
+        h: 200,
+    };
+    let Some(mut r) = Run::new(vec![slab(-5000, 5000, FLOOR), wall], 150) else {
+        return;
+    };
+    let mut sounds = Vec::new();
+    for t in 0..30 {
+        r.tick(if (12..18).contains(&t) {
+            RIGHT | JUMP
+        } else {
+            RIGHT
+        });
+        sounds.extend(r.j.sound.take());
+    }
+    let push = r.first(|s| s == State::Push).expect("empurra");
+    assert!(
+        r.log[push..].iter().all(|e| e.0 == State::Push),
+        "PULAR não pula: {}",
+        r.dump()
+    );
+    assert_eq!(sounds, vec![5043]);
+    assert_eq!(r.j.label(), 101);
+    r.log.clear();
+    r.ticks(0, 8);
+    let st: Vec<State> = r.log.iter().map(|e| e.0).collect();
+    assert_eq!(&st[..6], &[State::PushEnd; 6], "{}", r.dump());
+    assert_eq!(r.log[0].3, 5, "102 = o 100 ao contrário");
+    assert_eq!(st[6], State::Idle, "{}", r.dump());
+}
+
+/// Pulos 28/29 (`0x004254df`, `0x0042568c`): o rótulo toca uma vez e para no último
+/// quadro (no oráculo, `29/8` fica até o pouso); só então olham o chão. Pousando antes do
+/// fim (num degrau), seguem no 29 até o rótulo acabar.
+#[test]
+fn launched_jumps_hold_the_last_frame_and_land_only_after_it() {
+    use openhunted_engine::JumpKind;
+    // do alto de uma plataforma: o voo passa do fim do rótulo
+    let Some(mut r) = Run::new(
+        vec![slab(-5000, 5000, FLOOR + 200), slab(-10, 100, FLOOR)],
+        0,
+    ) else {
+        return;
+    };
+    r.tick(LEFT | JUMP);
+    r.ticks(0, 20);
+    let medium: Vec<usize> = r
+        .log
+        .iter()
+        .filter(|e| e.0 == State::Jump(JumpKind::Medium))
+        .map(|e| e.3)
+        .collect();
+    assert_eq!(medium.last(), Some(&8), "{}", r.dump());
+    assert!(
+        medium.windows(2).all(|w| w[1] >= w[0]),
+        "sem laço: {}",
+        r.dump()
+    );
+    // degrau 22 px acima, 20 px à frente: toca o topo antes do fim do rótulo
+    let step = Rect {
+        x: -400,
+        y: FLOOR - 22,
+        w: 380,
+        h: 22,
+    };
+    let Some(mut r) = Run::new(vec![slab(-5000, 5000, FLOOR), step], 0) else {
+        return;
+    };
+    r.tick(LEFT | JUMP);
+    r.ticks(0, 14);
+    let land = r.first(|s| matches!(s, State::Land(_))).expect("pousa");
+    assert_eq!(land, 9, "{}", r.dump());
+}
+
+/// Pulo estendido (80, `0x004253d3`): contato que não é chão durante a animação → pose 1
+/// (`0x004254c7`) no ar, em vez da queda descontrolada no fim.
+#[test]
+fn extended_jump_hitting_a_wall_goes_to_idle_pose() {
+    let wall = Rect {
+        x: 100,
+        y: FLOOR - 300,
+        w: 20,
+        h: 270,
+    };
+    let Some(mut r) = Run::new(
+        vec![slab(-5000, 0, FLOOR), slab(200, 5000, FLOOR), wall],
+        -30,
+    ) else {
+        return;
+    };
+    r.tick(RIGHT | JUMP);
+    assert_eq!(r.j.state(), State::RunUp, "{}", r.dump());
+    r.ticks(0, 12);
+    let idle = r.first(|s| s == State::Idle).expect("pose 1");
+    assert!(r.log[idle].2 < FLOOR - 10, "no ar: {}", r.dump());
+    assert!(r.first(|s| s == State::WildFall).is_none(), "{}", r.dump());
+}
+
+fn knock(push: (i32, i32)) -> Pending {
+    Pending {
+        amount: 1,
+        knockdown: true,
+        push,
+        ..Default::default()
+    }
+}
+
+/// Derrubada (`0x004235fc`): empurrado para o lado em que olha → 81, senão 82. O 81 só olha
+/// o chão no fim do rótulo (`0x00425ab6`): no chão → 77; o 82 → 83 (`BK2STAND`) → 84 →
+/// parado (`0x00425b99`, `0x00425bdf`).
+#[test]
+fn knockdown_follows_facing_and_gets_up_through_83_84() {
+    let Some(mut r) = Run::flat(0) else { return };
+    assert!(!r.j.facing_right());
+    r.j.hurt(knock((-15, -10)));
+    r.tick(0);
+    assert_eq!(r.j.label(), 81, "empurrado para a frente (esquerda)");
+    r.ticks(0, 40);
+    assert!(
+        r.first(|s| s == State::Land(openhunted_engine::jake::Landing::Hard))
+            .is_some(),
+        "{}",
+        r.dump()
+    );
+    let Some(mut r) = Run::flat(0) else { return };
+    r.j.hurt(knock((15, -10)));
+    r.tick(0);
+    assert_eq!(r.j.label(), 82, "empurrado para trás");
+    r.ticks(0, 80);
+    let sit = r.first(|s| s == State::SitUp).expect("83");
+    let rise = r.first(|s| s == State::Rise).expect("84");
+    let idle = r.first(|s| s == State::Idle).expect("parado");
+    assert!(sit < rise && rise < idle, "{}", r.dump());
+}
+
+/// Tranco no Jake (`0x004233e3`): nos estados da tabela, 169 (rótulo 173, `JK_COLPS`,
+/// esqueleto k = 2 em x) e no fim 84 (`0x00426c5e`); escalando (30/32), queda.
+#[test]
+fn jolt_knocks_jake_to_169_then_84() {
+    let Some(mut r) = Run::flat(0) else { return };
+    r.j.hurt(Pending {
+        amount: 1,
+        jolt: true,
+        ..Default::default()
+    });
+    r.tick(0);
+    assert_eq!((r.j.state(), r.j.label()), (State::Jolted, 173));
+    r.ticks(0, 60);
+    let rise = r.first(|s| s == State::Rise).expect("84");
+    assert!(r.first(|s| s == State::Idle) > Some(rise), "{}", r.dump());
+}
+
+/// Empurrão (reação 2, `0x00423366`): só nos estados 1, 6, 79 e 164–166; correndo ou
+/// empurrando o Jake leva o dano e segue.
+#[test]
+fn shove_only_when_standing_or_hiding() {
+    let shove = Pending {
+        amount: 1,
+        shove: true,
+        push: (10, 0),
+        ..Default::default()
+    };
+    let Some(mut r) = Run::flat(0) else { return };
+    r.j.hurt(shove);
+    r.tick(0);
+    assert_eq!(r.j.state(), State::Pushed);
+    let Some(mut r) = Run::flat(0) else { return };
+    r.ticks(LEFT, 3);
+    r.j.hurt(shove);
+    r.tick(LEFT);
+    assert_eq!(r.j.state(), State::Run);
+}
+
 #[test]
 #[ignore]
 fn scratch_fuzz() {
@@ -336,4 +551,24 @@ fn default_box_is_jk_deflt_even_if_the_level_says_otherwise() {
             h: 44
         }
     );
+}
+
+#[test]
+#[ignore]
+fn scratch_zones() {
+    let p = std::env::var_os("OPENHUNTED_DATA").unwrap();
+    let gd = open_data(std::path::Path::new(&p)).unwrap();
+    let l = Level::parse(&gd.levels().unwrap().get("I_J_002.LEV").unwrap()).unwrap();
+    let mut a = Assets::new(gd.resources().unwrap());
+    let s = Scene::build(&l, &mut a).unwrap();
+    for z in &s.prop_zones {
+        if z.layer == 1 && z.rect.x < 1000 {
+            println!("{z:?}");
+        }
+    }
+    for r in s.world.solids() {
+        if r.x < 1000 && r.y > 150 && r.y < 400 {
+            println!("{r:?}");
+        }
+    }
 }
