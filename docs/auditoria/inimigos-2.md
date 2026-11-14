@@ -32,7 +32,7 @@ Fases medidas: `D_J_012` (Morte, 600 t.), `I_J_107` e `I_M_011` (Anticorpo), `D_
 | Voadores sem alvo | descanso: sem `+0x27c` nada (`0x411504`, `0x421705`) | passeava (todos) | `I_J_107`: 0 movimentos em 9 × 300 t.; `I_M_011`: 0 em 6 | diferente → corrigido | `without_target_flyers_stay_resting` |
 | Anticorpo: ataque | descanso → modo 1 (rótulo 2, laços, `0x411538`) → mergulho ou perseguição pelo `+0x272` (`0x4115c3`); sem alvo no fim → 5 | descanso → 2/3 por sorteio | — | diferente → corrigido | `antibody_winds_up_in_loops_before_attacking` |
 | Manta: ataque | descanso → 2 (`+0x272`) ou 3 direto (`0x421739`) | idem por sorteio | `D_M_024`: 49 t. no 3, depois 2→4→5→1 | igual | idem |
-| Voadores: espera do descanso | `+0x279 > 0` sai antes da animação (`0x41148a`) | animava | q parado em 1 por 6–12 t. | diferente → corrigido | `flyer.rs` (Correções) |
+| Voadores: espera do descanso | `+0x279 > 0` sai antes da animação (`0x41148a`) | animava | q parado em 1 por 6–12 t. | diferente → corrigido | cc1ce4a |
 | Voadores: fim do ataque | mergulho/perseguição/volta até `+0x30` tiques → descanso, casa nova (`0x41184a`, `0x42250b`) | 2×/4× `+0x30`, depois passeio | — | diferente → corrigido | idem |
 | Anticorpo: percepção | só no fim de cada animação (`0x411a03` → `0x411a53`), centros, alcance, linha | a cada tique | — | diferente | em aberto |
 | Anticorpo: tempo da perseguição | sobe só com `rand & 1` (`0x4117ae`) | todo tique | — | diferente | em aberto |
@@ -59,10 +59,10 @@ Fases medidas: `D_J_012` (Morte, 600 t.), `I_J_107` e `I_M_011` (Anticorpo), `D_
 - 4f2cd3b (`behaviour/death.rs`): aparição, falha, ativação, rearme, radiação pelas
   posições, sons.
 - ff61329 (`scene/ai.rs`, `jake.rs`): `values[4]` → veneno; fase do veneno.
-- Personagens da IA como alvos dos objetos: `behaviour::Npc` em `Ctx::npcs`,
+- e2be449: personagens da IA como alvos dos objetos: `behaviour::Npc` em `Ctx::npcs`,
   `Out::npc_hits`/`npc_quakes` aplicados por `Scene::apply_npc_out`; `AiPlayer::quake`;
   `Scene::ai_special`. Usados pela radiação, pela gota e pelo terremoto.
-- `behaviour/flyer.rs`: descanso sem passeio, laços do Anticorpo antes do ataque, espera
+- cc1ce4a (`behaviour/flyer.rs`): descanso sem passeio, laços do Anticorpo antes do ataque, espera
   sem animação, fim do ataque no descanso.
 
 ## Em aberto
