@@ -42,7 +42,7 @@ Commit `eee0478`:
 12. **Empurrão** só parado/escondido (1, 6, 79, 164–166) (`shove_only_when_standing_or_hiding`).
 13. 77/78/83/84 com a sonda de 25 px.
 
-Commit desta entrega (final):
+Commit `ef1e824`:
 
 14. **Sair pelo alto da corda**: 8 decide como `0x423b2b` (CIMA na zona → 30 direto), e o
     fim do 3 também (`climbing_past_the_top_regrabs_from_let_go`); SOCO solta a corda.
