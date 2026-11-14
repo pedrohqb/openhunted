@@ -97,7 +97,12 @@ pub mod class {
 pub fn class_of(s: State, ch: Character) -> u8 {
     use class::*;
     match s {
-        State::Idle | State::Grab | State::LetGo | State::Shake | State::Shocked(_) => IDLE,
+        State::Idle
+        | State::Grab
+        | State::LetGo
+        | State::Shake
+        | State::Shocked(_)
+        | State::Quake => IDLE,
         State::Taunt => POSE,
         State::Special(_) => SPECIAL,
         State::Stealth | State::Run => WALK,
