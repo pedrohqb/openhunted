@@ -931,7 +931,9 @@ impl Jake {
         if pair[0].0 != cur_label && pair[1].0 != cur_label {
             aim = want;
             alt = self.coin();
-            let f = self.frame;
+            // o quadro do rótulo antigo já andou `passo` neste tique (`0x43b5ed`) e o novo
+            // rótulo fica nesse deslocamento (`0x43b6c3`)
+            let f = self.frame + self.weapon(w0 as usize).step as usize;
             let next = State::Fire {
                 aim,
                 t: t0,
@@ -1530,13 +1532,20 @@ impl Jake {
         let mut jump_over = false;
         match self.state {
             _ if fired => {}
-            State::Fire { aim, t, w, alt } => self.tick_fire(input, world, (aim, t, w, alt)),
+            State::Fire { aim, t, w, alt } => {
+                self.tick_fire(input, world, (aim, t, w, alt));
+                if self.state == State::Idle {
+                    // saída pelo repouso `+0x7c` (`0x426ecc`): o tratamento em pé decide já
+                    self.decide_standing(input, env, jump_edge, side);
+                }
+            }
             State::Recover(_) | State::Ready(..) | State::Holster(_) => {
                 // `0x43b94e`: direção, pulo, furtivo ou troca seguros (`0x1e0f`) → repouso
                 if input & (UP | DOWN | LEFT | RIGHT | JUMP | STEALTH | PREV_WEAPON | NEXT_WEAPON)
                     != 0
                 {
                     self.set(State::Idle);
+                    self.decide_standing(input, env, jump_edge, side);
                 } else {
                     match self.state {
                         State::Recover(w) if self.anim_done() => self.set(State::Ready(0, w)),
@@ -1545,8 +1554,8 @@ impl Jake {
                         State::Holster(_) if self.anim_done() => self.set(State::Idle),
                         _ => {}
                     }
+                    self.body.vx = 0;
                 }
-                self.body.vx = 0;
             }
             State::Idle | State::Run | State::Push => {
                 self.decide_standing(input, env, jump_edge, side);

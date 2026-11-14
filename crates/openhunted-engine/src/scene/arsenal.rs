@@ -208,7 +208,11 @@ impl Scene {
     pub(super) fn weapon_impact(&mut self, i: usize, victim: Option<usize>, out: &mut Out) {
         use crate::behaviour::{grenade, pellet, rocket, star};
         let e = &self.entities[i];
-        let (c, layer) = (e.center(), e.layer);
+        // efeito e explosão no centro do quadro do projétil (`0x43d90c`); chumbo, estrela,
+        // faca e chicote (bits 2 da linha) com x junto à vítima
+        let near = matches!(e.behaviour, Behaviour::Pellet(_) | Behaviour::Star(_));
+        let v = victim.filter(|_| near).map(|vi| &self.entities[vi]);
+        let (c, layer) = (behaviour::projectile::effect_center(e, v), e.layer);
         let dir = match &e.behaviour {
             Behaviour::Pellet(s) => s.vx.signum(),
             Behaviour::Rocket(s) => s.vx.signum(),
@@ -944,7 +948,8 @@ mod tests {
         assert!((7..=9).contains(&fs), "1ª divisão no tique {fs}");
         assert_eq!(
             sizes.into_iter().collect::<Vec<_>>(),
-            vec![(1, 10), (2, 6), (3, 5), (4, 4)],
+            // geração 0: o tique em que nasce (ainda não armado)
+            vec![(0, 10), (1, 10), (2, 6), (3, 5), (4, 4)],
             "os filhos encolhem"
         );
         assert_eq!(most.0, 4, "até a 4ª geração");

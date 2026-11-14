@@ -791,9 +791,6 @@ impl Scene {
         }
         self.tick_cell_doors();
         self.tick_lights();
-        for i in 0..seats {
-            self.with_seat(i, Self::spawn_shots);
-        }
         if self.outcome.is_none() {
             self.tick_ai_players();
             // balas à queima-roupa: acertam já na boca, antes de voar
@@ -827,6 +824,11 @@ impl Scene {
                 result
             };
             self.push_outcome(result);
+        }
+        // os tiros do tique entram na lista depois da atualização dos objetos: no tique em
+        // que nascem ficam na boca (oráculo: a bala da pistola só anda no tique seguinte)
+        for i in 0..seats {
+            self.with_seat(i, Self::spawn_shots);
         }
         for i in 0..seats {
             self.with_seat(i, |s| s.prev_input = s.cur_input);
@@ -1203,7 +1205,9 @@ impl Scene {
                 };
                 behaviour::interact::hurt(&mut self.entities[vi], &p);
             }
-            let c = self.entities[bi].center();
+            // efeito no centro do quadro da bala, x junto à vítima (bits 3 da linha 19)
+            let c =
+                behaviour::projectile::effect_center(&self.entities[bi], Some(&self.entities[vi]));
             self.entities[bi].alive = false;
             out.impacts.push((c.0, c.1, self.entities[bi].layer));
         }

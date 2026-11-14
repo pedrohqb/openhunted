@@ -134,7 +134,8 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     }
     if projectile::inside_wall(e, ctx) {
         e.alive = false;
-        out.impacts.push((e.center().0, e.center().1, e.layer));
+        let c = projectile::effect_center(e, None);
+        out.impacts.push((c.0, c.1, e.layer));
         return;
     }
     let Some(f) = projectile::fly(e, v, ctx, false) else {
