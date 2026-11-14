@@ -1584,7 +1584,7 @@ impl Scene {
                 match e.behaviour {
                     Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, out),
                     Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, out),
-                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &ctx, out),
+                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &mut ctx, out),
                     Behaviour::LaserEye(_) => behaviour::laser_eye::tick(e, &mut ctx, out),
                     Behaviour::Laser(_) => behaviour::laser::tick(e, &ctx, out),
                     Behaviour::Barrel(_) => behaviour::barrel::tick(e, &ctx, out),
