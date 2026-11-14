@@ -134,7 +134,7 @@ No Jake, natureza elétrica → estado 15 de choque por 10 tiques (`dano-vida.md
 
 ## Em aberto
 
-- `0x40fb58` (fogo deixado por barril com `values[0] ≠ 0`) e o rótulo 4 `oob03`.
+- O rótulo 4 `oob03`. (O fogo do barril, `0x40fb58`, está em `behaviour::fire::floor_fires`, M17.)
 - Campo `+0x22c` da colisão (as duas larguras comparadas) e o sinal do "−5/+7".
 - Geometria exata da faísca (`+0x27e/+0x27f`) e o desenho `0x414363`.
 - `0x43c774` (parar som em laço no ponto?).
