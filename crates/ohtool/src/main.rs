@@ -89,6 +89,10 @@ enum Cmd {
         /// Mostra o estado do Jake a cada tique.
         #[arg(long)]
         trace: bool,
+        /// Grava o estado do jogador e das entidades a cada tique em JSON lines, no formato
+        /// do oráculo (`tools/oraculo/compare.py`).
+        #[arg(long)]
+        trace_json: Option<PathBuf>,
     },
 }
 
@@ -172,6 +176,58 @@ fn parse_input(input: &str) -> Vec<u32> {
     } else {
         input_tokens(input)
     }
+}
+
+/// Uma linha do `--trace-json`: tique, entrada e objetos com os nomes de campo do oráculo
+/// (`tools/oraculo/memoria.py`). Entidades: tipo, posição, camada, sinalizadores, vida,
+/// armadura, rótulo e quadro dentro dele; o jogador também velocidade (1/8 px), estado do
+/// porte, arma, veneno, lado e inventário.
+fn trace_json_line(scene: &openhunted_engine::Scene, t: usize, input: u32) -> serde_json::Value {
+    use openhunted_engine::behaviour::label_of;
+    use openhunted_engine::character::Character;
+    use serde_json::json;
+    let mut objs = Vec::new();
+    if let Some(j) = scene.jake.as_ref() {
+        let inv: serde_json::Map<String, serde_json::Value> = j
+            .inventory
+            .slots
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.0 != 0 || p.1 != 0)
+            .map(|(i, p)| (i.to_string(), json!([p.0, p.1])))
+            .collect();
+        objs.push(json!({
+            "id": "jogador", "jogador": 1,
+            "tipo": if j.character() == Character::Garathe { 2 } else { 1 },
+            "x": j.body.x, "y": j.body.y, "vx": j.body.vx, "vy": j.body.vy,
+            "cam": j.layer(), "est": format!("{:?}", j.state()), "rot": j.label(),
+            "q": j.frame(), "vida": j.health.hp, "arm": j.health.armor,
+            "veneno": j.poison, "arma": j.inventory.weapon,
+            "lado": if j.facing_right() { 8 } else { 4 }, "inv": inv,
+        }));
+    }
+    for (i, e) in scene.entities.iter().enumerate() {
+        let (rot, q) = match e.sprite.as_ref() {
+            Some(sp) => {
+                let f = sp.player.frame();
+                let start = sp
+                    .anim
+                    .labels
+                    .iter()
+                    .filter(|l| l.frame as usize <= f)
+                    .map(|l| l.frame as usize)
+                    .max()
+                    .unwrap_or(0);
+                (label_of(sp).map_or(0, i32::from), (f - start) as i32)
+            }
+            None => (0, 0),
+        };
+        objs.push(json!({
+            "id": i, "tipo": e.kind, "x": e.x, "y": e.y, "cam": e.layer, "fl": e.flags,
+            "vida": e.health, "arm": e.armor, "vivo": e.alive, "rot": rot, "q": q,
+        }));
+    }
+    json!({"t": t, "in": input, "obj": objs})
 }
 
 fn parse_xy(s: &str) -> Result<(i32, i32), String> {
@@ -289,6 +345,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             ticks,
             input,
             trace,
+            trace_json,
         } => {
             use openhunted_engine::{
                 Assets, Framebuffer, SCREEN_H, SCREEN_W, Scene, background_index, clamp_camera,
@@ -303,6 +360,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("aviso: {w}");
             }
             let seq = parse_input(&input);
+            let mut json_out = match &trace_json {
+                Some(p) => Some(std::io::BufWriter::new(std::fs::File::create(p)?)),
+                None => None,
+            };
             for t in 0..ticks as usize {
                 let b = if seq.len() == 1 {
                     seq[0]
@@ -310,6 +371,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     seq.get(t).copied().unwrap_or(0)
                 };
                 scene.tick(b);
+                if let Some(w) = json_out.as_mut() {
+                    writeln!(w, "{}", trace_json_line(&scene, t, b))?;
+                }
                 if trace {
                     eprintln!("{t:4} {}", scene_digest(&mut scene));
                 }
