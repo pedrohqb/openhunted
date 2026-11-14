@@ -1589,7 +1589,7 @@ impl Scene {
                     Behaviour::Laser(_) => behaviour::laser::tick(e, &ctx, out),
                     Behaviour::Barrel(_) => behaviour::barrel::tick(e, &ctx, out),
                     Behaviour::Fire(_) => behaviour::fire::tick(e, &ctx, out),
-                    Behaviour::Opo(_) => behaviour::opo::tick(e, &ctx, out),
+                    Behaviour::Opo(_) => behaviour::opo::tick(e, &mut ctx, out),
                     Behaviour::Fence(_) => behaviour::fence::tick(e, &mut ctx, out),
                     Behaviour::Graffiti(_) => behaviour::graffiti::tick(e, &ctx, out),
                     Behaviour::CarPiece => behaviour::car_piece::tick(e, &ctx, out),
@@ -2766,7 +2766,8 @@ mod tests {
         let mut o = object(72, 0, 0, "OPO.ANM");
         o.start_label = Some(272);
         let (ref_frame, player, frozen) = object_start(&o, &a);
-        assert_eq!((ref_frame, player.frame(), frozen), (1, 1, false));
+        // o vapor (72) escolhe os próprios quadros (`behaviour::opo`)
+        assert_eq!((ref_frame, player.frame(), frozen), (1, 1, true));
         // sem rótulo inicial (ou rótulo inexistente): quadro 0
         o.start_label = None;
         assert_eq!(object_start(&o, &a).0, 0);
