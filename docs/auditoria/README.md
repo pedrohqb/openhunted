@@ -31,9 +31,9 @@ depois "Correções", "Em aberto". O README desta pasta lista as áreas e o plac
 |---|---|---|
 | Oráculo (original no Wine) | `oraculo.md` | pronto: `tools/oraculo/` + `ohtool render --trace-json` |
 | Movimentos do Jake | `jake-movimentos.md`, `jake-movimentos-2.md` | feito: 17 iguais, 29 corrigidos, 10 de outras áreas, 3 não implementados |
-| Movimentos do Garathe | `garathe-movimentos.md` | em andamento |
+| Movimentos do Garathe | `garathe-movimentos.md` | feita: 24 igual, 18 corrigidas, 2 decisão, 5 em aberto |
 | Armas, projéteis e reações a dano | `armas.md` | em andamento |
-| Itens, objetos de fase e colisões de objetos | `itens-objetos.md` | em andamento |
+| Itens, objetos de fase e colisões de objetos | `itens-objetos.md` | feito: 19 iguais, 7 corrigidos, 6 em aberto |
 | Inimigos principais | `inimigos.md` | a seguir |
 | Inimigos secundários e IA dos personagens | `inimigos-2.md` | a seguir |
 | Física e colisão do cenário, HUD e som | `fisica-hud-som.md` | a seguir |

@@ -102,6 +102,9 @@ pub(super) fn character(
         .with_inventory(crate::jake::Inventory::for_character(&o.points, ch))
         .with_layer(layer)
         .with_boxes(crawl, bar);
+    if let Some(n) = prof.collapse_brd {
+        j = j.with_collapse_box(brd(assets, n, boxr));
+    }
     if let Some(k) = skel {
         j = j.with_skeleton(k);
     }

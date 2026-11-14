@@ -54,7 +54,7 @@ Commit `ef1e824`:
     (`jump_choice_probes_a_thin_strip_under_the_feet`).
 
 Pilotos de `real_missions.rs`: `settle` espera o parado (o 102 leva 6 tiques),
-`jump_side` repete o pulo cancelado; **`i_j_002_can_be_won` fica `#[ignore]`**: a rota
+`jump_side` repete o pulo cancelado; **`i_j_002_can_be_won` fica pulado** (só roda com `OH_ROTA_I_J_002`): a rota
 roteirizada depende do empurrão na corrida e do empurrar antigo (o Jake fica preso aos
 raios dos robôs de cima e morre); precisa ser refeita.
 

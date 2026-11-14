@@ -1431,10 +1431,13 @@ impl Scene {
             for i in reached {
                 self.set_credit(i, c);
             }
+            if b.garathe {
+                self.garathe_special_on_others(b);
+            }
             self.hurt_others(|j| {
                 let r = j.body.bounds();
                 let at = (r.x + r.w / 2, r.y + r.h / 2);
-                (j.layer() == b.layer && b.reaches(at)).then(|| {
+                (!b.garathe && j.layer() == b.layer && b.reaches(at)).then(|| {
                     let dir = if r.x >= b.center.0 { 1 } else { -1 };
                     crate::damage::Pending {
                         knockdown: true,
@@ -1447,6 +1450,16 @@ impl Scene {
         for e in self.entities.iter_mut().filter(|e| {
             e.alive && e.layer == b.layer && e.flags & 0x80003 == 0x80001 && e.present()
         }) {
+            if let (true, Behaviour::AiPlayer(a)) = (b.garathe, &mut e.behaviour) {
+                // especial do Garathe num personagem da IA (`0x42c4f0`): até 140 px
+                let r = a.body.body.bounds();
+                match b.player_hit((r.x + r.w / 2, r.y + r.h / 2)) {
+                    Some(crate::jake::PlayerHit::Knock(p)) => a.body.hurt(p),
+                    Some(crate::jake::PlayerHit::Quake(t)) => a.body.start_quake(t),
+                    None => {}
+                }
+                continue;
+            }
             if !b.reaches(e.center()) {
                 continue;
             }
@@ -1472,6 +1485,40 @@ impl Scene {
                         behaviour::enemy::hurt(e, &dmg, true) || behaviour::interact::hurt(e, &dmg);
                 }
             }
+        }
+    }
+
+    /// Especial do Garathe nos outros jogadores (`0x42c4f0`): derrubada com dano a menos de
+    /// 70 px; de 70 a 139 px, `+0x274 = 30` (no Garathe, o 121; no Jake, o terremoto da
+    /// cena dele).
+    fn garathe_special_on_others(&mut self, b: SpecialBlast) {
+        let c = self.active_number();
+        let mut hit = Vec::new();
+        for s in self.parked.iter_mut() {
+            let Some(j) = s
+                .jake
+                .as_mut()
+                .filter(|j| j.is_active() && j.layer() == b.layer)
+            else {
+                continue;
+            };
+            let r = j.body.bounds();
+            match b.player_hit((r.x + r.w / 2, r.y + r.h / 2)) {
+                Some(crate::jake::PlayerHit::Knock(p)) => {
+                    j.hurt(p);
+                    hit.push(s.player);
+                }
+                Some(crate::jake::PlayerHit::Quake(t))
+                    if j.character() == crate::character::Character::Garathe =>
+                {
+                    j.start_quake(t)
+                }
+                Some(crate::jake::PlayerHit::Quake(t)) => s.quake = s.quake.max(t),
+                None => {}
+            }
+        }
+        for i in hit {
+            self.credit_player(i, c);
         }
     }
 
@@ -1584,12 +1631,12 @@ impl Scene {
                 match e.behaviour {
                     Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, out),
                     Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, out),
-                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &ctx, out),
+                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &mut ctx, out),
                     Behaviour::LaserEye(_) => behaviour::laser_eye::tick(e, &mut ctx, out),
                     Behaviour::Laser(_) => behaviour::laser::tick(e, &ctx, out),
                     Behaviour::Barrel(_) => behaviour::barrel::tick(e, &ctx, out),
                     Behaviour::Fire(_) => behaviour::fire::tick(e, &ctx, out),
-                    Behaviour::Opo(_) => behaviour::opo::tick(e, &ctx, out),
+                    Behaviour::Opo(_) => behaviour::opo::tick(e, &mut ctx, out),
                     Behaviour::Fence(_) => behaviour::fence::tick(e, &mut ctx, out),
                     Behaviour::Graffiti(_) => behaviour::graffiti::tick(e, &ctx, out),
                     Behaviour::CarPiece => behaviour::car_piece::tick(e, &ctx, out),
@@ -1677,6 +1724,7 @@ impl Scene {
             out.hazards.append(&mut o.hazards);
             out.enemy_spawns.append(&mut o.enemy_spawns);
             out.launches.append(&mut o.launches);
+            out.floor_fires.append(&mut o.floor_fires);
             extra.push(o);
         }
         // a explosão do foguete ou da granada à queima-roupa (`weapon_impact` na passada
@@ -1782,6 +1830,7 @@ impl Scene {
         }
         behaviour::catapult::apply(&mut self.entities, &out.launches);
         self.spawn_enemy_objects(&mut out);
+        self.spawn_floor_fires(&mut out);
         let base = self.entities.len();
         self.entities.extend(out.spawn);
         for (n, c) in out.spawn_credits {
@@ -1833,7 +1882,19 @@ impl Scene {
 
     /// Terremoto do Bruiser: enquanto durar, o Jake no chão cambaleia (choque sem dano,
     /// estado 15).
-    fn apply_quake(&mut self, quake: Option<u32>) {
+    pub(super) fn apply_quake(&mut self, quake: Option<u32>) {
+        // o Garathe tem o próprio contador e o 121 (`0x42bcf8`); o abalo atribui
+        // `+0x274 = 20 + rand % 20` (`0x418369`)
+        if let Some(j) = self
+            .jake
+            .as_mut()
+            .filter(|j| j.character() == crate::character::Character::Garathe)
+        {
+            if let Some(q) = quake {
+                j.start_quake(q);
+            }
+            return;
+        }
         if let Some(q) = quake {
             self.quake = self.quake.max(q);
         }
@@ -1966,6 +2027,61 @@ impl Scene {
                 }
             };
             out.spawn.push(e);
+        }
+    }
+
+    /// O fogo no chão dos barris que explodiram (`behaviour::fire::floor_fires`): as células
+    /// da linha (bits de `+0x04` e as caixas do BRD atual) e o `OFI.ANM`.
+    fn spawn_floor_fires(&mut self, out: &mut Out) {
+        for (at, layer) in std::mem::take(&mut out.floor_fires) {
+            let grid = &self.ai_grid;
+            let borders = &self.borders;
+            let cell = |cx: i32, cy: i32| {
+                let info = grid.get((cx, cy, layer)).filter(|c| c.present)?;
+                let (ox, oy) = (cx * CELL, cy * CELL);
+                Some(behaviour::fire::FloorCell {
+                    bits: info.bits,
+                    boxes: borders
+                        .iter()
+                        .filter(|(x, y, z, b)| (*x, *y, *z) == (ox, oy, layer) && b.kind == BOX)
+                        .map(|(_, _, _, b)| Rect {
+                            x: i32::from(b.x),
+                            y: i32::from(b.y),
+                            w: i32::from(b.width),
+                            h: i32::from(b.height),
+                        })
+                        .collect(),
+                })
+            };
+            let fires = behaviour::fire::floor_fires(
+                at,
+                behaviour::fire::BARREL_RANGE,
+                self.width,
+                &cell,
+                &mut self.rng,
+            );
+            let anim = self.assets_anim("OFI.ANM");
+            let fh = anim
+                .as_ref()
+                .and_then(|a| a.frames.first().map(|f| i32::from(f.height)))
+                .unwrap_or(1);
+            for f in fires {
+                let mut e = behaviour::fire::floor_fire_entity(&f, layer, fh);
+                if let (Some(anim), Behaviour::Fire(st)) = (anim.clone(), &e.behaviour) {
+                    let player = AnimPlayer::from_frame(&anim, 0);
+                    e.sprite = Some(Sprite {
+                        layer: Layer::Object,
+                        anim,
+                        player,
+                        x: e.x,
+                        y: e.y,
+                        frozen: false,
+                        scale: (st.height, fh.max(1)),
+                        mirror: f.mirror,
+                    });
+                }
+                out.spawn.push(e);
+            }
         }
     }
 
@@ -2766,7 +2882,8 @@ mod tests {
         let mut o = object(72, 0, 0, "OPO.ANM");
         o.start_label = Some(272);
         let (ref_frame, player, frozen) = object_start(&o, &a);
-        assert_eq!((ref_frame, player.frame(), frozen), (1, 1, false));
+        // o vapor (72) escolhe os próprios quadros (`behaviour::opo`)
+        assert_eq!((ref_frame, player.frame(), frozen), (1, 1, true));
         // sem rótulo inicial (ou rótulo inexistente): quadro 0
         o.start_label = None;
         assert_eq!(object_start(&o, &a).0, 0);

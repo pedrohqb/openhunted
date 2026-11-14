@@ -46,6 +46,19 @@ pub fn body_check(
     }
 }
 
+/// Estados em que a morte espera (`0x428863` devolve 0): 4, 11, 12, 25, 29, 32 e 33.
+pub(super) fn death_waits(s: State) -> bool {
+    matches!(
+        s,
+        State::Grab
+            | State::LayerDown(_)
+            | State::LayerUp(_)
+            | State::Jump(JumpKind::Long)
+            | State::WildFall
+            | State::KnockedDown(_)
+    )
+}
+
 /// Rótulo e atraso do estado `s` no Garathe.
 pub(super) fn anim(s: State) -> (u16, u32) {
     let g = Character::Garathe;
@@ -55,8 +68,10 @@ pub(super) fn anim(s: State) -> (u16, u32) {
         State::Push | State::PushEnd => (46, 1),
         State::StandJump => (21, 0),
         State::RunUp => (24, 1),
-        State::Jump(JumpKind::Medium) => (22, 1),
-        State::Jump(_) => (25, 1),
+        // a tabela diz atraso 1, mas o 22 e o 25 chamam `0x406c71(obj, 0xa)` direto a cada
+        // tique (`0x429ee7`, `0x429d21`): um quadro por tique (oráculo)
+        State::Jump(JumpKind::Medium) => (22, 0),
+        State::Jump(_) => (25, 0),
         State::Fall => (27, 0),
         State::WildFall => (29, 0),
         State::Land(Landing::Fall) => (28, 0),
@@ -69,7 +84,7 @@ pub(super) fn anim(s: State) -> (u16, u32) {
         State::Taunt => (76, 0),
         State::Pushed => (58, 0),
         State::KnockedDown(_) => (32, 1),
-        State::Shocked(_) => (121, 1),
+        State::Shocked(_) | State::Quake => (121, 1),
         State::Dying(label) => (label, 0),
         State::Dead => (0, 0),
         State::EnteringExit(_) => (12, 0),
@@ -112,11 +127,17 @@ pub(super) fn knocked_label(right: bool, facing_right: bool) -> u16 {
     if right == facing_right { 32 } else { 33 }
 }
 
-/// Estados que tocam o rótulo ao contrário: 5 (4), 38 (37), 55 (54), 51 (50), 26 (24).
+/// Estados que tocam o rótulo ao contrário: 5 (4), 38 (37), 55 (54), 51 (50), 26 (24) e
+/// guardar a arma (`0x43ba0b` → `0x423894`; oráculo: o 111 entra no último quadro).
 pub(super) fn reversed(s: State) -> bool {
     matches!(
         s,
-        State::LetGo | State::StandUp | State::Unhide | State::BarDown | State::Land(Landing::Long)
+        State::LetGo
+            | State::StandUp
+            | State::Unhide
+            | State::BarDown
+            | State::Land(Landing::Long)
+            | State::Holster(_)
     )
 }
 
@@ -186,6 +207,9 @@ pub const ALL_LABELS: [u16; 49] = [
 ];
 
 #[cfg(test)]
+mod auditoria;
+
+#[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::rc::Rc;
@@ -200,14 +224,14 @@ mod tests {
     use crate::physics::{Rect, SUB, World};
 
     /// Caixa envolvente do `MN_DEFLT` (pés em y + 56).
-    const BOX: Rect = Rect {
+    pub(super) const BOX: Rect = Rect {
         x: 10,
         y: 5,
         w: 20,
         h: 51,
     };
 
-    fn skeleton() -> Skel {
+    pub(super) fn skeleton() -> Skel {
         let xs = |v: &[i16]| v.iter().map(|&x| (x, 0)).collect::<Vec<_>>();
         let ys = |v: &[i16]| v.iter().map(|&y| (0, y)).collect::<Vec<_>>();
         let mut e: Vec<SynthSkeletonEntry> = vec![(0, (0, 0), vec![], 0); 170];
@@ -221,7 +245,7 @@ mod tests {
         Skel::new(Rc::new(ske), (39, 58))
     }
 
-    fn lengths() -> HashMap<u16, usize> {
+    pub(super) fn lengths() -> HashMap<u16, usize> {
         let mut m: HashMap<u16, usize> = ALL_LABELS.iter().map(|&l| (l, 6)).collect();
         for (l, n) in [
             (1, 47),
@@ -246,7 +270,7 @@ mod tests {
         m
     }
 
-    fn floor_world() -> World {
+    pub(super) fn floor_world() -> World {
         World::new(vec![Rect {
             x: -10_000,
             y: 100,
@@ -255,7 +279,7 @@ mod tests {
         }])
     }
 
-    fn garathe(world: &World, x: i32) -> Jake {
+    pub(super) fn garathe(world: &World, x: i32) -> Jake {
         let mut j = Jake::new(x, 44, BOX, lengths())
             .with_skeleton(skeleton())
             .with_character(Character::Garathe);
@@ -264,7 +288,7 @@ mod tests {
         j
     }
 
-    fn run(j: &mut Jake, w: &World, input: u32, n: usize) {
+    pub(super) fn run(j: &mut Jake, w: &World, input: u32, n: usize) {
         for _ in 0..n {
             j.tick(input, w);
         }
@@ -818,9 +842,14 @@ mod tests {
                 DIE_BACK,
             ),
         ] {
+            // derrubado, a morte espera o pouso (30 → 67, 35 → 69: `0x428863`)
             let mut j = garathe(&w, 0).with_health(10, 0);
             j.hurt(p);
-            j.tick(0, &w);
+            let mut n = 0;
+            while !matches!(j.state(), State::Dying(_)) && n < 40 {
+                j.tick(0, &w);
+                n += 1;
+            }
             assert_eq!(j.state(), State::Dying(label));
         }
     }
@@ -952,7 +981,7 @@ mod tests {
 
     /// Pulos 20/21 com as raízes do `MINOTAUR.SKE` (a raiz só sobe: o rótulo acaba no alto
     /// do impulso) e escala 1 (S = K): 20 = 0 ×13, 27, 39; 21 = 0 ×6, 9, 28, 32.
-    fn real_jumper(world: &World, x: i32, y: i32) -> Jake {
+    pub(super) fn real_jumper(world: &World, x: i32, y: i32) -> Jake {
         let ys = |v: &[i16]| v.iter().map(|&y| (0, y)).collect::<Vec<_>>();
         let mut e: Vec<SynthSkeletonEntry> = vec![(0, (0, 0), vec![], 0); 170];
         let mut up = vec![0i16; 13];
