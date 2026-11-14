@@ -99,8 +99,12 @@ pub enum State {
     BarDown,
     /// Empurrado (estado 168, `0x00423366`).
     Pushed,
-    /// Derrubado em voo (estados 81/82, `0x004235fc`); `true` = jogado para a direita.
+    /// Derrubado em voo (estados 81/82, `0x004235fc`). Jake: `true` = 81, empurrado para o
+    /// lado em que olha (`+0x250 |= 8`); `false` = 82, para trás (`0x10`). Garathe: `true` =
+    /// jogado para a direita (o rótulo sai de `garathe::knocked_label`).
     KnockedDown(bool),
+    /// Só o Jake: levantar da derrubada para trás (83, depois 84; `0x425b99`/`0x425bdf`).
+    KnockRise(bool),
     /// Choque elétrico (estado 15, `0x00423577`); tiques restantes.
     Shocked(u32),
     /// Morrendo (`0x004236b9`): rótulo da animação da causa.
@@ -294,7 +298,9 @@ pub const DIE_KNOCKED_RIGHT: u16 = 77;
 pub const DIE_KNOCKED_LEFT: u16 = 179;
 pub const DIE_POISON: u16 = 171;
 /// Todos os rótulos usados pelos estados (para conferir contra o `JAKE.ANM` real).
-pub const ALL_LABELS: [u16; 48] = [
+pub const ALL_LABELS: [u16; 50] = [
+    83,
+    84,
     1,
     10,
     100,
@@ -376,6 +382,8 @@ fn jake_anim(s: State) -> (u16, u32) {
         State::Pushed => (168, 0),
         State::KnockedDown(true) => (81, 0),
         State::KnockedDown(false) => (82, 0),
+        State::KnockRise(false) => (83, 0),
+        State::KnockRise(true) => (84, 0),
         State::Shocked(_) => (15, 0),
         State::Dying(label) => (label, 0),
         State::Dead => (0, 0),
@@ -384,12 +392,9 @@ fn jake_anim(s: State) -> (u16, u32) {
             weapon(w as usize).states[weapons::aim_slot(aim)][usize::from(alt)].0,
             0,
         ),
-        State::Recover(w) => {
-            let wp = weapon(w as usize);
-            (wp.states[2][0].1.recover, 0)
-        }
-        State::Ready(_, w) => (weapon(w as usize).ready, 0),
-        State::Holster(w) => (weapon(w as usize).holster, 0),
+        State::Recover(w) => pose(weapon(w as usize).states[2][0].1.recover),
+        State::Ready(_, w) => pose(weapon(w as usize).ready),
+        State::Holster(w) => pose(weapon(w as usize).holster),
         State::Stealth => (149, 0),
         State::JumpUp(false) => (16, 0),
         State::JumpUp(true) => (17, 0),
@@ -418,8 +423,16 @@ fn jake_anim(s: State) -> (u16, u32) {
 fn jake_reversed(s: State) -> bool {
     matches!(
         s,
-        State::LetGo | State::StandUp | State::Unhide | State::BarDown
+        State::LetGo | State::StandUp | State::Unhide | State::BarDown | State::Holster(_)
     )
+}
+
+/// Rótulo de pose de arma (pronto, guardar, recuperação) e o atraso de quadro da tabela
+/// `0x473300` (`+0x18`): 1 nas recuperações 73/112/131/188, guardar 109/128/147/187 e no
+/// "pronto" dos punhos 146 (oráculo: o 112 anda um quadro a cada 2 tiques).
+fn pose(label: u16) -> (u16, u32) {
+    let slow = matches!(label, 73 | 112 | 131 | 188 | 109 | 128 | 147 | 187 | 146);
+    (label, u32::from(slow))
 }
 
 /// Como a animação avança neste tique.
@@ -502,6 +515,8 @@ pub struct Jake {
     pub switched: bool,
     /// Tiques restantes da pose "pronto" depois da troca (`+0x26c`).
     switch_pose: u32,
+    /// A pose da troca vale neste tique (o contador andou no repouso).
+    pose_now: bool,
     /// Trava do tiro (`+0x294`): sair do tiro soltando ATIRAR põe 8; cai 1 por tique e,
     /// enquanto ≠ 0, `0x0043b43e` não começa tiro nenhum.
     fire_lock: u32,
@@ -562,6 +577,7 @@ impl Jake {
             blow: None,
             switched: false,
             switch_pose: 0,
+            pose_now: false,
             fire_lock: 0,
             punch_mode: 0,
             poison: 0,
@@ -779,10 +795,18 @@ impl Jake {
     }
 
     /// A boca da arma `w` está livre; o chicote só testa a metade da linha (`0x43bbe3`).
+    /// Centro da caixa do estado corrente (`0x42318e` troca o BRD já na entrada do estado de
+    /// tiro; a do corpo só se ajusta no fim do tique).
+    fn fire_center(&self) -> (i32, i32) {
+        let mut body = self.body.clone();
+        body.boxr = self.state_box();
+        let b = body.bounds();
+        (b.x + b.w / 2, b.y + b.h / 2)
+    }
+
     fn muzzle_ok(&self, world: &World, w: usize, muzzle: (i32, i32)) -> bool {
         if self.weapon(w).half_line {
-            let b = self.body.bounds();
-            let c = (b.x + b.w / 2, b.y + b.h / 2);
+            let c = self.fire_center();
             self.muzzle_clear(world, ((c.0 + muzzle.0) / 2, (c.1 + muzzle.1) / 2))
         } else {
             self.muzzle_clear(world, muzzle)
@@ -865,12 +889,14 @@ impl Jake {
     /// A linha do centro da caixa até a boca da arma está livre de sólidos
     /// (`docs/re/tiro-jake.md`, passo 4: senão o tiro é pulado).
     fn muzzle_clear(&self, world: &World, muzzle: (i32, i32)) -> bool {
-        let b = self.body.bounds();
-        let c = (b.x + b.w / 2, b.y + b.h / 2);
-        (1..=8).all(|i| {
+        let c = self.fire_center();
+        // um ponto por pixel do segmento (`0x433aa3`/`0x43735d` testam a linha toda): uma
+        // parede fina não escapa entre as amostras
+        let n = (muzzle.0 - c.0).abs().max((muzzle.1 - c.1).abs()).max(1);
+        (1..=n).all(|i| {
             let p = Rect {
-                x: c.0 + (muzzle.0 - c.0) * i / 8,
-                y: c.1 + (muzzle.1 - c.1) * i / 8,
+                x: c.0 + (muzzle.0 - c.0) * i / n,
+                y: c.1 + (muzzle.1 - c.1) * i / n,
                 w: 1,
                 h: 1,
             };
@@ -959,8 +985,7 @@ impl Jake {
         // chicote: algo até 3/4 da linha da boca → `t` e a animação andam um passo a mais
         // (`0x43bcf2`)
         if wp.half_line {
-            let b = self.body.bounds();
-            let c = (b.x + b.w / 2, b.y + b.h / 2);
+            let c = self.fire_center();
             let q = (
                 c.0 + (muzzle.0 - c.0) * 3 / 4,
                 c.1 + (muzzle.1 - c.1) * 3 / 4,
@@ -1157,6 +1182,7 @@ impl Jake {
             State::Pushed
                 | State::Jolted
                 | State::KnockedDown(_)
+                | State::KnockRise(_)
                 | State::Shocked(_)
                 | State::Dying(_)
                 | State::Dead
@@ -1192,7 +1218,14 @@ impl Jake {
             matches!(self.state, State::Idle | State::Run | State::Push)
         };
         if p.knockdown && !(g && layering) {
-            let right = p.push.0 >= 0;
+            // Jake (`0x423657`): 81 se empurrado para o lado em que olha, senão 82
+            let right = if g {
+                p.push.0 >= 0
+            } else if self.facing_right {
+                p.push.0 > 0
+            } else {
+                p.push.0 < 0
+            };
             self.body.vx = p.push.0 * SUB;
             self.body.vy = p.push.1 * SUB;
             self.set(State::KnockedDown(right));
@@ -1229,7 +1262,7 @@ impl Jake {
                 _ if g && p.poison => garathe::DIE_POISON,
                 _ if g => garathe::DIE_DEFAULT,
                 State::KnockedDown(true) => DIE_KNOCKED_RIGHT,
-                State::KnockedDown(false) => DIE_KNOCKED_LEFT,
+                State::KnockedDown(false) | State::KnockRise(_) => DIE_KNOCKED_LEFT,
                 _ if p.poison => DIE_POISON,
                 _ => DIE_DEFAULT,
             };
@@ -1245,7 +1278,7 @@ impl Jake {
     pub fn label(&self) -> u16 {
         match self.state {
             State::Dead => self.death_label,
-            State::Idle if self.switch_pose > 0 => self.weapon(self.inventory.weapon).ready,
+            State::Idle if self.pose_now => self.weapon(self.inventory.weapon).ready,
             _ => self.anim_of(self.state).0,
         }
     }
@@ -1483,19 +1516,23 @@ impl Jake {
             self.flash.start(crate::tint::FLASH_POISON, self.colour);
         }
         self.flash.tick(self.poison > 0);
+        // trava do tiro (`0x422a98`) e troca de arma (`0x43b0cb`) antes dos estados, em
+        // qualquer estado salvo morrendo (`+0x178 & 0x200000`), inclusive derrubado
+        if !matches!(self.state, State::Dying(_) | State::Dead) {
+            self.fire_lock = self.fire_lock.saturating_sub(1);
+            self.switch_weapon(input);
+        }
+        self.pose_now = false;
         if !self.controllable() {
             self.tick_passive(input, env);
             return;
         }
-        // trava do tiro (`0x422a98`) e troca de arma (`0x43b0cb`) antes dos estados; a pose
-        // da troca só conta no repouso (`0x422ce4`: fora do estado 1 o contador zera)
-        self.fire_lock = self.fire_lock.saturating_sub(1);
-        self.switch_weapon(input);
-        self.switch_pose = if self.state == State::Idle {
-            self.switch_pose.saturating_sub(1)
-        } else {
-            0
-        };
+        // a pose da troca anda e aparece só no repouso (`0x422ce4` → `0x43b15c`); nos outros
+        // estados o contador espera (oráculo: trocada no 84, a pose sai no repouso seguinte)
+        if self.state == State::Idle && self.switch_pose > 0 {
+            self.switch_pose -= 1;
+            self.pose_now = self.switch_pose > 0;
+        }
         let pressed = |bit: u32| input & bit != 0;
         let jump_edge = pressed(JUMP) && self.prev_input & JUMP == 0;
         let side = self.wanted_side(input);
@@ -1806,7 +1843,26 @@ impl Jake {
                 }
                 let was_rising = self.body.vy < 0;
                 step(&mut self.body, world, true);
-                if self.body.on_ground && !was_rising {
+                if !self.is_garathe() {
+                    // Jake (`0x425a70`/`0x425b1e`): o rótulo toca uma vez (modo 0xa) e só no
+                    // fim decide: no chão, 81 aterrissa e 82 levanta (83 → 84); no ar, 81 cai
+                    self.anim_mode = AnimMode::Step(1);
+                    let len = self.len_of(self.anim_of(self.state).0);
+                    if !self.label_changed && self.frame + 1 >= len {
+                        let fwd = self.state == State::KnockedDown(true);
+                        if self.body.on_ground {
+                            self.body.vx = 0;
+                            self.body.vy = 0;
+                            self.set(if fwd {
+                                State::Land(Landing::Fall)
+                            } else {
+                                State::KnockRise(false)
+                            });
+                        } else if fwd {
+                            self.set(State::Fall);
+                        }
+                    }
+                } else if self.body.on_ground && !was_rising {
                     self.body.vx = 0;
                     self.body.vy = 0;
                     let next = match self.state {
@@ -1821,6 +1877,22 @@ impl Jake {
                         _ => State::Land(Landing::Fall),
                     };
                     self.set(next);
+                }
+            }
+            State::KnockRise(second) => {
+                // 83 e 84 tocam até o fim; então o tratamento em pé decide (`0x425bdf`,
+                // `0x426ecc`); sem decisão, 83 → 84 → repouso
+                step(&mut self.body, world, true);
+                self.anim_mode = AnimMode::Step(1);
+                let len = self.len_of(self.anim_of(self.state).0);
+                if !self.label_changed && self.frame + 1 >= len {
+                    let jump_edge = input & JUMP != 0 && self.prev_input & JUMP == 0;
+                    let side = self.wanted_side(input);
+                    self.set(State::Idle);
+                    self.decide_standing(input, env, jump_edge, side);
+                    if !second && self.state == State::Idle {
+                        self.set(State::KnockRise(true));
+                    }
                 }
             }
             State::Dying(_) => {
@@ -2183,7 +2255,8 @@ mod tests {
         assert_eq!(j.state(), State::Shocked(1));
         j.tick(0, &w);
         assert_eq!((j.state(), j.body.x), (State::Idle, x));
-        // derrubada para a direita: voa e aterrissa
+        // derrubada para a direita olhando para a esquerda: para trás (82); voa, levanta
+        // (83, 84) e volta ao repouso
         j.hurt(Pending {
             amount: 5,
             explosion: true,
@@ -2192,7 +2265,7 @@ mod tests {
             ..Default::default()
         });
         j.tick(0, &w);
-        assert_eq!((j.state(), j.label()), (State::KnockedDown(true), 81));
+        assert_eq!((j.state(), j.label()), (State::KnockedDown(false), 82));
         assert!(j.body.x > x && j.body.vy < 0);
         for _ in 0..40 {
             j.tick(0, &w);
@@ -2213,11 +2286,21 @@ mod tests {
         }
         assert_eq!((j.state(), j.label(), j.body.x), (State::Dead, 173, x));
         assert!(!j.advance());
-        // derrubado e morto na mesma pancada: rótulo 177/179 pelo lado
+        // derrubado e morto na mesma pancada: rótulo 177 (`J077`) para a frente (`+0x250 & 8`),
+        // 179 para trás (`0x10`); olhando para a esquerda, empurrão à esquerda é para a frente
         let mut j = jake_on(&w, 0).with_health(1, 0);
         j.hurt(Pending {
             amount: 9,
             push: (-8, -8),
+            knockdown: true,
+            ..Default::default()
+        });
+        j.tick(0, &w);
+        assert_eq!(j.state(), State::Dying(DIE_KNOCKED_RIGHT));
+        let mut j = jake_on(&w, 0).with_health(1, 0);
+        j.hurt(Pending {
+            amount: 9,
+            push: (8, -8),
             knockdown: true,
             ..Default::default()
         });

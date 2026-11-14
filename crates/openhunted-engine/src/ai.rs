@@ -105,9 +105,12 @@ pub fn class_of(s: State, ch: Character) -> u8 {
         State::LayerUp(_) | State::LayerDown(_) if ch == Character::Garathe => WALK,
         State::LayerUp(_) | State::LayerDown(_) => LAYER,
         State::StandJump | State::RunUp | State::JumpUp(_) | State::Jump(_) => RISE,
-        State::Land(_) | State::WildFall | State::GetUp | State::KnockedDown(_) | State::Rise => {
-            LAND
-        }
+        State::Land(_)
+        | State::WildFall
+        | State::GetUp
+        | State::KnockedDown(_)
+        | State::KnockRise(_)
+        | State::Rise => LAND,
         State::Fall => FALL,
         State::Crouch | State::Crawl | State::StandUp => CROUCH,
         State::Push => PUSH,
@@ -137,6 +140,7 @@ pub fn attackable(s: State, ch: Character) -> bool {
             | Land(Landing::Fall | Landing::Hard)
             | WildFall
             | GetUp
+            | KnockRise(_)
             | KnockedDown(_)
             | StandUp
             | Unhide

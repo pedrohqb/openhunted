@@ -96,7 +96,8 @@ impl Scene {
                     crate::entity::GRENADE,
                     "OGR.ANM",
                     grenade::LABEL_THROWN,
-                    u8::from(s.vx < 0),
+                    // sem espelho ao sair (oráculo: `esp` 0 lançada para a esquerda)
+                    0,
                     "OGR2.BRD",
                     8,
                     Behaviour::Grenade(grenade::GrenadeState::new(vx, vy, fuse)),
@@ -517,13 +518,17 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // 20 px/tique = 160/8: −11,25°, 0°, 0°, +11,25° (≈ ±31 em 1/8 px)
+        // −11,25°, 0°, 0°, +11,25° com as velocidades em px inteiros arredondadas para
+        // baixo a cada divisão (`0x40d08f`): assimétricas, como no original
         let mut vys = vys;
         vys.sort_unstable();
-        assert!(vys[1].abs() <= 1 && vys[2].abs() <= 1, "{vys:?}");
+        assert_eq!(vys, vec![-32, -8, -8, 16]);
+        // os filhos encolhem: 10 → 6 → 5
         assert!(
-            (29..=33).contains(&-vys[0]) && (29..=33).contains(&vys[3]),
-            "{vys:?}"
+            s.entities
+                .iter()
+                .filter(|e| e.alive && e.kind == crate::entity::PELLET)
+                .all(|e| e.sprite.as_ref().unwrap().scale.0 == 5)
         );
         // batem na parede em x = 400: faíscas e nada sobra
         for _ in 0..20 {
@@ -639,7 +644,8 @@ mod tests {
         })
     }
 
-    /// Na parede a granada inverte vx (sem perder rapidez) e espelha; o som 3042 só toca
+    /// Na parede a granada inverte vx perdendo rapidez (rebote da física; o oráculo mede
+    /// 20 → 8 px/tique) e espelha; o som 3042 só toca
     /// no choque de parede (`0x40707c`: normal mais horizontal que vertical).
     #[test]
     fn grenade_wall_bounce_inverts_vx_and_mirrors() {
@@ -658,7 +664,10 @@ mod tests {
             let wall = s.events.iter().any(|e| e.sound_id() == Some(3042));
             if let (Some(before), true) = (last, wall) {
                 if !seen {
-                    assert_eq!(vx, -before, "inverte vx sem perder rapidez");
+                    assert!(
+                        vx.signum() == -before.signum() && vx.abs() < before.abs(),
+                        "inverte vx perdendo rapidez: {before} → {vx}"
+                    );
                     let g = s.entities.iter().find(|e| e.kind == crate::entity::GRENADE);
                     assert_eq!(
                         g.and_then(|e| e.sprite.as_ref()).map(|sp| sp.mirror),

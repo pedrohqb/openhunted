@@ -46,12 +46,14 @@ pub struct PelletState {
 }
 
 impl PelletState {
+    /// Chumbo recém-criado: geração 0 até o 1º tique o armar (`+0x27c = 1`, espera 2,
+    /// `+0x274 = 10`, `0x40cfac`).
     pub fn new(vx: i32, vy: i32) -> Self {
         Self {
             vx,
             vy,
-            generation: 1,
-            wait: SPLIT_WAIT,
+            generation: 0,
+            wait: 0,
             prev: None,
             spent: false,
             whip: false,
@@ -62,8 +64,6 @@ impl PelletState {
     /// Golpe do chicote do Garathe: geração 0 até o 1º tique o armar.
     pub fn whip(vx: i32, vy: i32) -> Self {
         Self {
-            generation: 0,
-            wait: 0,
             whip: true,
             ..Self::new(vx, vy)
         }
@@ -78,11 +78,13 @@ impl PelletState {
     }
 }
 
-/// Velocidade `(vx, vy)` girada de `da` (16 bits), com a mesma rapidez.
+/// Velocidade `(vx, vy)` (1/8 px) girada de `da` (16 bits), com a mesma rapidez, em px
+/// inteiros como em `0x40d08f…0x40d0d2` (`cos·|v| >> 17`, arredondado para baixo) e de
+/// volta a 1/8 px: de (−160, 0) saem (−160, −16) e (−160, 8) (oráculo, `H_J_030`).
 pub fn rotated(vx: i32, vy: i32, da: i32) -> (i32, i32) {
-    let speed = f64::from(vx).hypot(f64::from(vy)).round() as i32;
+    let speed = super::mine::distance((vx, vy), (0, 0));
     let (c, s) = cos_sin14(angle16(vx, vy) + da);
-    ((speed * c) >> 14, (speed * s) >> 14)
+    (((speed * c) >> 17) * 8, ((speed * s) >> 17) * 8)
 }
 
 pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
@@ -94,10 +96,10 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let mut split = None;
     let (last, angle) = st.split();
     let (whip, shrink) = (st.whip, st.shrink);
-    if whip && st.generation == 0 {
-        // 1º tique do chicote: só arma
+    if st.generation == 0 {
+        // 1º tique: só arma (espera 2 no chumbo, 6–8 no chicote; tamanho 10)
         st.generation = 1;
-        st.wait = whip_wait(ctx);
+        st.wait = if whip { whip_wait(ctx) } else { SPLIT_WAIT };
         st.shrink = WHIP_SHRINK;
     } else if st.generation <= last {
         st.wait = st.wait.saturating_sub(1);
@@ -112,10 +114,9 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             let (vx, vy) = rotated(vx, vy, da);
             let mut c = e.clone();
             let wait = if whip { whip_wait(ctx) } else { SPLIT_WAIT };
-            if whip {
-                if let Some(sp) = c.sprite.as_mut() {
-                    sp.scale.0 = shrink / 2 + 1;
-                }
+            // os filhos encolhem: tamanho `+0x274` do pai / 2 + 1 (chumbo e chicote)
+            if let Some(sp) = c.sprite.as_mut() {
+                sp.scale.0 = shrink / 2 + 1;
             }
             c.behaviour = Behaviour::Pellet(PelletState {
                 vx,
@@ -125,7 +126,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 prev: None,
                 spent: false,
                 whip,
-                shrink: if whip { shrink * 3 / 4 + 1 } else { 0 },
+                shrink: shrink * 3 / 4 + 1,
             });
             out.spawn.push(c);
         }
@@ -157,12 +158,10 @@ mod tests {
 
     #[test]
     fn rotation_keeps_speed_and_turns_by_the_split_angle() {
+        // px inteiros, para baixo (oráculo, `H_J_030`: (−160, 0) → (−160, −16)/(−160, 8))
+        assert_eq!(rotated(-160, 0, -SPLIT_ANGLE), (-160, 8));
+        assert_eq!(rotated(-160, 0, SPLIT_ANGLE), (-160, -16));
         let (vx, vy) = rotated(160, 0, SPLIT_ANGLE);
-        assert_eq!((vx, vy), (159, 15), "+5,6° (y para baixo)");
-        let (vx, vy) = rotated(vx, vy, SPLIT_ANGLE);
-        assert!(
-            (155..=157).contains(&vx) && (30..=31).contains(&vy),
-            "+11,25°: {vx}, {vy}"
-        );
+        assert_eq!((vx, vy), (152, 8), "+5,6° (y para baixo)");
     }
 }

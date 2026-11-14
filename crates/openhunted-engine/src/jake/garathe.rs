@@ -63,7 +63,7 @@ pub(super) fn anim(s: State) -> (u16, u32) {
         State::Land(Landing::Medium) => (23, 1),
         State::Land(Landing::Long) => (24, 2),
         State::Land(Landing::Hard) => (30, 0),
-        State::GetUp => (31, 0),
+        State::GetUp | State::KnockRise(_) => (31, 0),
         State::Rise => (35, 0),
         State::Jolted => (63, 0),
         State::Taunt => (76, 0),
@@ -116,7 +116,13 @@ pub(super) fn knocked_label(right: bool, facing_right: bool) -> u16 {
 pub(super) fn reversed(s: State) -> bool {
     matches!(
         s,
-        State::LetGo | State::StandUp | State::Unhide | State::BarDown | State::Land(Landing::Long)
+        State::LetGo
+            | State::StandUp
+            | State::Unhide
+            | State::BarDown
+            | State::Land(Landing::Long)
+            // guardar a arma toca de trás para a frente (`0x43ba0b` → `0x428a39`)
+            | State::Holster(_)
     )
 }
 
