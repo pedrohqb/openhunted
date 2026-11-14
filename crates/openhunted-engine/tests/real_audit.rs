@@ -37,10 +37,7 @@ fn god(gd: &GameData, name: &str) -> Verdict {
 }
 
 /// Missões que o modo deus não vence, com a causa documentada em `docs/campanha.md`.
-const KNOWN: [&str; 1] = [
-    // antídoto-objetivo sem fonte de veneno na fase (como no original, ao que parece)
-    "D_M_010.LEV",
-];
+const KNOWN: [&str; 0] = [];
 
 /// Todas as missões solo vencem no modo deus, salvo as conhecidas; e nenhuma tem objetivo,
 /// saída ou porta fora do alcance pela grade da IA (otimista).
@@ -77,18 +74,17 @@ fn every_solo_mission_wins_in_god_mode() {
 /// D_M_010: a placa (zona 73 "acionar", duração 30, rearma ocupada) termina 7 px antes da
 /// zona PR da saída; o Garathe em pé sobre as duas aperta CIMA e a placa segue ligada
 /// enquanto ele entra na porta (o original conta o jogador na porta, `0x40e14e`). O antídoto
-/// (objetivo) é recusado sem veneno e a fase não tem veneno: sem trapaça a auditoria falha
-/// (`docs/campanha.md`); com o Garathe envenenado à mão, vence.
+/// (objetivo) é recusado sem veneno (`0x40b7b6`) e a fase não tem veneno para apanhar (33/35),
+/// mas as poças e saliências `OPO` (68/70) envenenam quem as cruza (`0x40fa16`): o modo deus
+/// passa por uma antes do antídoto e vence.
 #[test]
 fn d_m_010_plate_holds_while_entering_the_exit() {
     let Some(gd) = data() else { return };
-    let Verdict::Fail(why) = god(&gd, "D_M_010.LEV") else {
-        panic!("o antídoto passou sem veneno");
-    };
-    assert!(why.contains("antídoto"), "{why}");
-    let mut s = scene(&gd, "D_M_010.LEV");
-    s.jake.as_mut().unwrap().poison = 1;
-    assert!(matches!(audit::god_mode(&mut s), Verdict::Win { .. }));
+    let s = scene(&gd, "D_M_010.LEV");
+    assert!(!s.entities.iter().any(|e| matches!(e.kind, 33 | 35)));
+    assert!(s.entities.iter().any(|e| matches!(e.kind, 68 | 70)));
+    let v = god(&gd, "D_M_010.LEV");
+    assert!(matches!(v, Verdict::Win { .. }), "{v:?}");
 }
 
 /// I_J_005: o Jake começa num corredor fechado da camada 0; o teletransporte de id 2

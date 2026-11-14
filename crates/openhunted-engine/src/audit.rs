@@ -520,6 +520,35 @@ fn wake(s: &mut Scene, index: usize, depth: u32) -> Result<(), String> {
     }
 }
 
+/// Envenena o jogador numa poça ou saliência `OPO` (68–70) da fase: fica sobre ela até o teste
+/// dela (a cada `values[0]` tiques) pegar. `Err` se não há nenhuma ou não envenenou.
+fn poison_at_ooze(s: &mut Scene) -> Result<(), ()> {
+    let mut oozes: Vec<usize> = (0..s.entities.len())
+        .filter(|&i| s.entities[i].alive && matches!(s.entities[i].behaviour, Behaviour::Opo(_)))
+        .collect();
+    // as poças (68/69) primeiro: ficam no chão
+    oozes.sort_by_key(|&i| s.entities[i].kind != 68 && s.entities[i].kind != 69);
+    for i in oozes {
+        let e = &s.entities[i];
+        let Behaviour::Opo(st) = &e.behaviour else {
+            continue;
+        };
+        let c = (
+            e.x + st.rect.x + st.rect.w / 2,
+            e.y + st.rect.y + st.rect.h / 2,
+        );
+        let layer = e.layer;
+        for _ in 0..STEP_TICKS / 4 {
+            teleport(s, c, layer);
+            god_tick(s, 0);
+            if s.jake.as_ref().is_some_and(|j| j.poison > 0) {
+                return Ok(());
+            }
+        }
+    }
+    Err(())
+}
+
 /// Cumpre um objetivo; `Err` com o motivo se não deu.
 fn complete(s: &mut Scene, o: &Objective) -> Result<(), String> {
     let done = |s: &Scene| {
@@ -536,17 +565,22 @@ fn complete(s: &mut Scene, o: &Objective) -> Result<(), String> {
         How::Unimplemented => Ok(()),
         How::Collect => {
             // o antídoto é recusado sem veneno (`0x40b7b6`): antes, apanha um veneno da fase
+            // ou, sem ele, passa por uma poça `OPO` (`0x40fa16` envenena quem a cruza)
             if o.kind == 37 && s.jake.as_ref().is_some_and(|j| j.poison == 0) {
                 let Some(p) = s
                     .entities
                     .iter()
                     .position(|e| e.alive && matches!(e.kind, 33 | 35))
                 else {
-                    return Err(format!(
-                        "antídoto em {:?} recusado: o jogador não está envenenado e a fase não \
-                         tem veneno (33/35)",
-                        o.at
-                    ));
+                    return poison_at_ooze(s)
+                        .map_err(|()| {
+                            format!(
+                                "antídoto em {:?} recusado: o jogador não está envenenado e a fase \
+                             não tem veneno (33/35 nem poça OPO)",
+                                o.at
+                            )
+                        })
+                        .and_then(|()| complete(s, o));
                 };
                 let e = &s.entities[p];
                 let poison = Objective {

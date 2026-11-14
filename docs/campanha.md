@@ -20,14 +20,15 @@ auditadas com `ohtool audit --god --reach` (`openhunted_engine::audit`; desenho 
   como a IA): 20 missões dependem de pulos para cima (T_M_006, I_M_003, I_J_004, I_M_109,
   I_M_008, I_M_106, I_M_011, H_M_003, D_M_030, H_J_018, H_J_024, H_M_004, D_M_024, H_M_027,
   D_M_004, D_M_003, H_J_039, D_M_027, D_J_012, D_M_018) — na T_M_006 basta o pulo até a
-  corda; as demais não foram percorridas. Quinze das vinte são do Garathe: o pulo para cima
+  corda; das demais, só a I_M_109 foi percorrida (acima). Quinze das vinte são do Garathe: o pulo para cima
   dele sobe 216 px (o do Jake, 79) e agarra o teto de um vão de uma célula, saindo de lado
   para a laje 128 px acima ("JUMP + UP to grab the ceiling", `T_M_004`/`T_M_008`;
   `garathe-movimentos.md`). Até `611d193` o porte cortava esse pulo em 84 px (fim do Jake
   copiado), e nenhuma dessas subidas era possível; a grade da auditoria não vê pulos, e o
   resultado dela não mudou com a correção.
 
-Resultado: **64 vencem, 1 falha** (D_M_010, abaixo); igual depois da revisão da IA da M11.
+Resultado: **65 vencem, 0 falham**. Até a correção da `I_M_109` a D_M_010 falhava (causa 3,
+abaixo); igual depois da revisão da IA da M11.
 
 ## Causas achadas e corrigidas
 
@@ -40,26 +41,34 @@ Resultado: **64 vencem, 1 falha** (D_M_010, abaixo); igual depois da revisão da
    sinalizadores, presença e vida, não pelo estado; a porta de saída liga `0x200008`, fora da
    máscara. O porte deixava de contá-lo ao entrar na porta, e a placa da D_M_010 (duração
    30, rearma ocupada) desligava antes dos 40 tiques do veredito.
+3. **Veneno das poças `OPO`.** Os tipos 68–70 (e o portão 72 fora do estado 2) envenenam quem
+   os cruza (`0x40fa16`: `+0x270 = 1` e 1 de veneno a cada 10 tiques; `docs/re/objetos.md`).
+   O porte os tinha como decoração, e a D_M_010 ("Your friend is poisoned!") ficava sem como
+   envenenar o Garathe para o antídoto-objetivo (37, recusado sem veneno, `0x40b7b6`): a fase
+   não tem itens de veneno (33/35), mas tem poças (68) e saliências (70). O modo deus passa
+   por uma poça antes do antídoto (`audit::poison_at_ooze`) e vence. 31 das 65 missões têm
+   68–70 (lista em `objetos.md`).
+
+## A rota da I_M_109
+
+**I_M_109** ("Garathe Tutorial 5"): **vencida por entrada** (`real_garathe.rs`,
+`i_m_109_can_be_won`, 875 tiques, sem repor vida nem relógio). A porta (5, 3, 0) diante da
+saída pede a chave 62 (976, 66, camada 0) e não há cordas: o pulo para cima do Garathe (20,
+216 px) agarra o teto de vãos de uma célula ou, no poço de x 278–362 (camada 1), rente à
+parede e com ESQUERDA no voo livre (controle no ar, `0x408205`), sai de baixo do gerador de
+minas do canto do teto e pousa direto no corredor da porta de camada. Na camada 0, a sala
+de x 278–618 sobe ao corredor da chave; os barris (28) que a cercam tombam ao toque e
+rolam, mas não passam um pelo outro: pulo médio sobre eles, corre por cima e cai no vão da
+chave (e volta igual). Na volta, a catapulta (41) do corredor de cima joga para a esquerda
+quem a pisa (pulo médio sobre ela); a descida pelo poço cruza a poça `OPO` (68) e envenena
+(sem antídoto na fase: 1 de vida a cada 20 tiques até a saída). Na camada 0 de baixo, a
+porta de célula abre com a chave ao empurrar e a pilha de três barris antes da saída se
+vence com o pulo parado e DIREITA no ar. O gerador de minas não precisa morrer; o ataque
+na barra que o alcança (ATIRAR/SOCO solta e ataca, `0x42a29b` → `0x43b43e`) agora existe
+no porte para o Jake e o Garathe (`claws_hit_the_mine_generator_from_the_ceiling`).
 
 ## Em aberto
 
-- **D_M_010** ("Your friend is poisoned!"): o antídoto é objetivo "acionar", mas a coleta
-  recusa o antídoto sem veneno (`0x40b7b6`: `+0x270 = 0`), e a fase solo não tem item de
-  veneno (33/35). A única escrita que soma em `+0x270` do jogador é a coleta
-  (`0x40b6c3`); as gotas (70/71) só falam "Oh no it's poison" e ferem com natureza veneno,
-  sem envenenar. Indício de que a missão também não se vence no original 1.00; **a conferir
-  no Wine**. O porte segue o original; NEXT no resultado leva adiante mesmo na derrota.
-- **I_M_109** ("Garathe Tutorial 5"): a porta (5, 3, 0) diante da saída pede a chave 62, no
-  corredor de cima (981, 74, camada 0). Sem cordas, a rota sobe 128 px agarrando o teto
-  (pulo 20 em voo livre, 47, mão ante mão e BAIXO sobre a laje): o vão do teto da sala do
-  início (camada 1, x 406–490; antes, pular o fosso de x 662–746), o poço de x 278–362 até o
-  corredor da porta de camada, e na camada 0 a sala de x 278–618 até o corredor da chave.
-  `real_garathe.rs` (`i_m_109_climbs_with_the_ceiling_grab`) percorre a 1ª e a da camada 0
-  (ida e volta). Falta o poço: o gerador de minas (tipo 103, 15 de vida) ocupa o canto do
-  teto dele e barra a mão ante mão; no original o 47 ataca ao soltar (`0x42a29b` →
-  `0x43b43e`), o porte não; e a plataforma `OPO` (tipo 68) ao pé do poço não tem
-  comportamento no porte. Os barris (tipo 28) do corredor da chave pedem as garras. A vitória
-  roteirizada fica para quando esses dois existirem.
 - Porta de célula que pede chave ausente da fase: I_M_106 (5, 4, 2), chave 62, fora do
   caminho. (A D_J_015 começa trancada na sala do início, mas o Jake traz a 62 da fase.)
 - Gatilhos para ids inexistentes (valem verdadeiro, `0x435bd8`): I_J_104 e D_J_012
@@ -69,7 +78,7 @@ Resultado: **64 vencem, 1 falha** (D_M_010, abaixo); igual depois da revisão da
   do jogador): `real_missions.rs` (T_J_003/005/007 e, da M13, **I_J_002**: seis robôs, a
   chave 62 no corredor de cima, portas que abrem sozinhas e a porta de célula da saída) e
   `real_garathe.rs` (T_M_002 e, da M13, **I_M_102**: poço, redes, três camadas e a porta de
-  empurrar que abre a de baixo pelo gatilho). Falta uma H_J/D_J: a D_J_001 (a mais curta)
+  empurrar que abre a de baixo pelo gatilho; e **I_M_109**, acima). Falta uma H_J/D_J: a D_J_001 (a mais curta)
   é um quebra-cabeça de interruptores (ids 3, 8, 9) e portas por gatilho na camada 1, ainda
   não percorrido.
 
@@ -96,7 +105,7 @@ Personagem J/G; tempo em segundos (campo 1004); objetivos além da saída.
 | I_J_104 | J | — | 2× bandeira | vence |  |
 | I_J_001 | J | 250 | 1× peça | vence |  |
 | I_J_004 | J | — | só a saída | vence |  |
-| I_M_109 | G | 300 | só a saída | vence | rota pelo teto (pulo 20); falta o poço do gerador (acima) |
+| I_M_109 | G | 300 | só a saída | vence | vitória roteirizada (pulo 20, teto, poça de veneno) |
 | I_J_013 | J | 240 | 1× peça | vence |  |
 | I_J_010 | J | — | 1× peça, 1× chave | vence |  |
 | I_M_008 | G | — | só a saída | vence | 1 teletr. entre camadas |
@@ -138,7 +147,7 @@ Personagem J/G; tempo em segundos (campo 1004); objetivos além da saída.
 | D_M_021 | G | — | só a saída | vence | 1 teletr. entre camadas |
 | H_J_033 | J | — | 1× Jake IA | vence |  |
 | H_J_036 | J | — | 1× bandeira | vence |  |
-| D_M_010 | G | 175 | 1× antídoto, 1× zona | FALHA | antídoto sem veneno; placa corrigida na M13 |
+| D_M_010 | G | 175 | 1× antídoto, 1× zona | vence | veneno pela poça `OPO`; placa corrigida na M13 |
 | H_J_045 | J | — | só a saída | vence |  |
 | D_M_027 | G | — | só a saída | vence | 2 teletr. entre camadas |
 | D_J_012 | J | 180 | 1× peça, 2× bandeira | vence |  |

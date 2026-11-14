@@ -97,7 +97,9 @@ Não são plataformas. A inicialização carrega o `OPO.BRD` só no 71 (os demai
      veneno (1), **1** de dano; `(72, qualquer, 0)`, veneno, **5**.
 
 É a única escrita de `+0x270` do jogador fora da coleta (`0x0040b6c3`) e do antídoto: os
-obstáculos `OPO` envenenam (1 por 20 tiques, `0x004231f9`, até o antídoto 37). A leitura antiga
+obstáculos `OPO` envenenam (1 por 20 tiques, `0x004231f9`, até o antídoto 37). A D_M_010
+("Your friend is poisoned!") depende disso: o antídoto-objetivo só se apanha envenenado e a
+fase não tem itens de veneno (33/35), só poças (68) e saliências (70). A leitura antiga
 ("esmagamento pelo portão e pelo bloco", "só animação") estava errada.
 
 Uso nas fases (todas as 100 do `LEVELS.VOL`): **68** em 33 fases (83 objetos), **69** em 1

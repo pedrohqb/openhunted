@@ -2,7 +2,8 @@
 //! O Garathe sobre os dados reais (OPENHUNTED_DATA): a `T_M_002` (primeiro tutorial do
 //! Garathe) carrega com ele controlável, corre e pula pelas tabelas e é vencida por entrada
 //! roteirizada, como a `I_M_102`; alturas dos pulos com os esqueletos reais; agarrar o teto
-//! nas dicas da `T_M_004`/`T_M_008` e nas subidas da `I_M_109`; fuzz nas fases `p=2` solo.
+//! nas dicas da `T_M_004`/`T_M_008`; a `I_M_109` vencida e a poça `OPO` dela; fuzz nas fases
+//! `p=2` solo.
 
 use openhunted_engine::character::Character;
 use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
@@ -319,6 +320,38 @@ impl Pilot {
             self.center()
         );
     }
+    /// PULAR+CIMA parado, CIMA na animação e, no voo livre, o lado (controle no ar,
+    /// `0x408205`) que leva o centro a `x` (até 4 px), até pousar.
+    fn jump_up_to(&mut self, x: i32) {
+        self.tick(JUMP | UP);
+        for _ in 0..80 {
+            let j = self.s.jake.as_ref().unwrap();
+            if j.body.on_ground && j.state() != State::JumpUp(false) {
+                break;
+            }
+            let c = self.center().0;
+            let steer = if j.body.vy == 0 || (c - x).abs() <= 4 {
+                0
+            } else if c > x {
+                LEFT
+            } else {
+                RIGHT
+            };
+            self.tick(UP | steer);
+        }
+        self.settle();
+    }
+    /// Mão ante mão para `side` até o teto acabar e cair (27), segurando `side` no ar até o
+    /// chão.
+    fn bar_off(&mut self, side: u32) {
+        for _ in 0..600 {
+            if self.on_ground() && self.state() != State::BarHang {
+                break;
+            }
+            self.tick(side);
+        }
+        self.settle();
+    }
     /// Mão ante mão (49) até o centro passar de `x`, de volta ao 47 e BAIXO: cai.
     fn bar_to(&mut self, x: i32) {
         let right = self.center().0 < x;
@@ -509,8 +542,7 @@ fn i_m_102_can_be_won() {
 /// - camada 0 (posto na sala de x 278–618, que fica sob o corredor da porta de camada de
 ///   x ≈ 195): sobe ao corredor da chave (barris a caminho dela) e, de volta, ao da porta.
 ///
-/// O poço entre as duas (camada 1, x 278–362) não entra: o gerador de minas (tipo 103) ocupa
-/// o canto do teto e a plataforma `OPO` (tipo 68) do pé dele não tem comportamento no porte.
+/// O poço entre as duas (camada 1, x 278–362) e a vitória estão em `i_m_109_can_be_won`.
 #[test]
 fn i_m_109_climbs_with_the_ceiling_grab() {
     let Some(s) = load("I_M_109.LEV") else {
@@ -556,6 +588,151 @@ fn i_m_109_climbs_with_the_ceiling_grab() {
         "corredor da porta de camada: {:?}",
         p.center()
     );
+}
+
+/// I_M_109 ("Garathe Tutorial 5") vencida só pela entrada, sem repor vida nem relógio. A
+/// saída fica atrás da porta de célula (5, 3, 0), que pede a chave 62 do corredor de cima da
+/// camada 0, e não há cordas: as subidas são o pulo para cima (216 px), agarrando o teto ou,
+/// no poço de x 278–362, pousando direto no corredor de cima com o controle no ar. O gerador
+/// de minas do canto do teto do poço fica para trás (não é objetivo) e a poça `OPO` do pé
+/// dele envenena na descida (1 de vida a cada 20 tiques até a saída).
+#[test]
+fn i_m_109_can_be_won() {
+    let Some(s) = load("I_M_109.LEV") else {
+        return;
+    };
+    let mut p = Pilot {
+        s,
+        t: 0,
+        climbed: 0,
+        god: false,
+    };
+    p.run(10, 0);
+    // camada 1: pula o fosso e sobe pelo vão do teto da sala do início
+    p.go_x(782);
+    p.tick(JUMP | LEFT);
+    p.run(20, LEFT);
+    p.settle();
+    assert_eq!(p.feet(), 372, "pulou o fosso: {:?}", p.center());
+    p.go_x(448);
+    p.grab_ceiling();
+    // mão ante mão para a esquerda até o teto acabar (x 362) e cai segurando ESQUERDA,
+    // longe da poça de veneno (x 331–397)
+    p.bar_off(LEFT);
+    assert_eq!(p.feet(), 244, "no chão do poço: {:?}", p.center());
+    p.go_x(288);
+    p.run(3, LEFT);
+    p.settle();
+    assert_eq!(p.center().0, 288, "encostado na parede");
+    assert_eq!(p.s.jake.as_ref().unwrap().poison, 0, "não pisou na poça");
+    // pulo para cima rente à parede da esquerda; no voo, ESQUERDA tira o Garathe de baixo
+    // do gerador de minas (x 290–320, no canto do teto) e o leva ao corredor de cima
+    p.jump_up_to(280);
+    assert_eq!(
+        p.feet(),
+        116,
+        "corredor da porta de camada: {:?}",
+        p.center()
+    );
+    // porta de camada (zona 1, x 179–212): para a camada 0
+    p.go_x(195);
+    p.tick(UP);
+    p.run(10, 0);
+    assert_eq!(p.s.jake_layer, 0, "camada 0: {:?}", p.center());
+    // cai na sala de x 278–618 e sobe ao corredor da chave pelo vão do teto
+    p.go_x(604);
+    assert_eq!(p.feet(), 244, "na sala: {:?}", p.center());
+    p.grab_ceiling();
+    p.bar_to(660);
+    assert_eq!(p.feet(), 116, "corredor da chave: {:?}", p.center());
+    // os barris de x 921–1061 cercam a chave (x 976–986): pulo médio sobre os dois
+    // primeiros (tombam ao toque e rolam, mas não passam um pelo outro), corre por cima e
+    // cai no vão da chave; volta do mesmo jeito
+    p.go_x(866);
+    p.tick(JUMP | RIGHT);
+    p.run(25, RIGHT);
+    p.settle();
+    assert_ne!(
+        p.s.jake.as_ref().unwrap().inventory.slots[13].1,
+        0,
+        "chave 62"
+    );
+    p.tick(JUMP | LEFT);
+    p.run(30, LEFT);
+    p.settle();
+    assert!(p.center().0 < 900, "de volta dos barris: {:?}", p.center());
+    // de volta à sala, ao corredor da porta de camada e à camada 1
+    p.go_x(590);
+    assert_eq!(p.feet(), 244, "de volta à sala: {:?}", p.center());
+    p.grab_ceiling();
+    p.bar_to(240);
+    assert_eq!(p.feet(), 116, "corredor da porta: {:?}", p.center());
+    p.go_x(195);
+    p.tick(DOWN);
+    p.run(10, 0);
+    assert_eq!(p.s.jake_layer, 1, "camada 1: {:?}", p.center());
+    // a catapulta (tipo 41, x 236–261) joga para a esquerda quem a pisa: pulo médio sobre
+    // ela; segurando DIREITA, cai no poço, cruza a poça (envenena) e cai pelo vão do teto
+    // na sala do início
+    p.go_x(212);
+    p.tick(JUMP | RIGHT);
+    p.run(40, RIGHT);
+    p.settle();
+    assert_eq!(p.feet(), 372, "sala do início: {:?}", p.center());
+    // pelo fosso (x 662–746) à sala de baixo e à porta de camada (zona 1, x 563–587)
+    p.go_x(704);
+    assert_eq!(p.feet(), 500, "sala de baixo: {:?}", p.center());
+    p.go_x(575);
+    p.tick(UP);
+    p.run(10, 0);
+    assert_eq!(p.s.jake_layer, 0, "camada 0 de baixo: {:?}", p.center());
+    // a porta de célula (5, 3, 0, x 700–718) abre com a chave ao empurrar; depois dela, a
+    // pilha de três barris (x 807–849): pulo parado e DIREITA no ar até cima deles, e por
+    // cima (tombam e rolam) até a saída (x 900–912)
+    p.go_x(778);
+    p.tick(JUMP);
+    p.run(3, 0);
+    p.run(40, RIGHT);
+    p.win();
+    let j = p.s.jake.as_ref().unwrap();
+    assert_eq!(j.poison, 1, "envenenado na poça, sem antídoto na fase");
+    assert!(j.health.hp > 50, "vida {:?}", j.health);
+    assert!(p.t < 20 * 300, "dentro dos 300 s: {} tiques", p.t);
+}
+
+/// Ataque na barra (`0x42a29b`/`0x42a4af` → `0x43b43e`) sobre os dados: no poço da `I_M_109`,
+/// mão ante mão até encostar no gerador de minas do canto do teto e CIMA+ATIRAR com as garras:
+/// o Garathe solta, golpeia no ar (t = 3) e tira 7 dos 15 de vida do gerador.
+#[test]
+fn claws_hit_the_mine_generator_from_the_ceiling() {
+    let Some(mut s) = load("I_M_109.LEV") else {
+        return;
+    };
+    let gen_hp = |s: &Scene| s.entities.iter().find(|e| e.kind == 103).unwrap().health;
+    s.run_ticks(3, 0);
+    place(&mut s, (345, 210), 1);
+    s.run_ticks(15, 0);
+    s.tick(openhunted_engine::input::PREV_WEAPON);
+    s.tick(0);
+    assert_eq!(
+        s.jake.as_ref().unwrap().inventory.weapon,
+        openhunted_engine::jake::weapons::CLAWS
+    );
+    let j = |s: &Scene| s.jake.as_ref().unwrap().clone();
+    s.tick(JUMP | UP);
+    assert!(until(&mut s, UP, 40, |s| j(s).state() == State::BarHang));
+    assert!(until(&mut s, LEFT, 80, |s| j(s).body.bounds().x <= 320));
+    assert_eq!(
+        j(&s).body.bounds().x,
+        320,
+        "encostado no gerador (x 290–320)"
+    );
+    assert_eq!(gen_hp(&s), 15);
+    s.tick(SHOOT | UP);
+    assert!(matches!(j(&s).state(), State::Fire { .. }), "solta e ataca");
+    s.run_ticks(4, SHOOT | UP);
+    assert_eq!(gen_hp(&s), 8, "golpe das garras no ar");
+    assert!(until(&mut s, 0, 40, |s| j(s).body.on_ground));
 }
 
 /// A poça `OPO` (tipo 68, 66 × 8) do pé do poço da `I_M_109` (camada 1, x 331–397, sobre o
