@@ -628,6 +628,13 @@ fn i_m_109_can_be_won() {
     // pulo para cima rente à parede da esquerda; no voo, ESQUERDA tira o Garathe de baixo
     // do gerador de minas (x 290–320, no canto do teto) e o leva ao corredor de cima
     p.jump_up_to(280);
+    // o pulo pode acabar agarrado ao teto do corredor (as minas do gerador, que caem 2 px
+    // na primeira física, mudam a trajetória): BAIXO solta
+    for _ in 0..3 {
+        p.tick(DOWN);
+    }
+    p.run(20, 0);
+    p.settle();
     assert_eq!(
         p.feet(),
         116,
@@ -662,6 +669,9 @@ fn i_m_109_can_be_won() {
     p.settle();
     assert!(p.center().0 < 900, "de volta dos barris: {:?}", p.center());
     // de volta à sala, ao corredor da porta de camada e à camada 1
+    p.go_x(590);
+    // uma mina do gerador pode estourar perto e jogá-lo no ar: espera o pouso e volta
+    p.settle();
     p.go_x(590);
     assert_eq!(p.feet(), 244, "de volta à sala: {:?}", p.center());
     p.grab_ceiling();

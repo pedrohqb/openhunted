@@ -85,6 +85,10 @@ pub struct MineState {
     pub velocity: (i32, i32),
     /// Gerador que a soltou (`mine_generator::sync`); 0 = mina da fase.
     pub owner: u32,
+    /// Já passou pela primeira física: nela a gravidade (2 px) age antes de a atualização
+    /// pedir a compensação (`0x404bc7`) — oráculo `I_J_004`: a mina da fase em y 290 fica em
+    /// 292.
+    pub settled: bool,
 }
 
 impl MineState {
@@ -96,6 +100,7 @@ impl MineState {
             hovering: false,
             velocity: (0, 0),
             owner: 0,
+            settled: false,
         }
     }
 
@@ -197,11 +202,11 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             } else if below && can_move(-v.speed) {
                 vel.1 = -v.speed;
             } else {
+                // `((tique + x) mod p)·(0x10000 / p)` e `amplitude·sen >> 14` (`0x41e996`)
                 let phase = i64::from((ctx.tick as i32).wrapping_add(e.x).rem_euclid(v.period))
-                    * 65536
-                    / i64::from(v.period);
-                let target_y = 64 + i64::from(v.amplitude) * sin16(phase) / 16384;
-                let local = i64::from(e.y.rem_euclid(128));
+                    * (65536 / i64::from(v.period));
+                let target_y = 64 + ((i64::from(v.amplitude) * sin16(phase)) >> 14);
+                let local = i64::from(e.y % 128);
                 let mut vy = (target_y - local).clamp(-64, 64);
                 if local + vy < 0 {
                     vy = 0;
@@ -217,6 +222,10 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let mut body = Body::new(e.x, e.y, boxr);
     body.vx = vel.0;
     body.vy = vel.1;
+    if !st.settled {
+        body.vy += crate::physics::GRAVITY;
+        st.settled = true;
+    }
     step(&mut body, ctx.cells_for(e.layer), false);
     e.x = body.x;
     e.y = body.y;
@@ -239,8 +248,26 @@ mod tests {
             h: 17,
         }];
         m.health = 1;
-        m.behaviour = Behaviour::Mine(MineState::new(0));
+        let mut st = MineState::new(0);
+        st.settled = true;
+        m.behaviour = Behaviour::Mine(st);
         m
+    }
+
+    /// Oráculo `I_J_004`: sem alvo, a mina da fase em y 290 cai 2 px na primeira física e fica.
+    #[test]
+    fn first_physics_drops_two_px() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let mut m = mine(100, 290);
+        if let Behaviour::Mine(s) = &mut m.behaviour {
+            s.settled = false;
+        }
+        for _ in 0..3 {
+            tick(&mut m, &mut c, &mut Out::default());
+        }
+        assert_eq!(m.y, 292);
     }
 
     #[test]
