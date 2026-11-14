@@ -550,15 +550,26 @@ impl Scene {
                             cell: key,
                             front: d.fields.get(4).is_some_and(|&f| f != 0),
                         }));
+                        // espelhado com a célula (`0x4305ac`: o retângulo vai a
+                        // `128 − x − largura` por `0x405775` e o desenho usa `+0x40` da
+                        // célula XOR `+0x30` do decalque, o 9º campo das versões ≥ 1004);
+                        // o desenho espelha em torno do quadro de referência
+                        let own = d.fields.get(8).is_some_and(|&f| f != 0);
+                        let x = if cell.mirrored {
+                            let rw = a.frames.first().map_or(0, |f| i32::from(f.width));
+                            cx.saturating_add(CELL - d.x - rw)
+                        } else {
+                            cx.saturating_add(d.x)
+                        };
                         s.sprites.push(Sprite {
                             layer: Layer::Decoration,
                             anim: a,
                             player,
-                            x: cx.saturating_add(d.x),
+                            x,
                             y: cy.saturating_add(d.y),
                             frozen: false,
                             scale: (1, 1),
-                            mirror: false,
+                            mirror: cell.mirrored != own,
                         });
                     }
                     Err(e) => s.warnings.push(format!("{}: {e}", d.animation)),

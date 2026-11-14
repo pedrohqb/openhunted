@@ -6,9 +6,10 @@ use std::path::Path;
 
 use std::rc::Rc;
 
+use openhunted_engine::camera;
 use openhunted_engine::scene::Mode;
 use openhunted_engine::scene::view::View;
-use openhunted_engine::shell::hud::{self, Character, HudState, VIEW_H};
+use openhunted_engine::shell::hud::{self, HudState, VIEW_H};
 use openhunted_engine::shell::views::{self, ViewRect};
 use openhunted_engine::sound::Cue;
 use openhunted_engine::{
@@ -84,28 +85,10 @@ pub struct Viewer {
     last_focus: [Option<(i32, i32)>; 2],
 }
 
-/// Passo máximo da câmera de uma vista da tela dividida por eixo e tique (`0x436386`).
-pub const CAMERA_STEP: i32 = 18;
-/// Salto do foco num tique (px, por eixo) acima do qual a vista recentra na hora. Ruling:
-/// renascimento e teletransporte "recentram a vista" (`multijogador.md`); o limite separa
-/// esses saltos do andar (no máximo poucas dezenas de px por tique).
+/// Salto do foco num tique (px, por eixo) acima do qual a vista da tela dividida recentra na
+/// hora. Ruling: renascimento e teletransporte "recentram a vista" (`multijogador.md`); o
+/// limite separa esses saltos do andar (no máximo poucas dezenas de px por tique).
 pub const JUMP_PX: i32 = 64;
-
-/// A câmera de uma vista anda até `target` no máximo `CAMERA_STEP` px por eixo; com o foco
-/// tendo saltado `jump` px (> `JUMP_PX`), vai direto.
-fn chase(cur: (i32, i32), target: (i32, i32), jump: i32) -> (i32, i32) {
-    if jump > JUMP_PX {
-        return target;
-    }
-    let step = |c: i32, t: i32| c + (t - c).clamp(-CAMERA_STEP, CAMERA_STEP);
-    (step(cur.0, target.0), step(cur.1, target.1))
-}
-
-/// Câmera do solo para uma vista `view` (largura, altura): o foco no centro, presa à fase.
-fn follow_camera(scene: &Scene, view: (i32, i32), focus: (i32, i32)) -> (i32, i32) {
-    let want = (focus.0 - view.0 / 2, focus.1 - view.1 / 2);
-    clamp_camera((scene.width, scene.height), view, want)
-}
 
 impl Viewer {
     /// Abre os dados do jogo e monta a cena da fase.
@@ -195,38 +178,65 @@ impl Viewer {
         if i == 0 { self.camera } else { self.camera2 }
     }
 
-    /// Põe a câmera de cada vista no jogador dela (centrado na vista do jogo), se houver.
+    /// Põe a câmera de cada vista no jogador dela (centro da vista no alvo), se houver.
     pub fn follow(&mut self) {
-        if !self.split() {
-            if let Some(f) = self.scene.focus() {
-                self.camera = follow_camera(&self.scene, (SCREEN_W as i32, VIEW_H), f);
-            }
-            return;
-        }
         self.track(true);
     }
 
-    /// Câmeras das vistas da tela dividida: cada uma persegue o seu jogador (`0x436386`),
-    /// no máximo `CAMERA_STEP` px por tique; `snap` (carga) ou um salto do foco a põem direto.
+    /// Câmeras das vistas (`0x436386`): o centro de cada uma persegue o alvo do seu jogador
+    /// (`openhunted_engine::camera`), no máximo 18 px por tique ao longo do vetor e sem ficar
+    /// preso à fase; `snap` (carga) a põe direto, e na tela dividida também um salto do foco.
     fn track(&mut self, snap: bool) {
-        let v = self.views()[0].game;
-        for i in 0..2 {
-            let Some(f) = self.scene.focus_of(i) else {
+        let g = self.views()[0].game;
+        let half = (g.w / 2, g.h / 2);
+        let split = self.split();
+        for i in 0..if split { 2 } else { 1 } {
+            let Some(target) = camera::target(&self.scene, i) else {
                 continue;
             };
-            let target = follow_camera(&self.scene, (v.w, v.h), f);
-            let jump = match self.last_focus[i] {
-                Some(p) if !snap => (f.0 - p.0).abs().max((f.1 - p.1).abs()),
-                _ => i32::MAX,
+            let focus = self.scene.focus_of(i);
+            let jump = match (self.last_focus[i], focus) {
+                (Some(p), Some(f)) if split => (f.0 - p.0).abs().max((f.1 - p.1).abs()),
+                _ => 0,
             };
-            self.last_focus[i] = Some(f);
+            self.last_focus[i] = focus;
             let cam = if i == 0 {
                 &mut self.camera
             } else {
                 &mut self.camera2
             };
-            *cam = chase(*cam, target, jump);
+            let center = (cam.0 + half.0, cam.1 + half.1);
+            let c = if snap || jump > JUMP_PX {
+                target
+            } else {
+                camera::chase(center, target)
+            };
+            *cam = (c.0 - half.0, c.1 - half.1);
         }
+    }
+
+    /// Centro da vista solo no mundo.
+    fn solo_center(&self) -> (i32, i32) {
+        (
+            self.camera.0 + SCREEN_W as i32 / 2,
+            self.camera.1 + VIEW_H / 2,
+        )
+    }
+
+    /// A vista solo, na escala absoluta do original (`camera::solo_view`).
+    fn solo_view(&self) -> View {
+        let screen = openhunted_engine::Rect {
+            x: 0,
+            y: 0,
+            w: SCREEN_W as i32,
+            h: VIEW_H,
+        };
+        camera::solo_view(
+            &self.scene,
+            screen,
+            (SCREEN_W as i32, VIEW_H),
+            self.solo_center(),
+        )
     }
 
     /// Relógio real da partida (ms em que o jogo andou).
@@ -261,39 +271,7 @@ impl Viewer {
 
     /// A barra do jogador `i`; na disputa, `F − S` no lugar do cronômetro (`0x40b089`).
     pub fn hud_state_of(&self, i: usize) -> HudState {
-        let score = self
-            .scene
-            .mode
-            .duel()
-            .and(self.scene.players.get(i))
-            .map(|p| p.stats.score());
-        let jake = if i == 0 {
-            self.scene.jake.as_ref()
-        } else {
-            self.scene.player_jake(i)
-        };
-        let (character, health, armor, slots, weapon, face_alt) = match jake {
-            Some(j) => (
-                j.character(),
-                j.health.hp,
-                j.health.armor,
-                j.inventory.slots,
-                j.inventory.weapon,
-                // rosto 93 com veneno (`+0x270 ≠ 0`)
-                j.poison != 0,
-            ),
-            None => (Character::Garathe, 0, 0, [(0, 0); 30], 1, false),
-        };
-        HudState {
-            character,
-            health,
-            armor,
-            face_alt,
-            slots,
-            weapon,
-            timer: self.scene.timer,
-            score,
-        }
+        HudState::of(&self.scene, i)
     }
 
     /// Liga os efeitos sonoros: os sons de cada tique vão a `sfx`.
@@ -309,11 +287,7 @@ impl Viewer {
     /// Ouvintes: centro de cada vista do jogo e a camada do jogador dela.
     fn listeners(&self) -> Vec<((i32, i32), i32)> {
         if !self.split() {
-            let at = (
-                self.camera.0 + SCREEN_W as i32 / 2,
-                self.camera.1 + VIEW_H / 2,
-            );
-            return vec![(at, self.scene.jake_layer)];
+            return vec![(self.solo_center(), self.scene.jake_layer)];
         }
         let v = self.views()[0].game;
         (0..2)
@@ -479,13 +453,8 @@ impl Viewer {
             self.taps = 0;
             self.taps2 = 0;
             done += 1;
-            // a câmera segue o jogador, centrado na vista do jogo; na tela dividida, cada vista
-            // persegue o seu com o passo máximo do original
-            if self.split() {
-                self.track(false);
-            } else {
-                self.follow();
-            }
+            // cada vista persegue o seu jogador com o passo máximo do original
+            self.track(false);
             let mut opened = false;
             let mut cues = Vec::new();
             for ev in self.scene.events.drain(..) {
@@ -536,8 +505,10 @@ impl Viewer {
         let y = (VIEW_H - h) / 2;
         let x = match (self.scene.jake.as_ref(), self.modal.as_ref()) {
             (Some(j), Some(m)) => {
-                let jb = j.body.bounds();
-                let (jl, jr) = (jb.x - self.camera.0, jb.x + jb.w - self.camera.0);
+                // o retângulo do Jake na tela, pela projeção da vista
+                let v = self.solo_view();
+                let jb = v.project_rect(j.body.bounds(), v.layer_distance(v.state.layer));
+                let (jl, jr) = (jb.x, jb.x + jb.w);
                 if m.left_of_jake {
                     (jl - w - 20).max(16)
                 } else {
@@ -586,7 +557,10 @@ impl Viewer {
     /// 640×203, normalizada pela referência 240 de duas vistas (`camadas-desenho.md`).
     pub fn view(&self, i: usize) -> View {
         let g = self.views()[i.min(1)].game;
-        self.scene.view_of(i, self.camera_of(i), g, (g.w, g.h))
+        let mut v = self.scene.view_of(i, self.camera_of(i), g, (g.w, g.h));
+        // a escala absoluta do original (referência 30)
+        v.reference = Some(openhunted_engine::scene::view::REFERENCE);
+        v
     }
 
     /// Índice da cor de fundo da paleta.
@@ -624,8 +598,9 @@ impl Viewer {
             return &self.fb;
         }
         self.fb.clear(self.background);
+        let view = self.solo_view();
         self.scene
-            .draw(&mut self.assets, &mut self.fb, self.camera, self.overlay);
+            .draw_view(&mut self.assets, &mut self.fb, &view, self.overlay);
         let font = self.font.clone();
         match (self.bar.clone(), font.as_ref()) {
             (Some(bar), _) => {
@@ -704,16 +679,6 @@ mod tests {
         let mut pal = [[100u8, 100, 100]; 256];
         pal[3] = [0, 0, 0];
         Viewer::new(scene, assets, &Palette(pal))
-    }
-
-    #[test]
-    fn split_camera_steps_at_most_18_px_and_snaps_on_a_jump() {
-        // passo máximo por eixo (`0x436386`)
-        assert_eq!(chase((0, 0), (100, -5), 0), (18, -5));
-        assert_eq!(chase((100, 100), (90, 300), 0), (90, 118));
-        // o foco saltou (renascimento): recentra na hora
-        assert_eq!(chase((0, 0), (500, 40), JUMP_PX + 1), (500, 40));
-        assert_eq!(chase((0, 0), (500, 40), JUMP_PX), (18, 18));
     }
 
     #[test]

@@ -93,6 +93,13 @@ enum Cmd {
         /// do oráculo (`tools/oraculo/compare.py`).
         #[arg(long)]
         trace_json: Option<PathBuf>,
+        /// Quadro do jogo como na partida: a câmera persegue o jogador como o original
+        /// (`openhunted_engine::camera`), na escala absoluta, e a barra de estado embaixo.
+        #[arg(long)]
+        jogo: bool,
+        /// Grava os sons pedidos em cada tique (id, prioridade, posição) em JSON lines.
+        #[arg(long)]
+        sons: Option<PathBuf>,
     },
 }
 
@@ -346,14 +353,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             input,
             trace,
             trace_json,
+            jogo,
+            sons,
         } => {
             use openhunted_engine::{
                 Assets, Framebuffer, SCREEN_H, SCREEN_W, Scene, background_index, clamp_camera,
                 display_palette,
             };
             let lv = Level::parse(&gd.levels()?.get(&level)?).map_err(|e| e.in_resource(&level))?;
-            let palette =
-                display_palette(&openhunted_formats::Palette::parse(ar.get(&lv.palette)?)?);
+            // na partida, a paleta do brilho padrão (`Brightness` 1402 → `WORLD_G1.PAL`)
+            let pal_name = if jogo {
+                openhunted_engine::shell::config::Config::default().palette()
+            } else {
+                lv.palette.clone()
+            };
+            let palette = display_palette(&openhunted_formats::Palette::parse(ar.get(&pal_name)?)?);
             let mut assets = Assets::new(gd.resources()?);
             let mut scene = Scene::build(&lv, &mut assets)?;
             for w in &scene.warnings {
@@ -364,6 +378,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 Some(p) => Some(std::io::BufWriter::new(std::fs::File::create(p)?)),
                 None => None,
             };
+            let mut sons_out = match &sons {
+                Some(p) => Some(std::io::BufWriter::new(std::fs::File::create(p)?)),
+                None => None,
+            };
+            // câmera da partida: começa no alvo e o persegue depois de cada tique
+            let mut center = openhunted_engine::camera::target(&scene, 0).unwrap_or((0, 0));
             for t in 0..ticks as usize {
                 let b = if seq.len() == 1 {
                     seq[0]
@@ -371,6 +391,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     seq.get(t).copied().unwrap_or(0)
                 };
                 scene.tick(b);
+                let aim = openhunted_engine::camera::target(&scene, 0).unwrap_or(center);
+                center = openhunted_engine::camera::chase(center, aim);
+                if let Some(w) = sons_out.as_mut() {
+                    // os eventos se acumulam na cena: os deste tique saem aqui
+                    for ev in scene.events.drain(..).collect::<Vec<_>>() {
+                        if let openhunted_engine::Event::Sound(c) = ev {
+                            let at = c.at.map(|s| [s.x, s.y, s.layer]);
+                            writeln!(
+                                w,
+                                "{}",
+                                serde_json::json!({"t": t, "id": c.id, "p": c.priority, "at": at})
+                            )?;
+                        }
+                    }
+                }
                 if let Some(w) = json_out.as_mut() {
                     writeln!(w, "{}", trace_json_line(&scene, t, b))?;
                 }
@@ -404,7 +439,25 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let cam = clamp_camera((scene.width, scene.height), view, camera);
             let mut fb = Framebuffer::new(SCREEN_W, SCREEN_H);
             fb.clear(background_index(&palette));
-            scene.draw(&mut assets, &mut fb, cam, overlay);
+            if jogo {
+                use openhunted_engine::shell::hud::{self, HudState, VIEW_H};
+                let w = SCREEN_W as i32;
+                let screen = openhunted_engine::Rect {
+                    x: 0,
+                    y: 0,
+                    w,
+                    h: VIEW_H,
+                };
+                let v = openhunted_engine::camera::solo_view(&scene, screen, (w, VIEW_H), center);
+                scene.draw_view(&mut assets, &mut fb, &v, overlay);
+                fb.fill_rect(0, VIEW_H, w, SCREEN_H as i32 - VIEW_H, 0);
+                if let Ok(bar) = assets.bitmap("INVBAR01.BMP") {
+                    hud::draw_hud(&mut fb, &bar, 0, VIEW_H, w, &HudState::of(&scene, 0));
+                }
+                eprintln!("câmera (centro) {center:?}");
+            } else {
+                scene.draw(&mut assets, &mut fb, cam, overlay);
+            }
             extract::write_indexed_png(
                 &path,
                 fb.width as u32,
