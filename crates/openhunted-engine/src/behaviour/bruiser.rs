@@ -455,7 +455,9 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     if st.state == TURN && st.clip.step + 1 == len {
         quake(e, j, ctx, out);
     }
-    if st.clip.advance(len) {
+    // 13 e −2 (olhar em volta) só tocam nos tiques ímpares (`0x41764b`/`0x417677`: `tique & 1`)
+    let plays = !matches!(st.state, LOOK | LOOK_BACK) || ctx.tick % 2 == 1;
+    if plays && st.clip.advance(len) {
         end_of_animation(e, &mut st, j, ctx, out);
     }
     // passos (`0x417a68`): vx pela tabela, vy = −16
@@ -523,6 +525,31 @@ mod tests {
             Behaviour::Bruiser(s) => s,
             _ => panic!(),
         }
+    }
+
+    /// Oráculo `H_J_024` (Bruisers 42–44): acordar (−3) seis tiques, olhar em volta (13) um
+    /// quadro a cada dois tiques, só nos ímpares (q0 no t6, q1 no t7 e t8, … q4 no t13–14), e
+    /// o 12 já no t15.
+    #[test]
+    fn looking_around_plays_on_odd_ticks() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let mut b = bruiser(100, 47, vec![]);
+        let mut seq = vec![];
+        for t in 0..16 {
+            c.tick = t;
+            tick(&mut b, &mut c, &mut Out::default());
+            let (_, _, len) = enemy::label(&LABELS, st(&b).clip.label);
+            seq.push((st(&b).state, st(&b).clip.offset(len)));
+        }
+        assert_eq!(seq[6], (LOOK, 0), "{seq:?}");
+        assert_eq!(
+            &seq[7..=14].iter().map(|s| s.1).collect::<Vec<_>>(),
+            &[1, 1, 2, 2, 3, 3, 4, 4],
+            "{seq:?}"
+        );
+        assert_eq!(seq[15].0, LOOK2, "{seq:?}");
     }
 
     #[test]
@@ -608,10 +635,19 @@ mod tests {
         let mut b = bruiser(100, 47, vec![]);
         let mut out = Out::default();
         let mut quaked = false;
+        let jx = 330 + 2 + 9;
         for t in 0..1500 {
             c.tick = t;
+            let n = out.enemy_spawns.len();
             tick(&mut b, &mut c, &mut out);
             quaked |= out.quake.is_some();
+            // cada tiro vai para o lado do Jake (o Bruiser pode tê-lo passado andando)
+            for s in &out.enemy_spawns[n..] {
+                if let Spawn::Shot { vel, .. } = s {
+                    let side = if jx > b.center().0 { 1 } else { -1 };
+                    assert_eq!(vel.0.signum(), side, "t {t}: tiro para o lado do Jake");
+                }
+            }
         }
         let shots = out
             .enemy_spawns
@@ -621,14 +657,6 @@ mod tests {
         assert!(shots > 0, "atira");
         assert!(quaked, "faz tremer");
         assert!(out.events.iter().any(|e| e.sound_id() == Some(SOUND_SHOT)));
-        let Some(Spawn::Shot { vel, .. }) = out
-            .enemy_spawns
-            .iter()
-            .find(|s| matches!(s, Spawn::Shot { .. }))
-        else {
-            panic!()
-        };
-        assert_eq!(vel.0, SHOT_SPEED, "para a direita, onde está o Jake");
     }
 
     #[test]
