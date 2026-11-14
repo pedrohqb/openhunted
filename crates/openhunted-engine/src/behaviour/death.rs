@@ -388,6 +388,30 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             )));
         }
     }
+    // ... e os personagens da IA (linha `(3, 1)`: vítima 1 = tipos 1 e 2)
+    for n in ctx.npcs.iter().filter(|n| n.layer == e.layer) {
+        let (nx, ny) = n.origin;
+        if (nx - e.x).abs() >= RADIATION_RANGE || (ny - e.y).abs() >= RADIATION_RANGE {
+            continue;
+        }
+        let Some(row) = crate::damage::row(crate::entity::DEATH, Some(n.kind), 0) else {
+            continue;
+        };
+        let c = enemy::center(&n.bounds);
+        out.npc_hits.push((
+            n.index,
+            row.pending(crate::damage::Geometry {
+                vel: (0, 0),
+                toward: (c.0 - e.center().0, c.1 - e.center().1),
+            }),
+        ));
+        out.events.push(Event::Sound(Cue::at(
+            SOUND_RADIATION,
+            PRIORITY_FRAME,
+            (e.x, e.y),
+            e.layer,
+        )));
+    }
     let (_, _, len) = enemy::label(&LABELS, st.clip.label);
     if st.clip.advance(len) {
         end_of_clip(e, &mut st, ctx, out);
@@ -572,6 +596,41 @@ mod tests {
             tick(&mut d, &mut c, &mut out);
             assert_eq!(out.jake_damage.amount == RADIATION, hit, "x {x}");
         }
+    }
+
+    /// A radiação percorre a lista de objetos (`0x416a48`): os personagens da IA também a
+    /// levam (linha `(3, 1)`: vítima 1 = personagem, tipos 1 e 2).
+    #[test]
+    fn radiation_reaches_ai_jakes() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(3000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let npc = |index, kind| crate::behaviour::Npc {
+            index,
+            kind,
+            origin: (1020, 0),
+            bounds: Rect {
+                x: 1022,
+                y: 3,
+                w: 18,
+                h: 44,
+            },
+            layer: 0,
+        };
+        let npcs = [npc(4, 1), npc(5, 2)];
+        c.npcs = &npcs;
+        let mut d = death(1000, 0);
+        let Behaviour::Death(s) = &mut d.behaviour else {
+            panic!()
+        };
+        s.active = true;
+        s.set(RISE);
+        d.flags &= !0x2;
+        let mut out = Out::default();
+        tick(&mut d, &mut c, &mut out);
+        let hits: Vec<(usize, i32)> = out.npc_hits.iter().map(|(i, p)| (*i, p.amount)).collect();
+        assert_eq!(hits, vec![(4, RADIATION), (5, RADIATION)]);
+        assert!(out.jake_damage.is_empty());
     }
 
     #[test]
