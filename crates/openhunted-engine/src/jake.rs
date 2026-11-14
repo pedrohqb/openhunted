@@ -472,6 +472,9 @@ pub struct Jake {
     frame: usize,
     anim_mode: AnimMode,
     ske_req: Option<SkeReq>,
+    /// Jake: controle no ar (`0x00408205`) pedido neste tique, com o lado das setas; vale
+    /// depois da velocidade do esqueleto (que ele sobrepõe), como no original.
+    air_side: Option<Option<bool>>,
     /// Esqueleto (`JAKE.SKE`) com a escala do Jake; sem ele, nada se move pelo esqueleto.
     skel: Option<Skel>,
     /// Camada (`+0x17c`).
@@ -538,6 +541,7 @@ impl Jake {
             frame: 0,
             anim_mode: AnimMode::Auto,
             ske_req: None,
+            air_side: None,
             skel: None,
             layer: 0,
             box_default: boxr,
@@ -1309,6 +1313,7 @@ impl Jake {
         self.sound = None;
         self.anim_mode = AnimMode::Auto;
         self.ske_req = None;
+        self.air_side = None;
         if self.state == State::Dead {
             self.advance = false;
             return;
@@ -1337,8 +1342,21 @@ impl Jake {
         self.switch_weapon(input);
         let pressed = |bit: u32| input & bit != 0;
         let jump_edge = pressed(JUMP) && self.prev_input & JUMP == 0;
+        // Jake: PULAR é o botão segurado (`0x200`); quem segura pula de novo
+        // (`0x00423b02`). O Garathe segue com a borda.
+        let jump = if self.is_garathe() {
+            jump_edge
+        } else {
+            pressed(JUMP)
+        };
         let side = self.wanted_side(input);
-        let airborne = matches!(self.state, State::Jump(_) | State::Fall | State::WildFall);
+        // o lado segue as setas em todo estado (`0x00422a62`); nos pulos lançados quem o
+        // muda é a inversão no ar. Garathe: também na queda.
+        let airborne = match self.state {
+            State::Jump(_) => true,
+            State::Fall | State::WildFall => self.is_garathe(),
+            _ => false,
+        };
         if let (false, Some(right)) = (airborne, side) {
             self.facing_right = right;
         }
@@ -1388,12 +1406,12 @@ impl Jake {
                 self.body.vx = 0;
             }
             State::Idle | State::Run | State::Push => {
-                self.decide_standing(input, env, jump_edge, side);
+                self.decide_standing(input, env, jump, side);
             }
             State::Taunt => {
                 // outra entrada passa pela decisão em pé; sem decisão, a pose toca até o fim
                 self.body.vx = 0;
-                if input != TAUNT_INPUT && self.decide(input, env, jump_edge, side) {
+                if input != TAUNT_INPUT && self.decide(input, env, jump, side) {
                 } else if self.anim_done() {
                     self.set(State::Idle);
                 }
@@ -1440,12 +1458,17 @@ impl Jake {
                     self.air_control(world, side);
                 }
             }
-            State::Fall | State::WildFall => {
-                if !self.try_grab_in_air(input, env) {
-                    self.air_reverse(side);
+            // 25 (`0x0042424d`): corda, depois o controle no ar; 76 (`0x004242f6`): só a corda
+            State::Fall => {
+                if pressed(SHOOT | PUNCH) && self.start_fire(input, world) {
+                } else if !self.try_grab_in_air(input, env) {
+                    self.air_side = Some(side);
                 }
             }
-            _ => self.tick_move(input, env, jump_edge, side),
+            State::WildFall => {
+                self.try_grab_in_air(input, env);
+            }
+            _ => self.tick_move(input, env, jump, side),
         }
         if self.is_garathe() {
             // fim do 44: som 5043 e entrada no 46 (rótulo novo), que pede a porta
@@ -1475,6 +1498,9 @@ impl Jake {
         }
         self.animate();
         self.apply_ske();
+        if let Some(side) = self.air_side {
+            self.air_control(world, side);
+        }
         let was_rising = self.body.vy < 0;
         let y0 = self.body.y;
         let gravity = self.gravity_on();

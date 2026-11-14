@@ -58,6 +58,9 @@ const PROBE: i32 = 4;
 const AIR_CONTROL: i32 = 8;
 /// Quadro até o qual o pulo parado/para cima pode virar pulo lançado.
 const LAUNCH_WINDOW: usize = 10;
+/// Pulo da corda do Jake (17): quadro do impulso e a vertical (`0x00424ee2`, −160/8).
+const ROPE_JUMP_FRAME: usize = 9;
+const ROPE_JUMP_VY: i32 = -20;
 
 /// Zona PR de uma célula, em px da fase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,6 +298,7 @@ impl Jake {
             State::JumpUp(true) if self.is_garathe() => {
                 self.ticks as usize >= super::garathe::ROPE_JUMP_FRAME
             }
+            State::JumpUp(true) => self.ticks as usize >= ROPE_JUMP_FRAME,
             s => gravity(s),
         }
     }
@@ -322,10 +326,19 @@ impl Jake {
     /// chão, nada; no ar, o lado pedido põe ±8 px/tique (0 com parede a 8 px desse lado) e,
     /// sem lado, a horizontal fica como está. **Ruling (OpenHunted)**: o original sonda a
     /// parede à esquerda (−8 px) também para a direita (`personagem.md`); aqui, do lado pedido.
+    ///
+    /// Jake: o lado só conta se a velocidade ainda não passa de 8 px/tique para ele
+    /// (`0x00408224`: ESQ com vx > −64; `0x408280`: DIR com vx < 64).
     pub(super) fn air_control(&mut self, world: &World, side: Option<bool>) {
         if self.body.on_ground {
             return;
         }
+        let limit = AIR_CONTROL * SUB;
+        let side = match side {
+            Some(true) if !self.is_garathe() && self.body.vx >= limit => None,
+            Some(false) if !self.is_garathe() && self.body.vx <= -limit => None,
+            s => s,
+        };
         if let Some(right) = side {
             let b = self.body.bounds();
             let x = if right {
@@ -429,7 +442,16 @@ impl Jake {
             && new.y >= old.y
             && new.x + new.w <= old.x + old.w
             && new.y + new.h <= old.y + old.h;
-        if inside || !world.blocked(&new) {
+        // Jake: os sólidos que a caixa já cruza (nasceu ou ficou sobreposto) não impedem.
+        let g = self.is_garathe();
+        let blocked = |r: &Rect| {
+            if g {
+                world.blocked(r)
+            } else {
+                world.blocked_from(&old, r)
+            }
+        };
+        if inside || !blocked(&new) {
             self.body.boxr = want;
         } else if self.body.boxr == self.box_crawl && self.controllable() && self.body.on_ground {
             self.body.vx = 0;
@@ -734,7 +756,51 @@ impl Jake {
             {
                 self.tick_bar_garathe(input, world, side)
             }
+            State::JumpUp(true) if !self.is_garathe() => {
+                // 17 (`0x424dd0`): no chão, aterrissa (`0x424220` → 26); ATIRAR/SOCO ataca;
+                // até o quadro 9, PULAR + lado lança; teto de barra (depois da física) e
+                // corda; parado e sem gravidade até o quadro 9, então vy = −20 com
+                // gravidade (`0x424ee2`). O rótulo para no fim e o voo segue até o chão.
+                // Controle no ar em todo tique.
+                if self.body.on_ground {
+                    self.body.vx = 0;
+                    self.body.vy = 0;
+                    self.set(State::Land(Landing::Fall));
+                    return;
+                }
+                if pressed(SHOOT | PUNCH) && self.start_fire(input, world) {
+                    return;
+                }
+                if self.frame < ROPE_JUMP_FRAME && pressed(JUMP) && side.is_some() {
+                    self.launch_from(input, world, false);
+                    return;
+                }
+                if self.try_grab_in_air(input, env) {
+                    return;
+                }
+                if self.anim_done() {
+                    self.anim_mode = AnimMode::Hold;
+                }
+                let n = self.ticks as usize;
+                if n < ROPE_JUMP_FRAME {
+                    self.body.vx = 0;
+                    self.body.vy = 0;
+                } else if n == ROPE_JUMP_FRAME {
+                    self.body.vy = ROPE_JUMP_VY * SUB;
+                }
+                self.air_side = Some(side);
+            }
             State::StandJump | State::JumpUp(_) => {
+                // Jake: ATIRAR/SOCO ataca no ar (`0x424f89`, `0x424ce3`: zera a vertical
+                // pedida; o 17, `0x424df3`, não)
+                if !self.is_garathe() && pressed(SHOOT | PUNCH) {
+                    if self.state != State::JumpUp(true) {
+                        self.body.vy = 0;
+                    }
+                    if self.start_fire(input, world) {
+                        return;
+                    }
+                }
                 if self.frame < LAUNCH_WINDOW && pressed(JUMP) && side.is_some() {
                     self.launch_from(input, world, self.body.on_ground);
                     return;
@@ -750,9 +816,12 @@ impl Jake {
                     return;
                 }
                 if self.anim_done() {
+                    // fim (`0x424d92`, `0x425103`): parado e, no mesmo tique, a decisão em
+                    // pé (`0x426ecc`), que com PULAR segurado pula de novo
                     self.body.vx = 0;
                     self.body.vy = 0;
                     self.set(State::Idle);
+                    self.decide_or_idle(input, env, jump_edge, side);
                     return;
                 }
                 if self.is_garathe() {
@@ -771,22 +840,19 @@ impl Jake {
                     self.air_control(world, side);
                     return;
                 }
+                // `0x406fc0` com k = 3 nos dois eixos (o Δx dos rótulos 16 e 27 é 0), depois
+                // o controle no ar `0x408205`, que no chão não faz nada (sem deslize)
                 self.ske_req = Some(SkeReq {
                     k: if self.state == State::StandJump {
                         self.profile().k.stand_jump
                     } else {
                         self.profile().k.jump_up
                     },
-                    x: false,
+                    x: true,
                     y: true,
                     diag: 0,
                 });
-                self.body.vx = match side {
-                    Some(_) if self.free_ahead(world, AIR_CONTROL) => {
-                        AIR_CONTROL * SUB * self.dir()
-                    }
-                    _ => 0,
-                };
+                self.air_side = Some(side);
             }
             State::Land(Landing::Fall) => {
                 if !self.decide(input, env, jump_edge, side) && self.anim_done() {
@@ -880,7 +946,7 @@ impl Jake {
                 self.tick_hide(input, env, jump_edge, side)
             }
             State::BarHang | State::BarMove | State::BarPull | State::BarUp | State::BarDown => {
-                self.tick_bar(input, world, jump_edge, side)
+                self.tick_bar(input, world, side)
             }
             _ => self.decide_or_idle(input, env, jump_edge, side),
         }
@@ -1090,8 +1156,10 @@ impl Jake {
     }
 
     /// Barra (`0x00424498`, `0x004247f8`, `0x00424ab4`, `0x004246c4`, `0x00424bb8`).
-    fn tick_bar(&mut self, input: u32, world: &World, jump_edge: bool, side: Option<bool>) {
+    fn tick_bar(&mut self, input: u32, world: &World, side: Option<bool>) {
         let pressed = |bit: u32| input & bit != 0;
+        // PULAR acabado de apertar (`0x200` e a mudança `0x4000`, `0x00424667`)
+        let jump_edge = pressed(JUMP) && self.prev_input & JUMP == 0;
         self.body.vx = 0;
         self.body.vy = 0;
         if self.probe(world, 0, -1) & CONTACT_SCENERY == 0 || input == JUMP | DOWN {
@@ -1403,12 +1471,19 @@ mod tests {
         assert_eq!(vys[10], y0 - 42);
         assert_eq!(vys[11], y0 - 43);
         assert!(vys[16] == y0, "volta ao chão: {vys:?}");
-        // controle no ar: 8 px/tique para o lado apertado
+        // controle no ar (`0x408205`): no chão (quadros 0–8) nada; no ar, 8 px/tique para o
+        // lado apertado
         let mut j = jake(&w, 0);
         j.tick(JUMP, &w);
         let x0 = j.body.x;
         j.tick(RIGHT, &w);
-        assert_eq!(j.body.x - x0, 8);
+        assert_eq!(j.body.x - x0, 0, "agachado não desliza");
+        for _ in 0..9 {
+            j.tick(RIGHT, &w);
+        }
+        let x1 = j.body.x;
+        j.tick(RIGHT, &w);
+        assert_eq!(j.body.x - x1, 8);
         assert_eq!(j.state(), State::StandJump);
         for _ in 0..30 {
             j.tick(0, &w);
