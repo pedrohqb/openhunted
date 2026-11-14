@@ -248,39 +248,38 @@ def cmd_run(a):
 
         # --- abertura e menu: Esc interrompe a abertura (e é ignorado no menu); o menu
         # e o briefing põem o ponteiro no centro do botão padrão (New Game / GO).
-        parado = (3, 3)
-        xdo("mousemove", str(parado[0]), str(parado[1]))
         fase = None
+        ultima = 0.0
         t0 = time.time()
         estado = "abertura"
         while True:
             if time.time() - t0 > a.timeout:
-                raise RuntimeError(f"tempo esgotado na etapa {estado}")
+                xdo.foto("/tmp/oraculo-falha.png")
+                raise RuntimeError(f"tempo esgotado na etapa {estado} "
+                                   "(tela em /tmp/oraculo-falha.png)")
             eip = esperar(th, 0.3)
             if eip == BP_CARGA:
                 fase = trocar_fase(mem, th, a.level)
                 memoria.escrever_rng(mem, rng_ini)
                 th.cont()
                 estado = "briefing"
-                pos_menu = xdo.mouse()
+                pos_carga = xdo.mouse()
+                log("fase carregada; briefing")
                 continue
             if eip == BP_TIQUE:
                 break  # GO: o laço do jogo começou (a thread está parada no tique 0)
-            if estado == "abertura":
-                if xdo.mouse() != parado:
-                    estado = "menu"
-                    log("menu principal; New Game")
-                    time.sleep(0.3)
-                    xdo("click", "1")
-                    continue
-                if xdo.janela():
-                    xdo("key", "Escape")
-            elif estado == "briefing":
-                if xdo.mouse() != pos_menu:
-                    log("briefing; GO")
-                    time.sleep(0.3)
-                    xdo("click", "1")
-                    estado = "go"
+            # Return interrompe a abertura (qualquer tecla), aciona o botão padrão do menu
+            # (New Game) e o GO do briefing (docs/re/menu.md, briefing.md); repete-se até
+            # a carga da fase e o primeiro tique, sem depender de onde está o ponteiro
+            if estado == "briefing" and xdo.mouse() != pos_carga:
+                # o briefing pôs o ponteiro no centro do GO: clica lá
+                time.sleep(0.2)
+                xdo("click", "1")
+                pos_carga = xdo.mouse()
+                ultima = time.time()
+            elif xdo.janela() and time.time() - ultima > (3.0 if estado == "briefing" else 1.0):
+                xdo("key", "Return")
+                ultima = time.time()
         log("fase", fase, "começou;", f"{time.time() - t0:.1f} s de menus")
 
         # --- tiques
@@ -318,7 +317,9 @@ def cmd_run(a):
                 # docs/re/dicas.md); fecha soltando uma tecla que o jogo não usa
                 modal += 1
                 if modal > 40:
-                    raise RuntimeError(f"o jogo parou no tique {t}")
+                    # 30 s sem tique: fim de missão (tela de resultado) ou morte
+                    log(f"o laço do jogo parou no tique {t} (fim de missão?); rastro truncado")
+                    break
                 xdo("key", "--delay", "100", "Escape")
                 continue
             if eip == BP_DICA:
