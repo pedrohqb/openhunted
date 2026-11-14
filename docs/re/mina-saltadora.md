@@ -83,6 +83,7 @@ Tipo 11: quadro 1 (pulo grande) 3014; quadro 10 (parada) 3010, prioridade 5; qua
 
 - Nomes dos sons 3010–3014; `values[5] = 4` e `values[7] = 5` (não lidos aqui; `+0x27c` é
   reposto a 5 pela inicialização).
-- O que significa o bit `0x100000` de 13 objetos.
+- O bit `0x100000` de 13 objetos: "sempre ativo" na ativação por distância (`0x435fb8`),
+  em vez do raio de 400 px do tipo.
 - Se a gravidade/atrito da física zera vx no chão entre os pulos (o código só zera fora do
   estado 2).

@@ -163,6 +163,15 @@ Variante 0: um raio a cada 4 tiques alternando os canhões, 6 por rajada, pausa 
   10 → `R = 72` px. São 10: até ~100 de dano a quem estiver embaixo [inferido do cálculo].
 - Objetivo: 7 robôs com `+0x1ac = 4` (destruir) na campanha; o veredito só olha a vida.
 
+## Medido no oráculo (M17, `docs/auditoria/inimigos.md`)
+
+- Na 1ª física a gravidade (2 px) age antes de a atualização pedir a compensação
+  `0x404bc7` (= gravidade global `0x471978/0x47197c`): o robô da fase em y 317 fica em 319.
+  Depois `+0x168` guarda o pedido − 16 e o robô não cai.
+- Patrulhando fica **girado** (`+0x278` = 8/24/0/16, rótulo 2), sem flutuar: a flutuação só
+  vale de lado (−1), sem contato e sem velocidade pedida. O giro não põe −1 ao alinhar; só a
+  perseguição o faz.
+
 ## Em aberto
 
 Bits de célula: `0x2` embaixo, `0x8` direita, `0x10` esquerda, `0x40` em cima (fechados), pela

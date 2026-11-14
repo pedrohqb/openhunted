@@ -89,7 +89,9 @@ dica) e `obj`. Cada objeto: `id` (estável na execução), `lista`, `tipo` (`+0x
 `esp` (`+0x194`), `vida`/`arm` (`+0x258/+0x25c`). O jogador (`+0x19c ≠ 0`) traz ainda
 `jogador`, `arma` (`+0x254`), `veneno` (`+0x270`), `lado` (`+0x288`: 4 esq., 8 dir.),
 `recarga` (`+0x294`), `c260/c264/c268` e `inv` (pares não nulos de `+0x28`, índice = arma).
-`--todos` inclui os objetos de lógica (tipos 0, 27, 30, 73).
+`--todos` inclui os objetos de lógica (tipos 0, 27, 30, 73). Campos internos de um tipo:
+`ORACULO_CAMPOS="ori=0x278,qa=0x190,hx=0x26c:b" ORACULO_TIPOS=8` (deslocamento e formato
+`struct`, padrão `i`) os acrescenta aos objetos desses tipos (`memoria.py`).
 
 `compare.py` casa os objetos pelo tipo e pela posição no primeiro tique (`--raio`, 24 px);
 no jogador compara posição, velocidade, rótulo, quadro, camada, vida, armadura, arma,

@@ -34,6 +34,6 @@ depois "Correções", "Em aberto". O README desta pasta lista as áreas e o plac
 | Movimentos do Garathe | `garathe-movimentos.md` | feita: 24 igual, 18 corrigidas, 2 decisão, 5 em aberto |
 | Armas, projéteis e reações a dano | `armas.md` | em andamento |
 | Itens, objetos de fase e colisões de objetos | `itens-objetos.md` | feito: 19 iguais, 7 corrigidos, 6 em aberto |
-| Inimigos principais | `inimigos.md` | a seguir |
+| Inimigos principais | `inimigos.md` | feito: 27 iguais, 18 corrigidos, 3 núcleo, 3 em aberto |
 | Inimigos secundários e IA dos personagens | `inimigos-2.md` | a seguir |
 | Física e colisão do cenário, HUD e som | `fisica-hud-som.md` | a seguir |
