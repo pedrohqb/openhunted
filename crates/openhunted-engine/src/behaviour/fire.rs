@@ -152,6 +152,178 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     });
 }
 
+/// Alcance do fogo deixado pelo barril (`0x40fb58(&pos, camada, 384)`, `0x0040e082`).
+pub const BARREL_RANGE: i32 = 384;
+
+/// Uma célula vista por `floor_fires` (`0x4317db`): bits de `célula+0x04` (2 = fechada
+/// embaixo) e as caixas (tipo 2) do BRD atual, relativas à célula e já espelhadas.
+pub struct FloorCell {
+    pub bits: i32,
+    pub boxes: Vec<Rect>,
+}
+
+/// Um fogo do chão: `values` (com a âncora em 10/11 e `values[13] = 1000`), espelho e se
+/// fica atrás (`+0x1b4` 175, senão 55).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FloorFire {
+    pub values: Vec<i32>,
+    pub mirror: bool,
+    pub behind: bool,
+}
+
+/// Os fogos que o barril com `values[0] ≠ 0` deixa ao explodir (`0x0040fb58`): acha o chão na
+/// célula (`y` = 116 na célula, ou o topo de uma caixa larga na metade de baixo), estende-se
+/// até `range/2` para cada lado até uma parede (caixa alta que cruza o meio da linha de
+/// células) ou o fim das células, e cobre as células fechadas embaixo com fogos de até 256 px
+/// (largura > 512 → o próximo começa 128 px adiante; > 384 → no meio do que sobra; > 256 → os
+/// últimos 256). Cada fogo: cresce 5 por tique (`+0x260 = 5`) até `largura·169/512`, fica
+/// `200 + rand % 20` tiques e míngua 1 px a cada `rand & 3` tiques; base 6 px abaixo do chão
+/// ou 2 acima, por sorteio. O gerador é consumido na ordem do original.
+pub fn floor_fires(
+    at: (i32, i32),
+    range: i32,
+    level_w: i32,
+    cell: &dyn Fn(i32, i32) -> Option<FloorCell>,
+    rng: &mut crate::rng::Rng,
+) -> Vec<FloorFire> {
+    let mut fires = Vec::new();
+    if range < 16 {
+        return fires;
+    }
+    let (x, y) = at;
+    let half = range / 2;
+    let tall_across_middle = |b: &Rect| b.w < b.h && b.y <= 64 && b.y + b.h >= 64;
+    // o chão
+    let mut fy = y - y % 128 + 116;
+    if let Some(c) = cell(x / 128, y / 128) {
+        for b in &c.boxes {
+            if b.y > 64 && b.w > b.h {
+                fy += b.y - fy % 128;
+            }
+        }
+    }
+    let row = fy / 128;
+    let boxes = |cx: i32| cell(cx, row).filter(|c| !c.boxes.is_empty());
+    // para a esquerda
+    let mut l = x;
+    'left: while x - l < half {
+        let Some(c) = boxes(l / 128) else { break };
+        for b in &c.boxes {
+            if l % 128 >= b.x + b.w && tall_across_middle(b) {
+                l += b.x + b.w - l % 128;
+                break 'left;
+            }
+        }
+        l -= l % 128 + 1;
+        if l < 0 {
+            break;
+        }
+    }
+    if half < x - l {
+        l = x - half;
+    }
+    // para a direita
+    let mut r = x;
+    'right: while r - x < half {
+        let Some(c) = boxes(r / 128) else { break };
+        for b in &c.boxes {
+            if r % 128 <= b.x && tall_across_middle(b) {
+                r += b.x - r % 128;
+                break 'right;
+            }
+        }
+        r += 128 - r % 128;
+        if r >= level_w {
+            break;
+        }
+    }
+    if r - x > half {
+        r = x + half;
+    }
+    // trechos de células fechadas embaixo
+    while r > l {
+        let seg = l;
+        while r > l {
+            match cell(l / 128, row) {
+                Some(c) if c.bits & 2 != 0 => {
+                    let m = l % 128;
+                    l += if m != 0 { 128 - m } else { 128 };
+                    l = l.min(r);
+                }
+                _ => {
+                    l = (l - l % 128).max(seg);
+                    break;
+                }
+            }
+        }
+        if l == seg {
+            l += 128 - l % 128;
+            continue;
+        }
+        let w = l - seg;
+        let fw = w.min(256);
+        if w > 512 {
+            l = seg + 128;
+        } else if w > 384 {
+            l = seg + (w - 256) / 2;
+        } else if w > 256 {
+            l -= 256;
+        }
+        let behind = rng.next_u16() & 1 != 0;
+        let shrink = (rng.next_u16() & 3) as i32 * 10 + 1;
+        let max = fw * 169 / 512;
+        let stay = 200 + (rng.next_u16() % 20) as i32;
+        let anchor = (seg + fw / 2, fy + if behind { 6 } else { -2 });
+        let mirror = rng.next_u16() & 1 != 0;
+        let mut values = vec![0; 14];
+        values[0] = 5;
+        values[1] = shrink;
+        values[2] = stay;
+        values[3] = max;
+        values[4] = 2;
+        values[10] = anchor.0;
+        values[11] = anchor.1;
+        values[13] = STARTED;
+        fires.push(FloorFire {
+            values,
+            mirror,
+            behind,
+        });
+    }
+    fires
+}
+
+/// A entidade de um fogo do chão (sem sprite; a cena põe o `OFI.ANM`).
+pub fn floor_fire_entity(f: &FloorFire, layer: i32, frame_h: i32) -> Entity {
+    let st = FireState::new(&f.values, (0, 0), (0, 0), frame_h);
+    let r = st.rect();
+    Entity {
+        kind: crate::entity::FIRE,
+        x: r.x,
+        y: r.y,
+        // `0x10` (`0x0040ff6f`) e os da inicialização (`0x28`, sem `0x80`)
+        flags: 0x8003d,
+        layer,
+        id: 0,
+        values: f.values.clone(),
+        triggers: Vec::new(),
+        objective: 0,
+        health: 0,
+        armor: 0,
+        boxes: vec![Rect {
+            x: 0,
+            y: 0,
+            w: r.w,
+            h: r.h,
+        }],
+        solid_shapes: false,
+        on: true,
+        alive: true,
+        sprite: None,
+        behaviour: Behaviour::Fire(st),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,5 +401,108 @@ mod tests {
         let mut out = Out::default();
         tick(&mut f, &c, &mut out);
         assert!(!f.on && out.hazards.is_empty());
+    }
+
+    /// Células de 128 px numa linha (y 0): chão em 116 (sem caixa larga), paredes onde a
+    /// lista diz, fechadas embaixo onde `floor`.
+    fn row_cells(
+        floor: &'static [bool],
+        walls: &'static [(i32, Rect)],
+    ) -> impl Fn(i32, i32) -> Option<FloorCell> {
+        move |cx, cy| {
+            if cy != 0 || cx < 0 || cx as usize >= floor.len() {
+                return None;
+            }
+            let mut boxes = vec![Rect {
+                x: 0,
+                y: 120,
+                w: 128,
+                h: 8,
+            }];
+            boxes.extend(walls.iter().filter(|(c, _)| *c == cx).map(|(_, b)| *b));
+            Some(FloorCell {
+                bits: if floor[cx as usize] { 2 } else { 0 },
+                boxes,
+            })
+        }
+    }
+
+    #[test]
+    fn barrel_fire_covers_the_floor_up_to_walls_and_range() {
+        let mut rng = crate::rng::Rng::new(7);
+        // chão largo (caixa 128 × 8 em y 120 > 64): o chão é y = 120; sem paredes, ±192
+        let cells = row_cells(&[true; 8], &[]);
+        let f = floor_fires((500, 40), BARREL_RANGE, 1024, &cells, &mut rng);
+        let spans: Vec<(i32, i32)> = f
+            .iter()
+            .map(|f| {
+                let w = f.values[3] * 512 / 169;
+                (f.values[10], w)
+            })
+            .collect();
+        // de 308 a 692 (384 px, que não passa de 384): 256 a partir de 308 e, como passa de
+        // 256, o próximo trecho são os últimos 256 (436…692), sobrepostos
+        assert_eq!(f.len(), 2, "{spans:?}");
+        assert_eq!(f[0].values[10], 308 + 128);
+        assert_eq!(f[0].values[3], 256 * 169 / 512);
+        assert_eq!(f[1].values[10], 436 + 128);
+        assert_eq!(f[1].values[3], 256 * 169 / 512);
+        for x in &f {
+            assert!(
+                x.values[11] == 126 || x.values[11] == 118,
+                "base 120 + 6 ou − 2"
+            );
+            assert_eq!((x.values[0], x.values[4], x.values[13]), (5, 2, 1000));
+            assert!(matches!(x.values[1], 1 | 11 | 21 | 31));
+            assert!((200..220).contains(&x.values[2]));
+        }
+        // parede alta no meio da célula 2 (x 300…310): o fogo começa em 310
+        let cells = row_cells(
+            &[true; 8],
+            &[(
+                2,
+                Rect {
+                    x: 44,
+                    y: 0,
+                    w: 10,
+                    h: 128,
+                },
+            )],
+        );
+        let f = floor_fires((400, 40), BARREL_RANGE, 1024, &cells, &mut rng);
+        assert_eq!(f[0].values[10], 310 + 128);
+        // célula 4 aberta embaixo: o trecho para nela e recomeça depois
+        let cells = row_cells(&[true, true, true, true, false, true, true, true], &[]);
+        let f = floor_fires((500, 40), BARREL_RANGE, 1024, &cells, &mut rng);
+        let centres: Vec<i32> = f.iter().map(|f| f.values[10]).collect();
+        assert_eq!(centres, vec![308 + 102, 640 + 26], "308…512 e 640…692");
+    }
+
+    #[test]
+    fn floor_fire_grows_stays_and_dies() {
+        let f = FloorFire {
+            values: vec![5, 1, 3, 20, 2, 0, 0, 0, 0, 0, 300, 120, 0, 1000],
+            mirror: false,
+            behind: true,
+        };
+        let mut e = floor_fire_entity(&f, 0, 63);
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let c = ctx(&j, &w, &on);
+        let mut heights = vec![];
+        while e.alive && heights.len() < 100 {
+            tick(&mut e, &c, &mut Out::default());
+            if let Behaviour::Fire(s) = &e.behaviour {
+                heights.push(s.height);
+            }
+        }
+        assert_eq!(
+            &heights[..5],
+            &[7, 12, 17, 20, 20],
+            "+5 por tique até o máximo"
+        );
+        assert!(!e.alive, "minguou até apagar");
+        let b = e.bounds().unwrap();
+        assert_eq!(b.y + b.h, 120, "base na âncora");
     }
 }
