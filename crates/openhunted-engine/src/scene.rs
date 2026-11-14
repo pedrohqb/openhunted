@@ -1589,6 +1589,7 @@ impl Scene {
                     Behaviour::Laser(_) => behaviour::laser::tick(e, &ctx, out),
                     Behaviour::Barrel(_) => behaviour::barrel::tick(e, &ctx, out),
                     Behaviour::Fire(_) => behaviour::fire::tick(e, &ctx, out),
+                    Behaviour::Opo(_) => behaviour::opo::tick(e, &ctx, out),
                     Behaviour::Fence(_) => behaviour::fence::tick(e, &mut ctx, out),
                     Behaviour::Graffiti(_) => behaviour::graffiti::tick(e, &ctx, out),
                     Behaviour::CarPiece => behaviour::car_piece::tick(e, &ctx, out),

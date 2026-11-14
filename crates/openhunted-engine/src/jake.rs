@@ -1021,6 +1021,9 @@ impl Jake {
         {
             return false;
         }
+        if p.poisons {
+            self.poison = 1;
+        }
         if p.amount != 0 && (p.knockdown || p.shove || p.jolt || p.explosion) {
             self.flash.start(crate::tint::FLASH_HIT, self.colour);
         }

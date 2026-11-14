@@ -29,6 +29,7 @@ pub mod laser;
 pub mod laser_eye;
 pub mod mine;
 pub mod mine_generator;
+pub mod opo;
 pub mod pellet;
 pub mod pickup;
 pub mod piston;

@@ -558,6 +558,44 @@ fn i_m_109_climbs_with_the_ceiling_grab() {
     );
 }
 
+/// A poça `OPO` (tipo 68, 66 × 8) do pé do poço da `I_M_109` (camada 1, x 331–397, sobre o
+/// chão de y 244): a cada 10 tiques (`values[0]`) quem a cruza leva 1 de veneno e fica
+/// envenenado (`+0x270 = 1`, `0x40fa16`); o Garathe fala 3737 ("Oh no it's poison") só na
+/// primeira vez. Fora dela (x < 331), nada.
+#[test]
+fn the_shaft_puddle_poisons() {
+    let Some(mut s) = load("I_M_109.LEV") else {
+        return;
+    };
+    let puddle = s.entities.iter().find(|e| e.kind == 68).unwrap();
+    assert_eq!((puddle.x, puddle.y, puddle.layer), (331, 237, 1));
+    assert_eq!(puddle.values.first().copied().unwrap_or(0), 10);
+    s.run_ticks(3, 0);
+    place(&mut s, (300, 210), 1);
+    s.run_ticks(30, 0);
+    let j = s.jake.as_ref().unwrap();
+    assert_eq!((j.poison, j.body.bounds().y + j.body.bounds().h), (0, 244));
+    place(&mut s, (360, 210), 1);
+    s.events.clear();
+    let mut speech = 0;
+    let mut first = None;
+    for t in 0..40 {
+        s.tick(0);
+        speech += s
+            .events
+            .drain(..)
+            .filter(|e| e.sound_id() == Some(3737))
+            .count();
+        if first.is_none() && s.jake.as_ref().unwrap().poison > 0 {
+            first = Some(t);
+        }
+    }
+    assert!(first.is_some_and(|t| t < 11), "envenenado em até 10 tiques");
+    let j = s.jake.as_ref().unwrap();
+    assert_eq!(j.poison, 1);
+    assert_eq!(speech, 1, "a fala só na primeira vez");
+}
+
 /// Entrada aleatória em todas as fases `p=2` solo: sem pânico e nunca dentro do cenário.
 #[test]
 #[ignore = "fuzz longo: rode com check.sh --full"]

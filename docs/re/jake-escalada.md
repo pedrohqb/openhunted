@@ -92,6 +92,11 @@ outro "agarrar beirada": nenhum estado do Jake testa quinas de plataforma.
   contrário, ao acabar → 103); CIMA no 106 → volta ao 105. Em todos: sem teto → queda; ATIRAR → solta e atira;
   PULAR acabado de apertar → solta.
 
+O ataque solta e atira de verdade: desliga 0x8, `+0x1b4 = 0x78` e chama `0x43b43e` (o estado de
+tiro da mira pedida, no ar); a queda `0x42415c` só o leva ao 25 quando o jogador para de
+atirar. Até a correção da `I_M_109` o porte só soltava (`garathe-movimentos.md`, "Ataque na
+barra").
+
 O 105/104 só muda a pose e a caixa (`JK_BARUP.BRD`): o Jake não sobe para cima da barra
 [inferido: nenhum estado o põe sobre ela].
 

@@ -31,6 +31,8 @@ pub struct Pending {
     pub shove: bool,
     /// Tranco (`+0x250 = 1`): só o Garathe reage (estado 59).
     pub jolt: bool,
+    /// Envenena (`+0x270 = 1`, não soma): os obstáculos `OPO` (`0x0040fa16`).
+    pub poisons: bool,
 }
 
 impl Pending {
@@ -50,6 +52,7 @@ impl Pending {
         self.knockdown |= o.knockdown;
         self.shove |= o.shove;
         self.jolt |= o.jolt;
+        self.poisons |= o.poisons;
     }
 }
 

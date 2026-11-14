@@ -187,6 +187,26 @@ com parede a 8 px; sem lado, a horizontal fica); desliga 0x8 e 0x4000. **Ruling
   gravidade, parado; soltar CIMA → 55); 55 = 54 ao contrário → parado (CIMA → 54). Ataque,
   PULAR e lado saem como no Jake 164–166. São os estados que o tipo 8 ignora.
 
+### Ataque na barra [confirmado]
+
+Nos quatro estados da barra (chamadas em 47 `0x42a41c`, 49 `0x42a568`, 50 `0x42a873`, 51
+`0x42a969`), depois do teste do teto (sem teto a 4 px → 27) e antes de BAIXO/PULAR/lado: com
+ATIRAR ou SOCO (`0x487a2c & 0x40100`) e sem recarga (`+0x294 = 0`), desliga 0x8 (volta a
+gravidade), `+0x1b4 = 0x79` e chama `0x43b43e`: o estado de ataque da mira pedida (as garras na
+frente: 104/105), no ar. Só PULAR+BAIXO exatos (0x202) soltam antes. Na queda (`0x4292d8`,
+gravidade e `+0x160 ≥ 40`), os estados de golpe/tiro só vão ao 27 sem ATIRAR/SOCO; com eles e
+chão (`0x429395`: `0x407031`) aterrissam (28). Os de pronto, guardar e recuperação (81, 82,
+85…) não são isentos: caem. O Jake faz o mesmo nos 103–107 (chamadas `0x42460b`, `0x424775`,
+`0x4248b1`, `0x424b70`, `0x424c66`; `+0x1b4 = 0x78`; queda `0x42415c`, aterrissagem
+`0x424220` → 26).
+
+**No porte**: `Jake::bar_attack` (os dois personagens) chama `start_fire` nos estados da
+barra; depois da física, um estado de arma (`Fire`) no ar a ≥ 5 px/tique para baixo vai à
+queda sem o ataque e, com ele, aterrissa ao tocar o chão vindo de ≥ 5 px; `Ready`, `Recover`
+e `Holster` no ar caem. Na `I_M_109`, pendurado colado ao gerador de minas (tipo 103, 15 de
+vida), CIMA+ATIRAR com as garras acerta em t = 3 (caixa já 20 px abaixo do teto) e tira 7;
+a clava (golpe em t = 5) chega tarde.
+
 ## Velocidade pelo esqueleto [confirmado na fórmula; px inferidos]
 
 `px = k · trunc(Δraiz · S/K)`, com **S = 39 × 58** e **K = 28 × 50**; + = para a frente/baixo
@@ -207,11 +227,10 @@ corpo (10,8) 20×44, topo (16,5) 8×3, base (16,52) 8×4 (pés em y + 56; Jake y
 
 ## Em aberto
 
-- Ataque na barra: o 47 (`0x42a29b`) com ATIRAR/SOCO e sem recarga solta (`+0x178 &= ~8`) e
-  ataca (`0x43b43e`) no ar; o porte só solta (os estados de tiro exigem chão). Na `I_M_109`
-  o gerador de minas (tipo 103) ocupa o canto do teto do poço de x 278–362 (camada 1).
-- A plataforma `OPO` (tipo 68, `values[0]` = 10) ao pé desse poço não tem comportamento no
-  porte nem engenharia reversa; pode ser a subida prevista ali.
+- Ataque no ar fora da barra: os pulos 19, 20 e 21 e a queda 27 (`0x429719`, `0x429604`,
+  `0x429876`, `0x4293ef`; o 20 zera antes `+0x168`) chamam `0x43b43e` com ATIRAR/SOCO, como os
+  16, 17, 25 e 27 do Jake (`0x424d02`, `0x424e0a`, `0x42427a`, `0x424fa8`). O porte só começa
+  ataques no chão e na barra (acima).
 - A queda 25 do Jake (`0x42424d`) também chama `0x408205`; o porte usa nela só a inversão
   de vx (`air_reverse`). Não mexido (o Jake fica idêntico); a conferir.
 

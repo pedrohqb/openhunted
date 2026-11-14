@@ -146,6 +146,8 @@ pub enum Behaviour {
     Laser(LaserState),
     Barrel(BarrelState),
     Fire(FireState),
+    /// Obstáculo `OPO` que envenena (68–70).
+    Opo(crate::behaviour::opo::OpoState),
     Fence(FenceState),
     Graffiti(GraffitiState),
     CarPiece,
@@ -446,6 +448,12 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
             solid_shapes = false;
             Behaviour::Fire(st)
         }
+        // poça de veneno e saliência que goteja: o retângulo do quadro de referência, sem
+        // caixa (não barram nem são contato; `0x0040fa16` testa o retângulo)
+        68..=70 => Behaviour::Opo(crate::behaviour::opo::OpoState::new(
+            frame_box.unwrap_or(own_box(0, 0)),
+            value(0),
+        )),
         FENCE => Behaviour::Fence(FenceState::from_values(&o.values)),
         GRAFFITI => {
             let lines = assets
