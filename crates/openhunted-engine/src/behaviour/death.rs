@@ -151,14 +151,16 @@ fn sweep_x(cells: &crate::physics::World, r: &Rect, d: i32) -> i32 {
     8 * d
 }
 
-/// Chão até 15 px abaixo (`0x416646`: varredura com `vy = 0x78`).
+/// Chão até 15 px abaixo (`0x416646`: varredura com `vy = 0x78`). Ruling (M17): o lugar
+/// dentro das células conta como sem chão — o original não testa o lugar depois do salto de
+/// `8·d` px e a Morte poderia ficar presa na parede.
 fn ground(cells: &crate::physics::World, e: &Entity, rel: &Rect) -> bool {
     let r = Rect {
         x: e.x + rel.x,
         y: e.y + rel.y,
         ..*rel
     };
-    cells.standing_on(&r, 15)
+    !cells.blocked(&r) && cells.standing_on(&r, 15)
 }
 
 /// Aparição (`0x416251`): sorteia o alvo (os jogadores vivos; no solo, o Jake) e passa à
@@ -576,6 +578,41 @@ mod tests {
         assert!(st(&d).hidden());
         assert_eq!((d.x, d.y), (500, 300), "na origem do alvo");
         assert!(st(&d).wait >= 75, "rearma (`0x416753`)");
+    }
+
+    /// Ruling: o salto de `8·d` px não deixa a Morte dentro de uma parede.
+    #[test]
+    fn appearance_never_lands_inside_a_wall() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(1000, 200);
+        // paredes dos dois lados, a 60–200 px do Jake: só sobra o recuo para perto dele
+        let walls: Vec<Rect> = w
+            .solids()
+            .iter()
+            .copied()
+            .chain([1080, 840].map(|x| Rect {
+                x,
+                y: 0,
+                w: 100,
+                h: 247,
+            }))
+            .collect();
+        let w = crate::World::new(walls);
+        for seed in 0..40 {
+            let mut c = ctx(&j, &w, &on);
+            *c.rng = crate::rng::Rng::new(seed);
+            let mut d = death(100, 100);
+            for _ in 0..2 {
+                tick(&mut d, &mut c, &mut Out::default());
+            }
+            if !st(&d).hidden() {
+                assert!(
+                    !w.blocked(&d.bounds().unwrap()),
+                    "semente {seed}: {:?}",
+                    d.bounds()
+                );
+            }
+        }
     }
 
     /// Radiação (`0x416a48`): `|Δ|` das posições (`+0x154/+0x158`), não dos centros.

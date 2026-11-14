@@ -5,8 +5,8 @@ Método em [`README.md`](README.md). Original: endereço do `Hunter.exe` e o or�
 `ohtool render --trace-json`, `--defasagem 1`). O `rand`, a ordem do tique e a ativação por
 distância são do núcleo: só distribuições e trechos determinísticos contam aqui.
 
-**Placar** (39 linhas): igual 11 · diferente 20 (14 corrigidos) · não implementado 4 (3
-corrigidos) · a confirmar 4.
+**Placar** (40 linhas): igual 11 · diferente 20 (14 corrigidos) · não implementado 4 (3
+corrigidos) · decisão 1 · a confirmar 4.
 
 Fases medidas: `D_J_012` (Morte, 600 t.), `I_J_107` e `I_M_011` (Anticorpo), `D_M_024`
 (Manta), `H_J_009` (Camaleão), `I_J_013` (dardos), `H_J_039` (catapulta), `I_M_014`
@@ -16,6 +16,7 @@ Fases medidas: `D_J_012` (Morte, 600 t.), `I_J_107` e `I_M_011` (Anticorpo), `D_
 |---|---|---|---|---|---|
 | Morte: tique que solta os gatilhos | `0x41588b`: liga `+0x278` e sai | seguia o tique (tentava aparecer no t0) | t0 parada, tentativa no t1 | diferente → corrigido | 4f2cd3b |
 | Morte: lugar da aparição | `0x416517` alinha a borda da caixa com a do alvo e os pés − 5; `0x432e5d` varre `d` = ±(10 + rand%10) e **`+0x15c` (1/8 px) é somado à posição em px** (`0x4163ac`); chão (`0x416646`, 15 px) recuando 10 px enquanto a ≥ 20 px da origem do alvo; 2 tentativas | ao lado da caixa (10–49 px), colada ao Jake: a radiação o matava em 260 t. | x 1083 (d −11), 1302 (16), 1254 (10) com o Jake em 1202; y 452 → 457 | diferente → corrigido | `death_appears_eight_times_the_shift_away` |
+| Morte: lugar dentro da parede | o salto de `8·d` px não testa as células | Ruling: conta como sem chão (segue recuando) | — | decisão | `appearance_never_lands_inside_a_wall` |
 | Morte: aparição que falha | fica na origem do alvo, na camada dele | não se movia | t1: (1202, 309), oculta, `vy` 120 | diferente → corrigido | `failed_appearance_leaves_death_on_the_target` |
 | Morte: tique da aparição | segue no estado 1 (anima, radia); `vy = 0x78` da sonda | saía; `vy` 0 | 1.ª linha visível q1 | diferente → corrigido | idem |
 | Morte: rearme `+0x264` | na tentativa oculta (sucesso ou falha) e na queda rápida; o fim do −2 não rearma | rearmava ao sumir | — | diferente → corrigido | 4f2cd3b |
