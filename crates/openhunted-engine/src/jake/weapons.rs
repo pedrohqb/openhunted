@@ -143,8 +143,11 @@ pub struct Weapon {
     pub states: [[(u16, Reg); 2]; 4],
     /// Desvio da rajada da pistola (rotina própria `0x43bab7`).
     pub spread: bool,
-    /// Som do tiro tocado pelo quadro ao entrar no estado.
-    pub sound: Option<u16>,
+    /// Sons de arma pelo quadro (`SOUND.TBL`, listas 1 e 2 por quadro do `JAKE.ANM`/
+    /// `MINOTAUR.ANM`): por mira (cima, diag., frente, baixo), (quadro no rótulo, som). Só
+    /// toca quando o quadro muda para ele (`0x4354dc`): com passo 2 os quadros ímpares
+    /// são pulados. Os esforços e vozes (5100–5112, 5058, 37xx) ficam de fora.
+    pub sounds: [&'static [(usize, u16)]; 4],
     /// Golpe corpo a corpo por mira (cima, diag., frente, baixo): a variante do `DAMAGE.TBL`
     /// (`0x43d629(atacante, vítima, variante)`; a linha sai por vítima).
     pub blow: Option<[u32; 4]>,
@@ -176,7 +179,7 @@ pub const FISTS_W: Weapon = Weapon {
         [(154, punch((4, 5), 8, 11)), (155, punch((3, 4), 9, 12))],
     ],
     spread: false,
-    sound: None,
+    sounds: [&[]; 4],
     blow: Some([0; 4]),
     half_line: false,
 };
@@ -215,7 +218,7 @@ pub const PISTOL_W: Weapon = Weapon {
         ),
     ],
     spread: true,
-    sound: Some(3040),
+    sounds: [&[(0, 3040)]; 4],
     blow: None,
     half_line: false,
 };
@@ -255,7 +258,7 @@ pub const SHOTGUN_W: Weapon = Weapon {
         ),
     ],
     spread: false,
-    sound: Some(3045),
+    sounds: [&[(0, 3045)]; 4],
     blow: None,
     half_line: false,
 };
@@ -274,7 +277,7 @@ pub const ROCKETS_W: Weapon = Weapon {
         pair(68, gun(R_BASE, (-25, 23), 35, (30, 30))),
     ],
     spread: false,
-    sound: Some(3035),
+    sounds: [&[(0, 3035)]; 4],
     blow: None,
     half_line: false,
 };
@@ -292,7 +295,8 @@ pub const STARS_W: Weapon = Weapon {
         pair(143, gun(N_BASE, (-15, 25), 35, (10, 10))),
     ],
     spread: false,
-    sound: Some(3110),
+    // 3110 "NinjaStar" no 7º quadro de J141–J144
+    sounds: [&[(6, 3110)]; 4],
     blow: None,
     half_line: false,
 };
@@ -311,7 +315,7 @@ pub const GRENADES_W: Weapon = Weapon {
         pair(195, gun(G_BASE, (-15, 25), 35, (20, 20))),
     ],
     spread: false,
-    sound: None,
+    sounds: [&[]; 4],
     blow: None,
     half_line: false,
 };
@@ -355,7 +359,7 @@ pub const CLAWS_W: Weapon = Weapon {
         [(108, melee((3, 4), 8, 8)), (109, melee((3, 4), 8, 8))],
     ],
     spread: false,
-    sound: None,
+    sounds: [&[]; 4],
     blow: Some([0; 4]),
     half_line: false,
 };
@@ -375,7 +379,7 @@ pub const CLUB_W: Weapon = Weapon {
         pair(118, melee((5, 7), 11, 12)),
     ],
     spread: false,
-    sound: None,
+    sounds: [&[]; 4],
     blow: Some([1, 1, 2, 3]),
     half_line: false,
 };
@@ -402,7 +406,13 @@ pub const WHIP_W: Weapon = Weapon {
         pair(161, whip_reg((-65, 90), 90, (20, 20))),
     ],
     spread: false,
-    sound: None,
+    // 3097 no quadro 3/1/1/2 de 162/160/159/161 e 3098 no 6 (com passo 2 só os pares soam)
+    sounds: [
+        &[(3, 3097), (6, 3098)],
+        &[(1, 3097), (6, 3098)],
+        &[(1, 3097), (6, 3098)],
+        &[(2, 3097), (6, 3098)],
+    ],
     blow: Some([4, 5, 6, 7]),
     half_line: true,
 };
@@ -426,7 +436,8 @@ pub const KNIVES_W: Weapon = Weapon {
         pair(97, gun(throw(85), (-20, 50), 45, (20, 20))),
     ],
     spread: false,
-    sound: None,
+    // 3034 no quadro 7/6/6/7 de 98/96/95/97
+    sounds: [&[(7, 3034)], &[(6, 3034)], &[(6, 3034)], &[(7, 3034)]],
     blow: None,
     half_line: false,
 };
@@ -445,7 +456,7 @@ pub const G_GRENADES_W: Weapon = Weapon {
         pair(149, gun(throw(142), (-20, 50), 45, (20, 20))),
     ],
     spread: false,
-    sound: None,
+    sounds: [&[]; 4],
     blow: None,
     half_line: false,
 };
@@ -464,7 +475,8 @@ pub const G_STARS_W: Weapon = Weapon {
         pair(137, gun(throw(130), (-20, 50), 45, (20, 20))),
     ],
     spread: false,
-    sound: None,
+    // 3110 no quadro 7/7/6/8 de 138/136/135/137
+    sounds: [&[(7, 3110)], &[(7, 3110)], &[(6, 3110)], &[(8, 3110)]],
     blow: None,
     half_line: false,
 };
@@ -547,6 +559,9 @@ pub fn labels_of(ch: Character) -> Vec<u16> {
     v.dedup();
     v
 }
+
+#[cfg(test)]
+mod fire;
 
 #[cfg(test)]
 mod tests {

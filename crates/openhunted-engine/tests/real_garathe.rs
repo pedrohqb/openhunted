@@ -710,7 +710,11 @@ fn i_m_109_can_be_won() {
 
 /// Ataque na barra (`0x42a29b`/`0x42a4af` → `0x43b43e`) sobre os dados: no poço da `I_M_109`,
 /// mão ante mão até encostar no gerador de minas do canto do teto e CIMA+ATIRAR com as garras:
-/// o Garathe solta, golpeia no ar (t = 3) e tira 7 dos 15 de vida do gerador.
+/// o Garathe solta e ataca no ar. Encostado no gerador, a linha do centro da caixa até a
+/// origem (a "boca" das garras, dx = dy = 0) cruza o gerador: `0x43b556`/`0x43bbe3` ligam o
+/// modo soco (`0x47d7b8 = 2`) e o golpe sai com a clava (par 2), cuja janela (5..7) chega
+/// tarde: o Garathe já caiu e o gerador fica intacto (auditoria M17, `armas.md`; a
+/// confirmar no oráculo).
 #[test]
 fn claws_hit_the_mine_generator_from_the_ceiling() {
     let Some(mut s) = load("I_M_109.LEV") else {
@@ -737,9 +741,13 @@ fn claws_hit_the_mine_generator_from_the_ceiling() {
     );
     assert_eq!(gen_hp(&s), 15);
     s.tick(SHOOT | UP);
-    assert!(matches!(j(&s).state(), State::Fire { .. }), "solta e ataca");
-    s.run_ticks(4, SHOOT | UP);
-    assert_eq!(gen_hp(&s), 8, "golpe das garras no ar");
+    assert!(
+        matches!(j(&s).state(), State::Fire { w: 2, .. }),
+        "solta e ataca com a clava: {:?}",
+        j(&s).state()
+    );
+    s.run_ticks(8, SHOOT | UP);
+    assert_eq!(gen_hp(&s), 15, "a clava chega tarde");
     assert!(until(&mut s, 0, 40, |s| j(s).body.on_ground));
 }
 

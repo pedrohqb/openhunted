@@ -78,10 +78,10 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         return;
     }
     if let Behaviour::Grenade(st) = &mut e.behaviour {
-        // parede (`0x40707c`: contato com a normal mais horizontal que vertical): inverte vx
-        // sem perder rapidez (a resposta comum da física daria meio rebote)
-        st.vx = if f.hit_wall { -v.0 } else { f.v.0 };
-        st.vy = if f.on_ground && f.v.1 > 0 { 0 } else { f.v.1 };
+        // a resposta comum da física: rebote e atrito na parede e no chão (oráculo,
+        // `H_J_030`: a 20 px/tique volta a 8 da parede e quica no chão de +11 a −4)
+        st.vx = f.v.0;
+        st.vy = f.v.1;
     }
     if f.hit_wall {
         // `0x434815(granada, 1)`: inverte o espelho; som posicional na base da caixa

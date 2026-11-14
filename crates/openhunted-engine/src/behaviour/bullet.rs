@@ -90,7 +90,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     // nasceu dentro de um sólido (boca na parede): impacto imediato
     if let Some(b) = e.bounds() {
         if ctx.cells_for(e.layer).blocked(&b) {
-            let c = e.center();
+            let c = super::projectile::effect_center(e, None);
             e.alive = false;
             out.impacts.push((c.0, c.1, e.layer));
             return;
@@ -121,7 +121,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
 pub fn finish(e: &mut Entity, out: &mut Out) {
     if let crate::entity::Behaviour::Bullet(b) = &e.behaviour {
         if b.spent && e.alive {
-            let c = e.center();
+            let c = super::projectile::effect_center(e, None);
             e.alive = false;
             out.impacts.push((c.0, c.1, e.layer));
         }

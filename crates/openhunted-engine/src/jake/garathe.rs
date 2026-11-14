@@ -78,7 +78,7 @@ pub(super) fn anim(s: State) -> (u16, u32) {
         State::Land(Landing::Medium) => (23, 1),
         State::Land(Landing::Long) => (24, 2),
         State::Land(Landing::Hard) => (30, 0),
-        State::GetUp => (31, 0),
+        State::GetUp | State::KnockRise(_) => (31, 0),
         State::Rise => (35, 0),
         State::Jolted => (63, 0),
         State::Taunt => (76, 0),

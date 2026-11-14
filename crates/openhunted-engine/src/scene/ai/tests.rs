@@ -173,7 +173,11 @@ fn human_pistol_kills_an_ai_jake_into_a_corpse() {
     );
     assert_eq!(behaviour::enemy::kills(&s.entities), 0, "tipo 1 não conta");
     assert_eq!(s.kills_total, 0, "nem no total");
-    // o cadáver não para mais as balas
+    // o cadáver não para mais as balas (pistola recarregada: a cadência fiel gasta as 50)
+    if let Some(j) = s.jake.as_mut() {
+        j.inventory.slots[crate::jake::PISTOL] = (1, 50);
+        j.inventory.weapon = crate::jake::PISTOL;
+    }
     let n = s.entities.len();
     for t in 0..40 {
         s.tick(if t % 2 == 0 { SHOOT } else { 0 });

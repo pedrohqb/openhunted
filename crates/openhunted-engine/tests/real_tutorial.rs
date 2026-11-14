@@ -106,6 +106,9 @@ fn t_j_005_barrels_explode_when_shot_and_chain() {
     let Some(mut s) = load("T_J_005.LEV") else {
         return;
     };
+    // prova do comportamento do objeto, não da ativação por distância (`0x435e7f`): todos
+    // ativos, como antes dela
+    s.view_centers.clear();
     assert_eq!(alive(&s, 28), 2);
     place(&mut s, 740, 150, 30);
     assert!(s.jake.as_ref().unwrap().body.on_ground);
@@ -201,6 +204,8 @@ fn t_j_007_car_piece_pickup_satisfies_the_objective() {
         j.body.x = b.x - 5;
         j.body.y = b.y - 20;
     }
+    // a ativação do tique usa a câmera do anterior: a peça acorda no 2º tique
+    s.tick(0);
     s.tick(0);
     assert!(!s.entities[piece].alive && s.entities[piece].on);
     assert!(

@@ -37,6 +37,9 @@ fn i_j_104_ledges_drip_and_steam_cycles() {
     let Some(mut s) = load("I_J_104.LEV") else {
         return;
     };
+    // prova do comportamento do objeto, não da ativação por distância (`0x435e7f`): todos
+    // ativos, como antes dela
+    s.view_centers.clear();
     let ledges = s.entities.iter().filter(|e| e.kind == 70).count();
     assert!(ledges > 0);
     assert!(
@@ -87,6 +90,9 @@ fn i_j_013_barrel_with_value_leaves_floor_fire() {
     let Some(mut s) = load("I_J_013.LEV") else {
         return;
     };
+    // prova do comportamento do objeto, não da ativação por distância (`0x435e7f`): todos
+    // ativos, como antes dela
+    s.view_centers.clear();
     let fires = |s: &Scene| {
         s.entities
             .iter()

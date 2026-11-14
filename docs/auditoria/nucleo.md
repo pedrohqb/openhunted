@@ -19,7 +19,8 @@
 | Sorteios da carga | cada inicialização na ordem do arquivo (globais, depois células, inclusive objetos de outro modo): genérica `0x40b2c8` 1 (`+0x184 = rand % n`), chaves 1, Morte 2, Manta 4, Anticorpo 5; 0 em 0, 1, 2, 6, 50–52 | nenhum; minas e itens no quadro 0 | implementado (`entity::init_draws`, `keeps_random_frame`): minas 11,5,10,2,8,8,8 e itens 4/6 na `T_J_001`, 10,2,8,8,8,6,7 e itens 4,0,1,10,1 na `T_J_003` — iguais | idem |
 | Tiro: par de estados | `0x43b4ea`: `rand & 1` a cada início de tiro | LCG próprio | usa o `rand` da cena (emprestado ao Jake no tique); idem o 79 (`rand & 3`) | `punch_in_the_scene…` |
 | Explosão | `0x40d20c`: sem direção, `a = rand` e rótulo `(rand >> 14) + 1`; `a < 0x4000` ou `> 0xc000` → espelho horizontal (`+0x194 \|= 1`, `0x405775`: bit 1 = x, 2 = y) | `1 + rand % 4` | corrigido (2 sorteios na ordem; espelho vertical `a > 0x8000` não implementado: o sprite não tem) | `scene.rs::explosion_entity` |
-| Ativação por distância | `0x435e7f`: raio por tipo (∞: 1, 2, 19–21, 36, 42, 50–52, 71, 86, 99, 100, 106, 108 e bit `0x100000`; 400: 10, 11, 28, 29, 40, 89, 102, 104, 105, 107, 109; 600 os demais) do centro da vista do tique anterior; fora das camadas desenhadas, inativo | tudo ativo (minas animando longe) | implementado (`Scene::activate`, `tick_camera`: câmera 18 px/tique ao longo do vetor, `0x4365ae`); inativo não atualiza nem anima. Minas da `T_J_001` agora paradas no quadro sorteado até a câmera chegar (q igual em todos os tiques) | medido abaixo |
+| Ativação por distância | `0x435e7f`: raio por tipo (∞: 1, 2, 19–21, 36, 42, 50–52, 71, 86, 99, 100, 106, 108 e bit `0x100000`; 400: 10, 11, 28, 29, 40, 89, 102, 104, 105, 107, 109; 600 os demais) do centro da vista do tique anterior; fora das camadas desenhadas, inativo | tudo ativo (minas animando longe) | implementado (`Scene::activate`, `tick_camera`: câmera 18 px/tique ao longo do vetor, `0x4365ae`; Ruling: salto do alvo > 64 px recentra, como no `viewer.rs`); inativo não atualiza nem anima. Minas da `T_J_001` agora paradas no quadro sorteado até a câmera chegar (q igual em todos os tiques) | medido abaixo |
+| Atrito da resposta | `0x404842`: uma vez em cada eixo, também na normal depois do rebote | só na tangencial | corrigido (pedido da área de armas: cápsula na parede −4 px/tique) | `physics::tests` |
 | Objetos de célula no tique 0 | itens no quadro sorteado no fim do tique 0, animam a partir do 1 | animavam no 0 | corrigido (`cell_objects`: dormem no tique 0; hipótese: só se atualizam depois do primeiro desenho) | `T_J_001`/`T_J_003` itens iguais |
 | Pulo correndo (PULAR sem lado logo após correr → 29) | 29, vx −80 | 27 | **não feito** (área de movimentos do Jake) | — |
 | Virar à direita desloca +1 px (Garathe, `0x434815`) | `T_M_002` t 10: 86 → 87 | não | **não feito** (movimentos do Garathe) | — |
@@ -53,7 +54,9 @@ vy −8), `ant` (`0x4207c3` refaz vy = −8 ao andar), `the_entity`, `flyer`, `b
 `punch_in_the_scene…` e `bruiser_wakes_attacks…` fixam `Rng::new(k)` (com a sequência do
 original o soco sai no par alternativo / o brutamontes se afasta); `ai_minotaur_approaches…`:
 o humano espera e só chega perto quando o Minotauro ataca; `t_j_007_layer_doors`: faixa de x
-440–470 → 425–470; **ignorados** com motivo: `i_m_109_can_be_won` (o Garathe pousa 4 px dentro
+440–470 → 425–470; o fuzz `m10_fuzz…` não confere inimigos inativos (a formiga nascida no
+formigueiro dentro da parede fica lá); `t_m_008_ant…` põe a vista sobre o formigueiro; o modo
+deus da auditoria não teleporta para fora da fase (`audit.rs`); **ignorados** com motivo: `i_m_109_can_be_won` (o Garathe pousa 4 px dentro
 da poça) e `i_j_002_can_be_won` (a luta com os robôs de x ≈ 362 mata o Jake) — roteiros a
 refazer pelas áreas de movimentos.
 
@@ -69,5 +72,8 @@ refazer pelas áreas de movimentos.
   (`0x4879e4`) aproximada por "camada ≥ a da vista"; alvo pela caixa do corpo, não pelo quadro.
 - Objetos de célula: a regra exata (desenho/visibilidade da célula) é hipótese.
 - "Pouso segurando o ataque" (`+0x160` em px depois da física): não conferido.
+- Da área de armas: dano de área medido do centro do **quadro** da vítima (28 e (15, 7) no
+  original × 21 e (10, −3)); efeitos criados no meio da atualização vivem 8 tiques (porte 7:
+  ordem global das entidades); quique da granada 8 × 10 px/tique (conferir com o atrito novo).
 - Para as áreas de movimentos: pulo correndo (29), +1 px na virada do Garathe, furtivo do
   Garathe; para inimigos: a formiga anda a `±0x40` (8 px) no original, o porte usa 2 px.

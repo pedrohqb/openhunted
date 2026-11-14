@@ -530,6 +530,9 @@ fn tutorial_shooting_kills_the_nearest_mine() {
     let Some((mut s, _)) = load("T_J_001.LEV") else {
         return;
     };
+    // prova do comportamento do objeto, não da ativação por distância (`0x435e7f`): todos
+    // ativos, como antes dela
+    s.view_centers.clear();
     assert_eq!(s.mines_at_start, 7, "as 7 minas da T_J_001");
     for _ in 0..20 {
         s.tick(0);
@@ -700,25 +703,35 @@ fn bullets_never_cross_cell_walls() {
             for _ in 0..6 {
                 s.tick(0);
             }
+            // a bala nasce na boca e só anda no tique seguinte (oráculo; a caixa dela, 16 px
+            // adiante, pode nascer num canto e vira faísca no tique seguinte); depois, o
+            // segmento do centro anterior ao atual não cruza sólido algum
+            let mut prev: std::collections::HashMap<usize, (i32, i32)> = Default::default();
             for t in 0..30 {
                 s.tick(if t < 8 { SHOOT } else { 0 });
-                let jb = s.jake.as_ref().unwrap().body.bounds();
-                let jc = (jb.x + jb.w / 2, jb.y + jb.h / 2);
-                for b in s.entities.iter().filter(|e| e.alive && e.kind == 19) {
+                let mut now = std::collections::HashMap::new();
+                for (k, b) in s.entities.iter().enumerate() {
+                    if !(b.alive && b.kind == 19) {
+                        continue;
+                    }
                     let bb = b.bounds().unwrap();
                     let bc = (bb.x + bb.w / 2, bb.y + bb.h / 2);
-                    // o segmento do centro do Jake ao centro da bala não cruza sólido algum
-                    let crossed = (1..16).any(|i| {
-                        let p = openhunted_engine::Rect {
-                            x: jc.0 + (bc.0 - jc.0) * i / 16,
-                            y: jc.1 + (bc.1 - jc.1) * i / 16,
-                            w: 1,
-                            h: 1,
-                        };
-                        s.cell_world().blocked(&p)
-                    });
+                    now.insert(k, bc);
+                    let crossed = match prev.get(&k) {
+                        None => false,
+                        Some(&pc) => (1..16).any(|i| {
+                            let p = openhunted_engine::Rect {
+                                x: pc.0 + (bc.0 - pc.0) * i / 16,
+                                y: pc.1 + (bc.1 - pc.1) * i / 16,
+                                w: 1,
+                                h: 1,
+                            };
+                            s.cell_world().blocked(&p)
+                        }),
+                    };
                     assert!(!crossed, "{level}: bala atravessou a parede em {bb:?}");
                 }
+                prev = now;
             }
         }
     }

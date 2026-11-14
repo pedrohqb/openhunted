@@ -324,11 +324,13 @@ fn bruiser_wakes_attacks_and_dies_by_pistol() {
         assert!(hits < 200, "não morreu");
         enemy::hurt(&mut s.entities[i], &pistol, true);
         hits += 1;
+        watch(&mut s, i);
         s.tick(0);
     }
     assert_eq!(hits, 100);
     let before = s.entities.len();
     for _ in 0..40 {
+        watch(&mut s, i);
         s.tick(0);
     }
     let blasts = s.entities[before..].iter().filter(|e| e.kind == 86).count();
@@ -380,6 +382,14 @@ fn i_j_110_hop_mines_on_other_layers_survive() {
     }
     let alive = mines.iter().filter(|&&i| s.entities[i].alive).count();
     assert_eq!(alive, mines.len(), "minas sumidas");
+}
+
+/// Põe a vista sobre a entidade `i` (o Jake longe dela): só o que está perto da vista se
+/// atualiza (`0x435e7f`). A câmera volta para o Jake a cada tique: chamar antes de cada um.
+fn watch(s: &mut Scene, i: usize) {
+    let (x, y, layer) = (s.entities[i].x, s.entities[i].y, s.entities[i].layer);
+    s.view_centers = vec![(x, y)];
+    s.views[0].layer = layer;
 }
 
 /// Inimigos vigiados pelo fuzz: os da M7a, as minas e os olhos-laser.
@@ -818,6 +828,7 @@ fn anthill_spawns_ants_in_t_m_008() {
     let hill = find(&s, 88, |_| true);
     let n0 = s.entities.len();
     for _ in 0..260 {
+        watch(&mut s, hill);
         s.tick(0);
     }
     let ants: Vec<_> = s.entities[n0..].iter().filter(|e| e.kind == 109).collect();
@@ -911,6 +922,7 @@ fn difficulty_scales_enemy_damage_on_real_data() {
     }
     let hp = s.entities[i].health;
     enemy::hurt(&mut s.entities[i], &pistol, true);
+    watch(&mut s, i);
     s.tick(0);
     assert_eq!(s.entities[i].health, hp - 2, "fácil: (2 × 2) / 2");
 }

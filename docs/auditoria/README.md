@@ -33,7 +33,7 @@ depois "Correções", "Em aberto". O README desta pasta lista as áreas e o plac
 | Núcleo: ordem do tique, contato com o chão, animação, `rand`, ativação | `nucleo.md` | feito (em aberto: ordem global das entidades) |
 | Movimentos do Jake | `jake-movimentos.md` | em andamento |
 | Movimentos do Garathe | `garathe-movimentos.md` | feita: 24 igual, 18 corrigidas, 2 decisão, 5 em aberto |
-| Armas, projéteis e reações a dano | `armas.md` | em andamento |
+| Armas, projéteis e reações a dano | `armas.md`, `armas-projeteis.md` | feita (32 corrigidos, 7 em aberto, 6 a confirmar) |
 | Itens, objetos de fase e colisões de objetos | `itens-objetos.md` | feito: 19 iguais, 7 corrigidos, 6 em aberto |
 | Inimigos principais | `inimigos.md` | a seguir |
 | Inimigos secundários e IA dos personagens | `inimigos-2.md` | a seguir |

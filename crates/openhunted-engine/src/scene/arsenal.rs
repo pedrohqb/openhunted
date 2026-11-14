@@ -96,7 +96,8 @@ impl Scene {
                     crate::entity::GRENADE,
                     "OGR.ANM",
                     grenade::LABEL_THROWN,
-                    u8::from(s.vx < 0),
+                    // sem espelho ao sair (oráculo: `esp` 0 lançada para a esquerda)
+                    0,
                     "OGR2.BRD",
                     8,
                     Behaviour::Grenade(grenade::GrenadeState::new(vx, vy, fuse)),
@@ -208,7 +209,13 @@ impl Scene {
     pub(super) fn weapon_impact(&mut self, i: usize, victim: Option<usize>, out: &mut Out) {
         use crate::behaviour::{grenade, pellet, rocket, star};
         let e = &self.entities[i];
-        let (c, layer) = (e.center(), e.layer);
+        // efeito e explosão no centro do quadro do projétil (`0x43d90c`); chumbo, estrela,
+        // faca e chicote (bits 2 da linha) com x junto à vítima
+        let near = matches!(e.behaviour, Behaviour::Pellet(_) | Behaviour::Star(_));
+        let v = victim.filter(|_| near).map(|vi| &self.entities[vi]);
+        let (c, layer) = (behaviour::projectile::effect_center(e, v), e.layer);
+        // direção da reação: centro do projétil → centro da vítima (`0x43d6c5`)
+        let origin = behaviour::projectile::effect_center(e, None);
         let dir = match &e.behaviour {
             Behaviour::Pellet(s) => s.vx.signum(),
             Behaviour::Rocket(s) => s.vx.signum(),
@@ -223,7 +230,7 @@ impl Scene {
             let row = crate::damage::row(attacker, Some(v.kind), 0)?;
             Some(row.pending(Geometry {
                 vel: (0, 0),
-                toward: (vc.0 - c.0, vc.1 - c.1),
+                toward: (vc.0 - origin.0, vc.1 - origin.1),
             }))
         };
         let (direct, blast) = match &e.behaviour {
@@ -233,14 +240,16 @@ impl Scene {
             Behaviour::Star(s) if s.knife => {
                 (by_row(crate::entity::KNIFE).unwrap_or_default(), None)
             }
+            // chumbo: linha `(20, …)` pela vítima (derrubada de módulo 20 na direção dos
+            // centros, não só na horizontal)
             Behaviour::Pellet(_) => (
-                Pending {
+                by_row(crate::entity::PELLET).unwrap_or(Pending {
                     amount: pellet::DAMAGE,
                     explosion: true,
                     knockdown: true,
                     push: (dir * pellet::PUSH, 0),
                     ..Default::default()
-                },
+                }),
                 None,
             ),
             Behaviour::Rocket(_) => (
@@ -516,13 +525,17 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // 20 px/tique = 160/8: −11,25°, 0°, 0°, +11,25° (≈ ±31 em 1/8 px)
+        // −11,25°, 0°, 0°, +11,25° com as velocidades em px inteiros arredondadas para
+        // baixo a cada divisão (`0x40d08f`): assimétricas, como no original
         let mut vys = vys;
         vys.sort_unstable();
-        assert!(vys[1].abs() <= 1 && vys[2].abs() <= 1, "{vys:?}");
+        assert_eq!(vys, vec![-32, -8, -8, 16]);
+        // os filhos encolhem: 10 → 6 → 5
         assert!(
-            (29..=33).contains(&-vys[0]) && (29..=33).contains(&vys[3]),
-            "{vys:?}"
+            s.entities
+                .iter()
+                .filter(|e| e.alive && e.kind == crate::entity::PELLET)
+                .all(|e| e.sprite.as_ref().unwrap().scale.0 == 5)
         );
         // batem na parede em x = 400: faíscas e nada sobra
         for _ in 0..20 {
@@ -638,7 +651,8 @@ mod tests {
         })
     }
 
-    /// Na parede a granada inverte vx (sem perder rapidez) e espelha; o som 3042 só toca
+    /// Na parede a granada inverte vx perdendo rapidez (rebote da física; o oráculo mede
+    /// 20 → 8 px/tique) e espelha; o som 3042 só toca
     /// no choque de parede (`0x40707c`: normal mais horizontal que vertical).
     #[test]
     fn grenade_wall_bounce_inverts_vx_and_mirrors() {
@@ -657,7 +671,10 @@ mod tests {
             let wall = s.events.iter().any(|e| e.sound_id() == Some(3042));
             if let (Some(before), true) = (last, wall) {
                 if !seen {
-                    assert_eq!(vx, -before, "inverte vx sem perder rapidez");
+                    assert!(
+                        vx.signum() == -before.signum() && vx.abs() < before.abs(),
+                        "inverte vx perdendo rapidez: {before} → {vx}"
+                    );
                     let g = s.entities.iter().find(|e| e.kind == crate::entity::GRENADE);
                     assert_eq!(
                         g.and_then(|e| e.sprite.as_ref()).map(|sp| sp.mirror),
@@ -950,7 +967,8 @@ mod tests {
         assert!((7..=9).contains(&fs), "1ª divisão no tique {fs}");
         assert_eq!(
             sizes.into_iter().collect::<Vec<_>>(),
-            vec![(1, 10), (2, 6), (3, 5), (4, 4)],
+            // geração 0: o tique em que nasce (ainda não armado)
+            vec![(0, 10), (1, 10), (2, 6), (3, 5), (4, 4)],
             "os filhos encolhem"
         );
         assert_eq!(most.0, 4, "até a 4ª geração");
