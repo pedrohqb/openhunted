@@ -581,6 +581,65 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Encerra a partida corrente com `outcome` e espera o `SH2HS`.
+    fn finish(a: &mut App, outcome: Outcome) {
+        a.viewer_mut().unwrap().scene_mut().outcome = Some(outcome);
+        a.advance(END_DELAY_MS + 50);
+        assert_eq!(a.page_kind(), Some(PageKind::Duo));
+        a.key_down(Key::Enter); // salta a contagem
+    }
+
+    #[test]
+    fn limits_cancel_replay_and_next_wrap_in_the_deathmatch() {
+        let Some((mut a, root)) = app("duo-wrap") else {
+            return;
+        };
+        load_first(&mut a, info_ids::MULTI_H2H);
+        click(&mut a, segoc::OK);
+        click(&mut a, segoc::OK);
+        assert_eq!(a.page_kind(), Some(PageKind::Limits));
+        // CANCEL da `SHVLD` sem resultado antes: a `SEGOC` do jogador 1
+        a.key_down(Key::Escape);
+        run(&mut a, 1);
+        assert_eq!((a.page_kind(), a.choosing()), (Some(PageKind::Choose), 0));
+        click(&mut a, segoc::OK);
+        click(&mut a, segoc::OK);
+        click(&mut a, dmm::GO);
+        assert_eq!(a.mode(), Mode::Play);
+        finish(&mut a, Outcome::Victory);
+        // REPLAY na disputa: a mesma fase, direto na `SHVLD`
+        click(&mut a, h2h::REPLAY);
+        assert_eq!(a.page_kind(), Some(PageKind::Limits));
+        assert_eq!(a.duo_index(), Some(0));
+        let list = a.duo_missions();
+        assert_eq!(a.level_file(), list[0].file);
+        click(&mut a, dmm::GO);
+        finish(&mut a, Outcome::Victory);
+        // NEXT na última da lista volta à primeira (Ruling)
+        a.m15.index = Some(list.len() - 1);
+        click(&mut a, h2h::NEXT);
+        assert_eq!(a.page_kind(), Some(PageKind::Limits));
+        assert_eq!(a.duo_index(), Some(0));
+        assert_eq!(a.level_file(), list[0].file);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn coop_time_out_announces_and_keeps_the_campaign() {
+        let Some((mut a, root)) = app("duo-timeout") else {
+            return;
+        };
+        coop(&mut a);
+        let s = a.viewer_mut().unwrap().scene_mut();
+        (s.time_limit, s.timer) = (60, 0);
+        a.take_sounds();
+        finish(&mut a, Outcome::Defeat);
+        let snd = a.take_sounds();
+        assert!(snd.windows(2).any(|w| w == [3776, 3787]), "{snd:?}");
+        assert!(a.records.iter().all(|&r| r == 0));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn split_views_draw_each_half_through_the_scene_view() {
         let Some((mut a, root)) = app("duo-views") else {
