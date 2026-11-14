@@ -187,7 +187,7 @@ impl LaserEyeState {
             shots: v.shots,
             pause: v.pause,
             fired: 0,
-            sweep_ticks: 0,
+            sweep_ticks: v.sweep,
             hurt: Pending::default(),
             last_sound: None,
         }
@@ -300,9 +300,12 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     });
     // 4. varredura
     if !st.firing {
-        st.sweep_ticks += 1;
-        if st.sweep_ticks >= st.variant().sweep {
-            st.sweep_ticks = 0;
+        // contador `+0x290` (`0x41f5d9`): > 0 desconta; em 0 recarrega e dá o passo — um
+        // passo a cada `período + 1` tiques (oráculo `H_J_001`, Beta: a cada 5)
+        if st.sweep_ticks > 0 {
+            st.sweep_ticks -= 1;
+        } else {
+            st.sweep_ticks = st.variant().sweep;
             st.step();
         }
     }
@@ -425,6 +428,28 @@ mod tests {
         e.solid_shapes = true;
         e.behaviour = Behaviour::LaserEye(LaserEyeState::new(&e.values));
         e
+    }
+
+    /// Oráculo `H_J_001` (olho Beta, período 4): sem alvo, passos nos tiques 4, 9, 14 (um a
+    /// cada 5: `+0x290` desconta até 0 e só então recarrega e anda).
+    #[test]
+    fn sweep_steps_every_period_plus_one() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 5000);
+        let mut c = ctx(&j, &w, &on);
+        let mut e = eye(100, 0, 150);
+        e.values[0] = 1;
+        e.behaviour = Behaviour::LaserEye(LaserEyeState::new(&e.values));
+        let mut steps = vec![];
+        for t in 0..15 {
+            c.tick = t;
+            let before = state(&e).pos;
+            tick(&mut e, &mut c, &mut Out::default());
+            if state(&e).pos != before {
+                steps.push(t);
+            }
+        }
+        assert_eq!(steps, vec![4, 9, 14]);
     }
 
     fn state(e: &Entity) -> &LaserEyeState {
