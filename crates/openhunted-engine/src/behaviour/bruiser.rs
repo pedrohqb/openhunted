@@ -351,7 +351,7 @@ fn end_of_animation(
                 let tx = enemy::center(&t).0;
                 if tx >= me.x && tx < me.x + me.w {
                     let side = if tx >= e.center().0 { 1 } else { -1 };
-                    out.jake_damage.add(&Pending {
+                    out.jake_damage.assign(&Pending {
                         amount: SMASH,
                         knockdown: true,
                         push: (SMASH_PUSH.0 * side, SMASH_PUSH.1),

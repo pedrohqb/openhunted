@@ -224,7 +224,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         .is_some_and(|(j, b)| j.overlaps(&b));
     if hit {
         let r = row(e.kind);
-        out.jake_damage.add(&Pending {
+        out.jake_damage.assign(&Pending {
             amount: r.direct,
             shove: r.shove,
             ..Default::default()

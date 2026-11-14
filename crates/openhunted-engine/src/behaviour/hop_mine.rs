@@ -165,7 +165,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     }
     if e.health <= 0 {
         if touched {
-            out.jake_damage.add(&Pending {
+            out.jake_damage.assign(&Pending {
                 amount: DIRECT,
                 ..Default::default()
             });
