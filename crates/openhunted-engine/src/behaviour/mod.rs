@@ -112,6 +112,12 @@ pub struct Ctx<'a> {
     pub any_taker: bool,
     /// Os outros jogadores (com dois): índice do jogador, corpo e camada. Vazio no solo.
     pub others: &'a [(usize, &'a Jake, i32)],
+    /// Grade das células (`célula+0x04`, presença; `0x4317db`), se a cena tem fase.
+    pub grid: Option<&'a crate::ai::CellGrid>,
+    /// Zonas PR da fase (`0x4075af`).
+    pub zones: &'a [crate::jake::Zone],
+    /// Posição (`+0x14c/+0x150`) do objeto vivo de um id de gatilho antes do tique.
+    pub at: &'a dyn Fn(i32) -> Option<(i32, i32)>,
 }
 
 impl<'a> Ctx<'a> {
@@ -193,6 +199,14 @@ impl Out {
     pub fn hurt_player(&mut self, who: Option<usize>, p: &Pending) {
         match who {
             None => self.jake_damage.add(p),
+            Some(i) => self.seat_damage.push((i, *p)),
+        }
+    }
+
+    /// Golpe direto num jogador (`0x43d629` com vítima): o dano atribui (`Pending::assign`).
+    pub fn hit_player(&mut self, who: Option<usize>, p: &Pending) {
+        match who {
+            None => self.jake_damage.assign(p),
             Some(i) => self.seat_damage.push((i, *p)),
         }
     }
@@ -362,6 +376,9 @@ pub(crate) mod test_support {
             difficulty: crate::Difficulty::Normal,
             any_taker: false,
             others: &[],
+            grid: None,
+            zones: &[],
+            at: &|_| None,
         }
     }
 }

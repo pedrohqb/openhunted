@@ -1558,6 +1558,13 @@ impl Scene {
             .map(|e| (e.id, e.on))
             .collect();
         let on = |id: i32| snapshot.iter().find(|(i, _)| *i == id).map(|(_, o)| *o);
+        let places: Vec<(i32, (i32, i32))> = self
+            .entities
+            .iter()
+            .filter(|e| e.alive && e.id != 0)
+            .map(|e| (e.id, (e.x, e.y)))
+            .collect();
+        let at = |id: i32| places.iter().find(|(i, _)| *i == id).map(|(_, p)| *p);
         let seats = self.seats();
         let multi = self.players.len() >= 2;
         // cada entidade age contra um jogador (Ruling M15a: o mais perto, `entity_targets`)
@@ -1624,6 +1631,9 @@ impl Scene {
                     difficulty: self.difficulty,
                     any_taker,
                     others: &others[t],
+                    grid: (self.ai_grid.size != (0, 0, 0)).then_some(&self.ai_grid),
+                    at: &at,
+                    zones: &self.prop_zones,
                 };
                 let out = &mut outs[t];
                 let (blasts, spawns, hazards) =
