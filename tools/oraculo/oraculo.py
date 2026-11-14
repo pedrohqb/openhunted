@@ -296,13 +296,25 @@ def cmd_run(a):
         dev = mem.u32(0x499014 + 4 * mem.i32(jogador + 0x198))
         if a.inicial:
             print(json.dumps(memoria.quadro(mem, -1, None, ids, a.todos)), file=saida)
+        # o estado do `rand` no tique 0 também é fixado: o briefing sorteia conforme o
+        # tempo que fica aberto
+        memoria.escrever_rng(mem, rng_ini)
         t = 0
         pausados = 0
+        modal = 0
         bits = entrada_do_tique(seq, 0)
         mem.write(dev + 0x8C, dispositivo(bits))
         th.cont()
         while t < a.ticks:
-            eip = th.wait_break(timeout=10)
+            eip = esperar(th, 0.8)
+            if eip is None:
+                # sem tique em 0,8 s: diálogo modal dentro do tique (dica do "mago",
+                # docs/re/dicas.md); fecha soltando uma tecla que o jogo não usa
+                modal += 1
+                if modal > 40:
+                    raise RuntimeError(f"o jogo parou no tique {t}")
+                xdo("key", "--delay", "100", "Escape")
+                continue
             if eip != BP_TIQUE:
                 th.cont()
                 continue
@@ -312,6 +324,9 @@ def cmd_run(a):
                 th.cont()
                 continue
             q = memoria.quadro(mem, t, bits, ids, a.todos)
+            if modal:
+                q["modal"] = True  # este tique abriu uma dica (o jogo esperou a tecla)
+                modal = 0
             print(json.dumps(q, separators=(",", ":")), file=saida)
             if a.shots and t % a.shot_every == 0:
                 xdo.foto(os.path.join(a.shots, f"t{t:05d}.png"))
