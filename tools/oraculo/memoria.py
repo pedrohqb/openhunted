@@ -34,17 +34,40 @@ def _campo(blob, ofs, fmt):
     return struct.unpack_from("<" + fmt, blob, ofs)[0]
 
 
-def objetos(mem, limite=5000):
-    """Endereços da lista, na ordem do jogo."""
-    o, n = mem.u32(LISTA), 0
+MORTOS = 0x488E80      # lista dos destruídos (0x43cfcf a percorre junto)
+CELULAS = 0x488E84     # vetor de ponteiros de célula (gx·gy·gz); a lista da célula em +0xd0
+GRADE = (0x488E6C, 0x488E70, 0x488E74)
+
+
+def _cadeia(mem, o, limite=5000):
+    n = 0
     while o and n < limite:
         yield o
         o = mem.u32(o + 0x1C)
         n += 1
 
 
+def objetos(mem, mortos=False):
+    """(endereço, lista) de todos os objetos, como 0x43cfcf os percorre: a lista global
+    ("g", ordenada por +0x1b4), as listas das células ("c": itens, cenário animado…) e, se
+    pedido, a dos destruídos ("m")."""
+    for o in _cadeia(mem, mem.u32(LISTA)):
+        yield o, "g"
+    gx, gy, gz = (mem.i32(a) for a in GRADE)
+    n = gx * gy * gz
+    if 0 < n < 1_000_000:
+        vet = struct.unpack(f"<{n}I", mem.read(mem.u32(CELULAS), 4 * n))
+        for c in vet:
+            if c:
+                for o in _cadeia(mem, mem.u32(c + 0xD0)):
+                    yield o, "c"
+    if mortos:
+        for o in _cadeia(mem, mem.u32(MORTOS)):
+            yield o, "m"
+
+
 def achar_jogador(mem):
-    for o in objetos(mem):
+    for o, _ in objetos(mem):
         if mem.i32(o + 0x18) in (1, 2) and mem.i32(o + 0x19C):
             return o
     return None
@@ -65,8 +88,9 @@ def ler(mem, o):
 def quadro(mem, t, bits, ids, todos):
     """Uma linha do rastro. `ids` dá a cada endereço um número estável (ordem de chegada)."""
     objs = []
-    for o in objetos(mem):
+    for o, lista in objetos(mem, mortos=True):
         d = ler(mem, o)
+        d["lista"] = lista
         if not todos and d["tipo"] in LOGICA:
             continue
         if o not in ids:
