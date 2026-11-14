@@ -334,7 +334,7 @@ pub fn jake_joltable(s: State) -> bool {
             | State::Land(Landing::Fall)
             | State::GetUp
             | State::Shake
-            | State::Rise
+            | State::KnockRise(true)
             | State::Crouch
             | State::Crawl
             | State::StandUp
@@ -368,7 +368,7 @@ pub fn can_fall(s: State) -> bool {
             | State::Land(_)
             | State::GetUp
             | State::Rise
-            | State::SitUp
+            | State::KnockRise(_)
             | State::Shake
             | State::Special(_)
             | State::Taunt
@@ -516,7 +516,7 @@ impl Jake {
 
     /// Caixa do estado (BRD da coluna `+0x01`): engatinhando, `JK_CRAWL`; puxando o corpo
     /// na barra, `JK_BARUP`; senão a padrão.
-    fn state_box(&self) -> Rect {
+    pub(super) fn state_box(&self) -> Rect {
         if self.is_garathe() {
             // `MN_CRAWL` em 36–38, `MN_BARUP` em 49–51, `MN_COLPS` em 29–33, 35, 59 e nas
             // mortes
@@ -1106,15 +1106,15 @@ impl Jake {
                     }
                 }
             }
-            State::SitUp => {
+            State::KnockRise(false) => {
                 // 83 (`0x00425b99`): com 25 px livres, decisão em pé; fim → 84
                 self.body.vx = 0;
                 if self.free_above(world, HEADROOM_77) && self.decide(input, env, jump_edge, side) {
                 } else if self.anim_done() {
-                    self.set(State::Rise);
+                    self.set(State::KnockRise(true));
                 }
             }
-            State::Rise => {
+            State::KnockRise(true) => {
                 // 84 (`0x00425bdf`): teto a menos de 25 px ou BAIXO → 86; decisão; fim →
                 // parado
                 self.body.vx = 0;

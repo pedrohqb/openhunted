@@ -423,8 +423,8 @@ fn knockdown_follows_facing_and_gets_up_through_83_84() {
     r.tick(0);
     assert_eq!(r.j.label(), 82, "empurrado para trás");
     r.ticks(0, 80);
-    let sit = r.first(|s| s == State::SitUp).expect("83");
-    let rise = r.first(|s| s == State::Rise).expect("84");
+    let sit = r.first(|s| s == State::KnockRise(false)).expect("83");
+    let rise = r.first(|s| s == State::KnockRise(true)).expect("84");
     let idle = r.first(|s| s == State::Idle).expect("parado");
     assert!(sit < rise && rise < idle, "{}", r.dump());
 }
@@ -442,7 +442,7 @@ fn jolt_knocks_jake_to_169_then_84() {
     r.tick(0);
     assert_eq!((r.j.state(), r.j.label()), (State::Jolted, 173));
     r.ticks(0, 60);
-    let rise = r.first(|s| s == State::Rise).expect("84");
+    let rise = r.first(|s| s == State::KnockRise(true)).expect("84");
     assert!(r.first(|s| s == State::Idle) > Some(rise), "{}", r.dump());
 }
 

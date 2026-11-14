@@ -70,3 +70,19 @@ pub fn inside_wall(e: &Entity, ctx: &Ctx) -> bool {
     e.bounds()
         .is_some_and(|b| ctx.cells_for(e.layer).blocked(&b))
 }
+
+/// Ponto do efeito do impacto (`0x43d629`, `0x43d90c`): centro do retângulo do quadro do
+/// atacante (`0x43585c`), não da caixa de colisão; com vítima e o bit 2 da linha, x vai ao
+/// centro do quadro da vítima, 4 px para o lado do atacante.
+pub fn effect_center(e: &Entity, victim: Option<&Entity>) -> (i32, i32) {
+    let mid = |x: &Entity| match x.sprite_rect() {
+        Some(r) => (r.x + r.w / 2, r.y + r.h / 2),
+        None => x.center(),
+    };
+    let (mut x, y) = mid(e);
+    if let Some(v) = victim {
+        let vx = mid(v).0;
+        x = if vx > x { vx - 4 } else { vx + 4 };
+    }
+    (x, y)
+}

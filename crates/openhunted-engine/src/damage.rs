@@ -356,6 +356,21 @@ mod tests {
         assert_eq!(row(3, None, 0), None, "a linha (3, 1) exige o jogador");
     }
 
+    /// Chumbo (linha `(20, 0)`): explosão, 10, derrubada de módulo 20 na direção dos centros
+    /// (um chumbo vindo de cima empurra para baixo).
+    #[test]
+    fn pellet_row_pushes_along_the_centres() {
+        let (p, _) = hit(20, 7, 0, (0, 9));
+        assert_eq!(
+            (p.amount, p.explosion, p.knockdown, p.push),
+            (10, true, true, (0, 20))
+        );
+        assert_eq!(hit(20, 7, 0, (-30, 0)).0.push, (-20, 0));
+        // no Garathe (vítima 2): 10 com empurrão, sem derrubada
+        let (p, _) = hit(20, 2, 0, (5, 0));
+        assert!(p.shove && !p.knockdown && p.amount == 10);
+    }
+
     #[test]
     fn knockdown_side_follows_the_attacker_velocity() {
         let r = row(2, Some(7), 1).unwrap();

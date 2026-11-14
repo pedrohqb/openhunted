@@ -114,8 +114,8 @@ pub fn class_of(s: State, ch: Character) -> u8 {
         | State::WildFall
         | State::GetUp
         | State::KnockedDown(_)
-        | State::Rise
-        | State::SitUp => LAND,
+        | State::KnockRise(_)
+        | State::Rise => LAND,
         State::Fall => FALL,
         State::Crouch | State::Crawl | State::StandUp => CROUCH,
         State::Push | State::PushEnd => PUSH,
@@ -145,6 +145,7 @@ pub fn attackable(s: State, ch: Character) -> bool {
             | Land(Landing::Fall | Landing::Hard)
             | WildFall
             | GetUp
+            | KnockRise(_)
             | KnockedDown(_)
             | StandUp
             | Unhide

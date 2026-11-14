@@ -33,11 +33,12 @@ Commit `eee0478`:
    (pose 1); **80** com contato no ar → pose 1
    (`launched_jumps_hold_the_last_frame_and_land_only_after_it`,
    `extended_jump_hitting_a_wall_goes_to_idle_pose`).
-10. **Derrubada** pelo lado relativo (81 para a frente, 82 para trás); 81 só no fim do
-    rótulo: 77 ou 76; 82 → **83** (estado novo `SitUp`) → **84** (`Rise` no Jake); mortes
-    177/179 pelo mesmo critério (constantes `DIE_KNOCKED_FORWARD/BACK`)
+10. **Derrubada** pelo lado relativo (81 para a frente, 82 para trás; nada nas portas de
+    camada); 81 só no fim do rótulo: 77 ou 76; 82 → 83 → 84 (`KnockRise`, que a auditoria
+    das armas também criou; no merge ficou a lógica daqui: 83 decide com 25 px livres, 84
+    agacha com teto ou BAIXO); mortes 177/179 pelo mesmo critério
     (`knockdown_follows_facing_and_gets_up_through_83_84`).
-11. **Tranco no Jake**: 169 (rótulo 173, k = 2) → 84; na corda, queda
+11. **Tranco no Jake**: 169 (rótulo 173, k = 2) → 84 (`KnockRise(true)`); na corda, queda
     (`jolt_knocks_jake_to_169_then_84`).
 12. **Empurrão** só parado/escondido (1, 6, 79, 164–166) (`shove_only_when_standing_or_hiding`).
 13. 77/78/83/84 com a sonda de 25 px.

@@ -193,6 +193,15 @@ fn ai_does_not_attack_a_helpless_human() {
                 seed ^= seed << 5;
                 input = seed & (UP | DOWN | LEFT | RIGHT | SHOOT | JUMP | 0x400 | 0x40000);
             }
+            let prev: std::collections::HashMap<usize, u32> = s
+                .entities
+                .iter()
+                .enumerate()
+                .filter_map(|(k, e)| match &e.behaviour {
+                    Behaviour::AiPlayer(ai) => Some((k, ai.brain.last)),
+                    _ => None,
+                })
+                .collect();
             s.tick(input);
             let Some(j) = s.jake.as_ref() else { break };
             let h = matches!(
@@ -203,10 +212,15 @@ fn ai_does_not_attack_a_helpless_human() {
                 continue;
             }
             helpless += 1;
-            for e in &s.entities {
+            for (k, e) in s.entities.iter().enumerate() {
                 if let Behaviour::AiPlayer(ai) = &e.behaviour {
+                    // colada no alvo, a IA que já atacava repete a entrada anterior (`attack`,
+                    // ramo de perto): só o ataque novo conta
+                    let before = prev.get(&k).copied().unwrap_or(0);
                     assert!(
-                        !ai.brain.sees || ai.brain.last & (SHOOT | PUNCH) == 0,
+                        !ai.brain.sees
+                            || ai.brain.last & (SHOOT | PUNCH) == 0
+                            || before & (SHOOT | PUNCH) != 0,
                         "{name}: ataque ao humano indefeso ({:?}) no tique {t}",
                         j.state()
                     );
