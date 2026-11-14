@@ -210,8 +210,25 @@ pub struct Scene {
     regens: Vec<players::Regen>,
 }
 
-/// Empurrão da derrubada do especial num personagem da IA (Ruling: valor não lido).
-const SPECIAL_KNOCKDOWN: (i32, i32) = (10, -10);
+/// Empurrão da derrubada do especial num jogador a < 70 px (`0x427822…0x42783e`: ±15 pelo
+/// lado do centro, 20 em y).
+const SPECIAL_KNOCKDOWN: (i32, i32) = (15, 20);
+/// Efeito da linha `(1, 0, 8)` nos projéteis que o especial destrói: `oex01`, raio 5.
+const SPECIAL_EFFECT_LABEL: u16 = 1;
+const SPECIAL_EFFECT_RADIUS: i32 = 5;
+
+/// Dano do especial num jogador a `d` px: `4·(19600 − d)/19600` (`0x42780a`; 3, ou 4 em
+/// d = 0: o original compara a distância, não o quadrado, com 140²).
+fn special_knockdown(center: (i32, i32), at: (i32, i32)) -> crate::damage::Pending {
+    let d = behaviour::mine::distance(center, at);
+    let dir = if at.0 > center.0 { 1 } else { -1 };
+    crate::damage::Pending {
+        amount: 4 * (19600 - d) / 19600,
+        knockdown: true,
+        push: (dir * SPECIAL_KNOCKDOWN.0, SPECIAL_KNOCKDOWN.1),
+        ..Default::default()
+    }
+}
 
 /// Tiques por segundo do cronômetro (`0x43c95c`).
 pub const TIMER_TICKS_PER_SECOND: i32 = 20;
@@ -1438,16 +1455,10 @@ impl Scene {
             self.hurt_others(|j| {
                 let r = j.body.bounds();
                 let at = (r.x + r.w / 2, r.y + r.h / 2);
-                (j.layer() == b.layer && b.reaches(at)).then(|| {
-                    let dir = if r.x >= b.center.0 { 1 } else { -1 };
-                    crate::damage::Pending {
-                        knockdown: true,
-                        push: (dir * SPECIAL_KNOCKDOWN.0, SPECIAL_KNOCKDOWN.1),
-                        ..Default::default()
-                    }
-                })
+                (j.layer() == b.layer && b.reaches(at)).then(|| special_knockdown(b.center, at))
             });
         }
+        let mut destroyed = 0;
         for e in self.entities.iter_mut().filter(|e| {
             e.alive && e.layer == b.layer && e.flags & 0x80003 == 0x80001 && e.present()
         }) {
@@ -1455,16 +1466,15 @@ impl Scene {
                 continue;
             }
             match SpecialBlast::effect(e.kind) {
-                crate::jake::SpecialEffect::Destroy => e.alive = false,
+                crate::jake::SpecialEffect::Destroy => {
+                    e.alive = false;
+                    destroyed += 1;
+                }
                 crate::jake::SpecialEffect::Knockdown => {
                     // personagem da IA a < 70 px: derrubado para longe do centro (M11)
+                    let at = e.center();
                     if let Behaviour::AiPlayer(a) = &mut e.behaviour {
-                        let dir = if e.x >= b.center.0 { 1 } else { -1 };
-                        a.body.hurt(crate::damage::Pending {
-                            knockdown: true,
-                            push: (dir * SPECIAL_KNOCKDOWN.0, SPECIAL_KNOCKDOWN.1),
-                            ..Default::default()
-                        });
+                        a.body.hurt(special_knockdown(b.center, at));
                     }
                 }
                 crate::jake::SpecialEffect::Damage => {
@@ -1475,6 +1485,20 @@ impl Scene {
                     let _ =
                         behaviour::enemy::hurt(e, &dmg, true) || behaviour::interact::hurt(e, &dmg);
                 }
+            }
+        }
+        // cada projétil destruído: linha `(1, 0, 8)`, efeito `oex01` de raio 5 no centro do
+        // atacante (`0x43d90c`, bits 0)
+        for _ in 0..destroyed {
+            let blast = behaviour::Blast {
+                center: b.center,
+                layer: b.layer,
+                radius: SPECIAL_EFFECT_RADIUS,
+                push: 0,
+                damage: 0,
+            };
+            if let Some(e) = self.effect_entity(&blast, SPECIAL_EFFECT_LABEL) {
+                self.entities.push(e);
             }
         }
     }
@@ -2249,6 +2273,65 @@ mod tests {
         assert_eq!(s.kills, 2, "as duas minas contam");
         let j = s.jake.as_ref().unwrap();
         assert!(j.health.hp < 50 && j.health.hp > 0, "vida {}", j.health.hp);
+    }
+
+    /// Especial nos jogadores a < 70 px (`0x4277f8`): 3 de dano (4 só a 0 px), derrubada,
+    /// empurrão ±15 pelo lado do centro e 20 em y.
+    #[test]
+    fn special_knockdown_hurts_three_and_pushes_fifteen() {
+        let p = special_knockdown((100, 50), (130, 50));
+        assert_eq!((p.amount, p.knockdown, p.push), (3, true, (15, 20)));
+        let p = special_knockdown((100, 50), (100, 50));
+        assert_eq!(
+            (p.amount, p.push),
+            (4, (-15, 20)),
+            "a 0 px: 4, e o lado é o esquerdo"
+        );
+        assert_eq!(special_knockdown((100, 50), (60, 50)).push, (-15, 20));
+    }
+
+    /// O projétil que o especial destrói deixa o efeito `oex01` de raio 5 (linha (1, 0, 8)).
+    #[test]
+    fn special_destroys_a_bullet_with_an_effect() {
+        use crate::input::{DOWN, SHOOT};
+        let (l, mut a) = platform_level(0, 0x80089);
+        let mut s = Scene::build(&l, &mut a).unwrap();
+        for _ in 0..30 {
+            s.tick(0);
+        }
+        let jc = s.focus().unwrap();
+        let mut bullet = crate::behaviour::test_support::logic(19, jc.0 + 30, jc.1, &[]);
+        bullet.flags = 0x80001;
+        bullet.boxes = vec![Rect {
+            x: 0,
+            y: 0,
+            w: 4,
+            h: 4,
+        }];
+        bullet.behaviour = Behaviour::Bullet(crate::behaviour::bullet::BulletState {
+            vx: 0,
+            vy: 0,
+            prev: None,
+            spent: false,
+            player_shot: false,
+        });
+        s.entities.push(bullet);
+        let before = s
+            .entities
+            .iter()
+            .filter(|e| e.kind == crate::entity::EXPLOSION)
+            .count();
+        s.tick(DOWN | SHOOT);
+        assert!(
+            !s.entities.iter().any(|e| e.alive && e.kind == 19),
+            "destruída"
+        );
+        let after = s
+            .entities
+            .iter()
+            .filter(|e| e.kind == crate::entity::EXPLOSION)
+            .count();
+        assert_eq!(after, before + 1, "efeito oex01");
     }
 
     /// Especial BAIXO+ATIRAR: a mina a menos de 70 px do centro do Jake morre (conta como

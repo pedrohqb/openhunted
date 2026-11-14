@@ -18,7 +18,7 @@ Continuação de [`armas.md`](armas.md) (placar comum lá). Fontes: `projeteis.m
 | Chumbo 20: 1º tique só arma | `0x40cfac`: geração 1, espera 2, tamanho 10 | orác.: divide no 3º tique depois do disparo (62 → 65); porte dividia no 2º; agora igual | diferente → corrigido |
 | Chumbo: velocidade dos filhos | `cos·|v| >> 17` em px inteiros (para baixo), ×8 | orác.: (−160, 0) → (−160, −16) e (−160, 8); porte idêntico (era simétrico em 1/8 px) | diferente → corrigido |
 | Chumbo: filhos encolhem | `+0x1f0 = +0x274/2 + 1`; `+0x274 = 3/4 + 1` (10 → 6 → 5) | não encolhia | não implementado → corrigido |
-| Chumbo no alvo | linha `(20, 0)`: 10, explosão, derrubada módulo 20 **na direção centro→vítima** | fixo (±20, 0) | diferente, em aberto (só diagonais) |
+| Chumbo no alvo | linha `(20, 0)`: 10, explosão, derrubada módulo 20 **na direção centro→vítima** | era fixo (±20, 0); agora pela linha (`pellet_row_pushes_along_the_centres`) | diferente → corrigido |
 | Foguete 21: criação e voo | boca (−25, 4), 30 px/tique, reto | orác. (35, 969) v −240; porte igual; explode no tique seguinte na parede, igual | igual |
 | Foguete: linha `(21, 0)` | 20 direto, raio 64 (sorteio `oex01–04`), empurrão 30, área 50 (`R = 96`) | tabela igual; rótulo sorteado diverge (gerador) | igual |
 | Dano de área no Jake | `0x40d499`: centro da caixa da explosão; vítima pelo **quadro** (`0x43585c`) | caixa do Jake: foguete 21 (orác. 28), empurrão (10, −3) (orác. (15, 7)); granada 14 (orác. 13) | diferente, em aberto (tentado o centro do quadro do sprite: piora com o espelho; falta a origem exata do quadro) |
@@ -52,7 +52,7 @@ Continuação de [`armas.md`](armas.md) (placar comum lá). Fontes: `projeteis.m
 | Jake: janela 1..5, 3 de vida/tique, pisca 0x27 | `0x47d7bc`, `0x427643` | igual (registro conferido) | igual |
 | Alcance: centros < 140 e ação < 70 | `0x427791`, `0x4277f8` | < 70 | igual |
 | Tipos destruídos (19–21, 25–27, 29, 36, 99, 100, 106, 108) | `0x42779d` | igual | igual |
-| Projétil destruído: linha `(1, 0, 8)` | efeito `oex01` raio 5 | some sem efeito | diferente, em aberto |
+| Projétil destruído: linha `(1, 0, 8)` | efeito `oex01` raio 5 no centro do atacante | sumia sem efeito; agora o efeito (`special_destroys_a_bullet_with_an_effect`) | diferente → corrigido |
 | Demais: linha `(1, 0, 9)` 15 com empurrão (2, 0) | `0x4278a3` | igual | igual |
-| Jogadores a < 70 px | derrubada, dano `4·(19600 − d)/19600` (3; 4 só em d = 0), empurrão (±15, 20) pelo centro, crédito | (±10, −10), sem dano (Ruling antigo) | diferente, em aberto |
+| Jogadores a < 70 px | derrubada, dano `4·(19600 − d)/19600` (3; 4 só em d = 0), empurrão (±15, 20) pelo centro, crédito | era (±10, −10) sem dano (Ruling); agora igual (`special_knockdown_hurts_three_…`) | diferente → corrigido |
 | Garathe: 5..20, 1/tique; terremoto 70–139 (`+0x274 = 30`) | `0x47e228`, `0x42c348` | janela conferida; terremoto não medido | a confirmar |

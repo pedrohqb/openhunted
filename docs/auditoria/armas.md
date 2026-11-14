@@ -7,8 +7,9 @@ especial em [`armas-projeteis.md`](armas-projeteis.md). Fontes: `tiro-jake.md`, 
 **oráculo** (`tools/oraculo/`, sessões `T_J_001` pistola e `H_J_030` foguete, espingarda e
 granada; entradas no fim). "orác." = medido no original no Wine.
 
-Placar das duas páginas: **igual 27**, **diferente → corrigido 27**, **não implementado →
-corrigido 6**, **diferente em aberto 10**, **a confirmar 9**, **decisão 2**.
+Placar das duas páginas (linhas das tabelas): **igual 21**, **diferente → corrigido 27**,
+**não implementado → corrigido 5**, **diferente em aberto 7**, **a confirmar 6**,
+**decisão 2**.
 
 ## Tabelas e fluxo do tiro (`0x43b43e`, `0x43b50b`, `0x43b1d0`)
 
@@ -63,8 +64,10 @@ corrigido 6**, **diferente em aberto 10**, **a confirmar 9**, **decisão 2**.
   por quadro, pose da troca (`jake/weapons/fire.rs`, 8 testes).
 - `813683a` tiros entram depois da atualização (oráculo), efeitos no centro do quadro,
   saída decide em pé, mira nova no quadro andado.
-- Último commit da área: derrubada 81/82 e levantar 83/84, poses com atraso e guardar
-  invertido, troca em qualquer estado, chumbo e granada (`armas-projeteis.md`).
+- `9eabcec` derrubada 81/82 e levantar 83/84, poses com atraso e guardar invertido, troca
+  em qualquer estado, chumbo e granada, linha da boca pixel a pixel.
+- Último commit: especial (dano 3 e empurrão (±15, 20) nos jogadores, `oex01` nos
+  projéteis destruídos) e chumbo pela linha `(20, …)`.
 
 Testes de outras áreas ajustados à cadência fiel: `real_missions` (o piloto da `I_J_002`
 segura ATIRAR, não entra no vão da escada e luta até o último robô), `real_ai` (a IA colada

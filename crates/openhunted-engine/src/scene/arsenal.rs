@@ -214,6 +214,8 @@ impl Scene {
         let near = matches!(e.behaviour, Behaviour::Pellet(_) | Behaviour::Star(_));
         let v = victim.filter(|_| near).map(|vi| &self.entities[vi]);
         let (c, layer) = (behaviour::projectile::effect_center(e, v), e.layer);
+        // direção da reação: centro do projétil → centro da vítima (`0x43d6c5`)
+        let origin = behaviour::projectile::effect_center(e, None);
         let dir = match &e.behaviour {
             Behaviour::Pellet(s) => s.vx.signum(),
             Behaviour::Rocket(s) => s.vx.signum(),
@@ -228,7 +230,7 @@ impl Scene {
             let row = crate::damage::row(attacker, Some(v.kind), 0)?;
             Some(row.pending(Geometry {
                 vel: (0, 0),
-                toward: (vc.0 - c.0, vc.1 - c.1),
+                toward: (vc.0 - origin.0, vc.1 - origin.1),
             }))
         };
         let (direct, blast) = match &e.behaviour {
@@ -238,14 +240,16 @@ impl Scene {
             Behaviour::Star(s) if s.knife => {
                 (by_row(crate::entity::KNIFE).unwrap_or_default(), None)
             }
+            // chumbo: linha `(20, …)` pela vítima (derrubada de módulo 20 na direção dos
+            // centros, não só na horizontal)
             Behaviour::Pellet(_) => (
-                Pending {
+                by_row(crate::entity::PELLET).unwrap_or(Pending {
                     amount: pellet::DAMAGE,
                     explosion: true,
                     knockdown: true,
                     push: (dir * pellet::PUSH, 0),
                     ..Default::default()
-                },
+                }),
                 None,
             ),
             Behaviour::Rocket(_) => (
