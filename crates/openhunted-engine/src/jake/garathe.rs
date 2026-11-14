@@ -866,4 +866,165 @@ mod tests {
         run(&mut j, &w, 0, 6);
         assert_eq!(j.state(), State::Idle, "76 com 6 quadros, depois parado");
     }
+
+    /// Pulos 20/21 com as raízes do `MINOTAUR.SKE` (a raiz só sobe: o rótulo acaba no alto
+    /// do impulso) e escala 1 (S = K): 20 = 0 ×13, 27, 39; 21 = 0 ×6, 9, 28, 32.
+    fn real_jumper(world: &World, x: i32, y: i32) -> Jake {
+        let ys = |v: &[i16]| v.iter().map(|&y| (0, y)).collect::<Vec<_>>();
+        let mut e: Vec<SynthSkeletonEntry> = vec![(0, (0, 0), vec![], 0); 170];
+        let mut up = vec![0i16; 13];
+        up.extend([27, 39]);
+        e[20] = (0, (0, 0), ys(&up), 0);
+        e[21] = (0, (0, 0), ys(&[0, 0, 0, 0, 0, 0, 9, 28, 32]), 0);
+        let ske = Skeleton::parse(&mkske(2, (39, 58), &e)).unwrap();
+        let mut len = lengths();
+        len.insert(20, 15);
+        len.insert(21, 9);
+        let mut j = Jake::new(x, y, BOX, len)
+            .with_skeleton(Skel::new(Rc::new(ske), (39, 58)))
+            .with_character(Character::Garathe);
+        j.tick(0, world);
+        j
+    }
+
+    /// Sobe até o pico e devolve (subida em px, estados vistos até pousar).
+    fn flight(j: &mut Jake, w: &World, first: u32, rest: u32) -> (i32, Vec<State>) {
+        let y0 = j.body.y;
+        let mut top = y0;
+        let mut seen = vec![];
+        j.tick(first, w);
+        for _ in 0..80 {
+            j.tick(rest, w);
+            top = top.min(j.body.y);
+            if seen.last() != Some(&j.state()) {
+                seen.push(j.state());
+            }
+            if matches!(j.state(), State::Land(_)) {
+                break;
+            }
+        }
+        (y0 - top, seen)
+    }
+
+    /// 20 (`0x4295a8`): a animação toca uma vez (`0x4289da`) e, enquanto não acaba, pede a
+    /// velocidade do esqueleto (k = 2). Acabada no ar, o estado **segue no 20** sem pedido
+    /// algum: a última velocidade (−24 px/tique depois da gravidade) vira voo livre até o
+    /// chão, e só então 28 (`0x407031` → `0x407009` → `0x4294fa`).
+    #[test]
+    fn up_jump_flies_on_after_its_animation_and_lands_in_28() {
+        let w = floor_world();
+        let mut j = real_jumper(&w, 0, 44);
+        let (rise, seen) = flight(&mut j, &w, JUMP | UP, UP);
+        // 54 − 2, 24 − 2, depois 20 + 18 + … + 2 = 110
+        assert_eq!(rise, 52 + 22 + 110);
+        assert_eq!(seen, vec![State::JumpUp(false), State::Land(Landing::Fall)]);
+        assert_eq!((j.label(), j.body.vx, j.body.vy), (28, 0, 0));
+    }
+
+    /// 21 (`0x429817`, k = 3): no fim, estado 1 e a rotina da queda (`0x4293c2`) no mesmo
+    /// tique, sem zerar a velocidade: o impulso que restou continua subindo na queda 27.
+    #[test]
+    fn standing_jump_ends_in_a_fall_that_keeps_its_momentum() {
+        let w = floor_world();
+        let mut j = real_jumper(&w, 0, 44);
+        let (rise, seen) = flight(&mut j, &w, JUMP, 0);
+        // 27 − 2, 57 − 2, 12 − 2, depois 8 + 6 + 4 + 2
+        assert_eq!(rise, 25 + 55 + 10 + 20);
+        assert_eq!(
+            seen,
+            vec![State::StandJump, State::Fall, State::Land(Landing::Fall)]
+        );
+    }
+
+    /// O teto alcançado no voo livre do 20 também é agarrado (47): o teste de teto
+    /// (`0x40712f`, `+0x220 = 2`) vem antes da animação em todo tique do 20.
+    #[test]
+    fn up_jump_grabs_a_ceiling_reached_in_free_flight() {
+        let w = World::new(vec![
+            Rect {
+                x: -1000,
+                y: 100,
+                w: 3000,
+                h: 20,
+            },
+            // fundo do teto 150 px acima da cabeça (caixa do topo em y + 5 = 49)
+            Rect {
+                x: -1000,
+                y: -121,
+                w: 3000,
+                h: 20,
+            },
+        ]);
+        let mut j = real_jumper(&w, 0, 44);
+        j.tick(JUMP | UP, &w);
+        let mut n = 0;
+        while j.state() == State::JumpUp(false) && n < 40 {
+            j.tick(UP, &w);
+            n += 1;
+        }
+        assert_eq!((j.state(), j.label()), (State::BarHang, 47));
+        assert_eq!(j.body.bounds().y, -101, "pendurado rente ao teto");
+    }
+
+    /// Controle no ar (`0x408205`) no 20: nada no chão (o impulso de 13 quadros não anda); no
+    /// ar, o lado põe ±8 px/tique e, sem lado, o voo livre mantém a horizontal.
+    #[test]
+    fn up_jump_steers_only_in_the_air() {
+        let w = floor_world();
+        let mut j = real_jumper(&w, 0, 44);
+        let x0 = j.body.x;
+        j.tick(JUMP | UP, &w);
+        for _ in 0..12 {
+            j.tick(UP | RIGHT, &w);
+            assert!(j.body.on_ground);
+        }
+        assert_eq!(j.body.x, x0, "impulso no chão: parado");
+        run(&mut j, &w, UP | RIGHT, 4);
+        assert_eq!(j.state(), State::JumpUp(false));
+        assert_eq!(j.body.vx, 8 * SUB);
+        let x1 = j.body.x;
+        j.tick(UP, &w);
+        assert_eq!(j.body.vx, 8 * SUB, "voo livre: a horizontal segue");
+        assert_eq!(j.body.x - x1, 8);
+    }
+
+    /// 19 (`0x4296df`, PULAR+CIMA na corda): parado e sem gravidade até o quadro 9, então
+    /// `vy = −30`; **não há saída no fim da animação**: só o chão (`0x429395` → 28).
+    #[test]
+    fn rope_jump_flies_until_the_ground() {
+        let w = floor_world();
+        let mut j = real_jumper(&w, 0, -400);
+        j.set(State::JumpUp(true));
+        let y0 = j.body.y;
+        let mut top = y0;
+        let mut seen = vec![];
+        for _ in 0..80 {
+            j.tick(UP, &w);
+            top = top.min(j.body.y);
+            if seen.last() != Some(&j.state()) {
+                seen.push(j.state());
+            }
+            if matches!(j.state(), State::Land(_)) {
+                break;
+            }
+        }
+        assert_eq!(y0 - top, (2..=28).step_by(2).sum::<i32>());
+        assert_eq!(seen, vec![State::JumpUp(true), State::Land(Landing::Fall)]);
+    }
+
+    /// Queda 27 (`0x4293c2`): controle no ar (`0x408205`), ±8 px/tique pelo lado pedido.
+    #[test]
+    fn fall_steers_with_the_air_control() {
+        let w = floor_world();
+        let mut j = real_jumper(&w, 0, -400);
+        j.set(State::Fall);
+        j.tick(0, &w);
+        assert_eq!(j.body.vx, 0);
+        j.tick(RIGHT, &w);
+        assert_eq!((j.state(), j.body.vx), (State::Fall, 8 * SUB));
+        j.tick(0, &w);
+        assert_eq!(j.body.vx, 8 * SUB, "sem lado, mantém");
+        j.tick(LEFT, &w);
+        assert_eq!(j.body.vx, -8 * SUB);
+    }
 }

@@ -114,4 +114,6 @@ Valores por tique (olhando à direita, + = para a frente / para baixo), quadro 0
   foram medidos]: dependem da escala do Jake (22/47 nos 172 objetos de tipo 1 das fases;
   Garathe 39/58) e do arredondamento da caixa K.
 - Topologia das juntas (`0x471ab8`) e o desenho do esqueleto em modo de depuração.
-- O que o Garathe faz com o `MINOTAUR.SKE` (mesmo mecanismo, outros estados).
+- O Garathe usa o `MINOTAUR.SKE` pelo mesmo mecanismo (k por estado em
+  `garathe-movimentos.md`); diferença notável: os rótulos 20 e 21 acabam no alto do impulso
+  e o estado não zera a velocidade no fim (voo livre, 216 e 122 px).

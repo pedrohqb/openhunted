@@ -102,18 +102,60 @@ sons 3772 e 3135; senão 5 (desvira, rótulo 4 ao contrário). Zona 4 + CIMA →
 - **Investida no pulo longo**: em 25, `+0x1cc = 0x00429bda`: quem ele toca (objeto, não
   só-toque) recebe tranco (`+0x250 = 1`), **7 de dano** e empurrão por `0x435951`; volta a
   `0x407796` no fim.
-- 20 (PULAR+CIMA): exige chão; ataque zera `+0x168`; até o quadro 10 PULAR + lado → 25 (com
-  CIMA) ou escolha; teto (`+0x220 = 2`) → barra 47; zona 4 → escalar; esqueleto k = 2 nos
-  dois eixos; fim no chão → 28; controle no ar `0x408205`.
-- 21 (PULAR parado): igual, k = 3; até o quadro 10 PULAR + CIMA sem lado → 20 no mesmo
-  quadro (rótulo `0x479250`); fim → 1 e queda.
-- 19 (PULAR+CIMA na corda): sem gravidade e parado até o quadro 9; então `vy = −30` px/tique
-  e gravidade.
+- 20 (PULAR+CIMA, `0x4295a8`): exige chão; ataque zera `+0x168`; até o quadro 10 PULAR +
+  lado → 25 (com CIMA) ou escolha; teto (`0x40712f`, `+0x220 = 2`) → barra 47; zona 4 →
+  escalar; a animação toca uma vez (`0x4289da`, modo 0xa) e, **enquanto não acaba**, pede o
+  esqueleto com k = 2 nos dois eixos (`0x406fc0(obj, 2, 8)`); controle no ar `0x408205`.
+  **Acabada a animação, o estado não muda**: no chão (`0x407031`) zera as velocidades
+  (`0x407009`) e vai para 28; no ar não há pedido algum e a velocidade do último quadro
+  (−26 px/tique, −24 depois da gravidade) segue em **voo livre** (gravidade e controle no ar),
+  ainda com os testes de teto e de zona 4 a cada tique, até o chão. A queda `0x4292d8`
+  isenta o 20. O `MINOTAUR.SKE` acaba o rótulo 20 no alto do impulso (raiz 0 ×13, 27, 39):
+  o pulo é o impulso **mais** o voo livre.
+- 21 (PULAR parado, `0x429817`): sem o teste de teto; k = 3; até o quadro 10 PULAR + CIMA
+  sem lado → 20 no mesmo quadro (rótulo `0x479250`); fim → `0x428302(obj, 1)` e, no mesmo
+  tique, a rotina da queda `0x4293c2` (no chão → 28; senão 27), **sem zerar a velocidade**: o
+  que resta do impulso (−12 px/tique) continua subindo na queda.
+- 19 (PULAR+CIMA na corda, `0x4296df`): no chão (`0x429395`) → 28; ataque; até o quadro 10
+  PULAR + lado → 25 (com CIMA) ou escolha; teto → 47; zona 4 → escalar; sem gravidade e
+  parado (`0x407009`) até o quadro 9; no 9, `vy = −30` px/tique e gravidade; controle no ar
+  em todo tique. **Não há saída no fim da animação**: o 19 dura até o chão.
+- O Jake é diferente: o fim do 16/17 e do 27 zera as velocidades e vai para o parado
+  (`0x424ca6` → `0x407009`, `0x426ecc`), e o `JAKE.SKE` volta a raiz ao chão no fim do rótulo.
+
+### Alturas [confirmado na fórmula e nos dados; conferido no porte]
+
+Subida máxima dos pés num chão sem teto, com `S`/`K` reais e a física de `personagem.md` §8
+(gravidade somada antes do deslocamento; velocidade em 1/8 px, sem fração acumulada):
+
+| Pulo | Garathe | Conta | Jake |
+|---|---|---|---|
+| para cima (20 / 16) | **216 px** | 60 + 24 (quadros 13–14) + 22 + 20 + … + 2 | 79 px |
+| parado (21 / 27) | **122 px** | 28 + 64 + 10 + 8 + 6 + 4 + 2 | 43 px |
+| médio (22) | 30 px | 10 + 8 + … + 2 | 25 px (médio do Jake) |
+| longo (25) | 42 px | 12 + 10 + … + 2 | — |
+| corda (19) | 210 px | 28 + 26 + … + 2 | — |
+
+O porte até `611d193` copiava o fim do Jake nos três (zerava a velocidade e ia ao parado):
+para cima 84 px, parado 102 px, e o 19 virava parado no ar. Com 84 px a cabeça (caixa do
+topo em y + 5) não chega a um teto 181 px acima, que é o caso das dicas abaixo.
+
+### "JUMP + UP to grab the ceiling" [confirmado nos dados]
+
+É a dica 3 do `WIZARD.RES`, posta em `T_M_004` (mago em (1263, 1154)) e `T_M_008` ((50, 390)):
+a sala do mago não tem teto (vão de uma célula), a laje do andar de cima fica 128 px acima
+do chão e o teto dela 232 px acima (cabeça a 181 px). O pulo para cima chega ao teto no voo
+livre, agarra (47), vai mão ante mão (49) até a laje e BAIXO o solta sobre ela. Não há
+"puxada" para cima da barra: subir um andar é sempre agarrar o teto de cima e sair de lado.
+A `I_M_109` ("Garathe Tutorial 5") repete o movimento (teste `real_garathe.rs`).
 
 ## Queda, derrubada e levantar [confirmado]
 
-27: chão → 28 (aterrissagem interrompível, depois parado); ataque; zona 4 → escalar;
-controle no ar; desliga 0x8 e 0x4000. 32/33: v = 8·empurrão, uma vez; 32 → 30 no chão ou 29
+27 (`0x4293c2`): chão (`0x429395`) → 28 (aterrissagem interrompível, depois parado);
+ataque; zona 4 → escalar; controle no ar (`0x408205`: no ar, ESQ/DIR põe ∓8/±8 px/tique, 0
+com parede a 8 px; sem lado, a horizontal fica); desliga 0x8 e 0x4000. **Ruling
+(OpenHunted)**: a sonda de parede vai para o lado pedido (o original sonda −8 px nos dois,
+`personagem.md`). 32/33: v = 8·empurrão, uma vez; 32 → 30 no chão ou 29
 (queda descontrolada → 30); 33 → 35 no chão. 30 (`0x42951f`): com 20 px livres acima
 (`0x40718d(obj, 0, −20)`), decisão em pé; sem eles só anima; fim → 31. 31 e 35 (`0x429555`,
 `0x42a248`): teto a menos de 20 px ou BAIXO → 36; senão decisão em pé; fim → parado.
@@ -151,7 +193,7 @@ controle no ar; desliga 0x8 e 0x4000. 32/33: v = 8·empurrão, uma vez; 32 → 3
 (já com o espelhamento do 3):
 
 - 3 (rótulo 103): 0, 15, 12, 12, 15, 12, 18, 18, 12, 12, 12, 27, 24 (189 px/ciclo).
-- 20: vy 0 ×13, −62, −26. 21: vy 0 ×6, −30, −66, −12.
+- 20: vy 0 ×13, −62, −26 (e o voo livre que segue, acima). 21: vy 0 ×6, −30, −66, −12.
 - 23: 0, 6, 6. 26: 0. 36: 0, 10 ×6, 20, 20, 10, 10, 5, 10, 10, 10, 20, 25 ×4, 20 (295 px).
 - 49: ciclos de 0 e 6 (132 px em 42 quadros). 52: vy 0, −4, −16, −8, −2, 0, −2, −4, −20, −10,
   −2, 0, 0 (68 px). 53: 0, 22, 18, 4, 12, 8, 0 (64 px).
@@ -164,6 +206,14 @@ corpo (10,8) 20×44, topo (16,5) 8×3, base (16,52) 8×4 (pés em y + 56; Jake y
 `MN_COLPS` (10,30) 20×26; `MN_CRAWL` (10,20) 20×36; `MN_BARUP` (10,5) 20×21.
 
 ## Em aberto
+
+- Ataque na barra: o 47 (`0x42a29b`) com ATIRAR/SOCO e sem recarga solta (`+0x178 &= ~8`) e
+  ataca (`0x43b43e`) no ar; o porte só solta (os estados de tiro exigem chão). Na `I_M_109`
+  o gerador de minas (tipo 103) ocupa o canto do teto do poço de x 278–362 (camada 1).
+- A plataforma `OPO` (tipo 68, `values[0]` = 10) ao pé desse poço não tem comportamento no
+  porte nem engenharia reversa; pode ser a subida prevista ali.
+- A queda 25 do Jake (`0x42424d`) também chama `0x408205`; o porte usa nela só a inversão
+  de vx (`air_reverse`). Não mexido (o Jake fica idêntico); a conferir.
 
 - Medir no original os valores do esqueleto (k altos: 5 no rastejar, 6 na barra).
 - Confirmar no jogo o `+0x14c = 0` do empurrar.

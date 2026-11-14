@@ -1431,6 +1431,12 @@ impl Jake {
                     self.air_reverse(side);
                 }
             }
+            State::Fall if self.is_garathe() => {
+                // 27 (`0x4293c2`): zona 4 agarra; senão controle no ar (`0x408205`)
+                if !self.try_grab_in_air(input, env) {
+                    self.air_control(world, side);
+                }
+            }
             State::Fall | State::WildFall => {
                 if !self.try_grab_in_air(input, env) {
                     self.air_reverse(side);

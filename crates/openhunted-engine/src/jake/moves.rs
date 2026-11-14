@@ -318,6 +318,31 @@ impl Jake {
         })
     }
 
+    /// Controle no ar do Garathe (`0x00408205`, no fim dos estados 19, 20, 21 e 27): no
+    /// chão, nada; no ar, o lado pedido põe ±8 px/tique (0 com parede a 8 px desse lado) e,
+    /// sem lado, a horizontal fica como está. **Ruling (OpenHunted)**: o original sonda a
+    /// parede à esquerda (−8 px) também para a direita (`personagem.md`); aqui, do lado pedido.
+    pub(super) fn air_control(&mut self, world: &World, side: Option<bool>) {
+        if self.body.on_ground {
+            return;
+        }
+        if let Some(right) = side {
+            let b = self.body.bounds();
+            let x = if right {
+                b.x.saturating_add(b.w)
+            } else {
+                b.x.saturating_sub(AIR_CONTROL)
+            };
+            let free = !world.blocked(&Rect {
+                x,
+                w: AIR_CONTROL,
+                ..b
+            });
+            let dir = if right { 1 } else { -1 };
+            self.body.vx = if free { AIR_CONTROL * SUB * dir } else { 0 };
+        }
+    }
+
     /// Sonda de `d` px para o lado em que o Jake olha.
     fn free_ahead(&self, world: &World, d: i32) -> bool {
         let b = self.body.bounds();
@@ -599,6 +624,30 @@ impl Jake {
         self.set(State::Fall);
     }
 
+    /// Pouso do Garathe (`0x429395`): no chão, zera as velocidades (`0x407009`) e vai para a
+    /// aterrissagem 28 (`0x4294fa`).
+    fn land_garathe(&mut self) {
+        self.body.vx = 0;
+        self.body.vy = 0;
+        self.set(State::Land(Landing::Fall));
+    }
+
+    /// Fim da animação dos pulos 20 e 21 do Garathe, sem zerar a velocidade (o esqueleto
+    /// acaba no alto do impulso, `MINOTAUR.SKE`): no chão, 28; o 20 (`0x4295a8`) segue no
+    /// ar em voo livre, no último quadro, até o chão; o 21 (`0x429817`) passa a 1 e chama a
+    /// queda (`0x4293c2`) no mesmo tique.
+    fn end_jump_garathe(&mut self, world: &World, side: Option<bool>) {
+        self.anim_mode = AnimMode::Hold;
+        if self.body.on_ground {
+            self.land_garathe();
+            return;
+        }
+        if self.state == State::StandJump {
+            self.set(State::Fall);
+        }
+        self.air_control(world, side);
+    }
+
     /// Pulo lançado a partir do pulo parado ou da corda: com CIMA o longo, senão o da sonda.
     fn launch_from(&mut self, input: u32, world: &World, run_up: bool) {
         if input & UP != 0 {
@@ -618,16 +667,32 @@ impl Jake {
         let world = env.world;
         match self.state {
             State::JumpUp(true) if self.is_garathe() => {
-                // 19: parado até o quadro 9, então vy = −30 com gravidade (`0x4296df`)
+                // 19 (`0x4296df`): no chão, pousa (`0x429395` → 28); até o quadro 10, PULAR +
+                // lado lança; CIMA/BAIXO na zona 4 agarra; parado e sem gravidade até o
+                // quadro 9, então vy = −30 com gravidade. A animação toca uma vez e não há
+                // saída no fim: o voo segue até o chão. Controle no ar em todo tique.
+                if self.body.on_ground {
+                    self.land_garathe();
+                    return;
+                }
+                if self.frame < LAUNCH_WINDOW && pressed(JUMP) && side.is_some() {
+                    self.launch_from(input, world, false);
+                    return;
+                }
+                if self.try_grab_in_air(input, env) {
+                    return;
+                }
+                if self.anim_done() {
+                    self.anim_mode = AnimMode::Hold;
+                }
                 let n = self.ticks as usize;
-                self.body.vx = 0;
                 if n < super::garathe::ROPE_JUMP_FRAME {
+                    self.body.vx = 0;
                     self.body.vy = 0;
                 } else if n == super::garathe::ROPE_JUMP_FRAME {
                     self.body.vy = super::garathe::ROPE_JUMP_VY * SUB;
-                } else if self.anim_done() {
-                    self.set(State::Idle);
                 }
+                self.air_control(world, side);
             }
             State::Land(Landing::Medium | Landing::Long) if self.is_garathe() => {
                 // 23 e 26: deslizam pelo esqueleto com k = 1; no fim, parado
@@ -680,10 +745,30 @@ impl Jake {
                 if self.try_grab_in_air(input, env) {
                     return;
                 }
+                if self.anim_done() && self.is_garathe() {
+                    self.end_jump_garathe(world, side);
+                    return;
+                }
                 if self.anim_done() {
                     self.body.vx = 0;
                     self.body.vy = 0;
                     self.set(State::Idle);
+                    return;
+                }
+                if self.is_garathe() {
+                    // `0x406fc0` nos dois eixos (Δx = 0 no 20 e no 21), depois `0x408205`
+                    self.ske_req = Some(SkeReq {
+                        k: if self.state == State::StandJump {
+                            self.profile().k.stand_jump
+                        } else {
+                            self.profile().k.jump_up
+                        },
+                        x: false,
+                        y: true,
+                        diag: 0,
+                    });
+                    self.body.vx = 0;
+                    self.air_control(world, side);
                     return;
                 }
                 self.ske_req = Some(SkeReq {

@@ -20,7 +20,12 @@ auditadas com `ohtool audit --god --reach` (`openhunted_engine::audit`; desenho 
   como a IA): 20 missões dependem de pulos para cima (T_M_006, I_M_003, I_J_004, I_M_109,
   I_M_008, I_M_106, I_M_011, H_M_003, D_M_030, H_J_018, H_J_024, H_M_004, D_M_024, H_M_027,
   D_M_004, D_M_003, H_J_039, D_M_027, D_J_012, D_M_018) — na T_M_006 basta o pulo até a
-  corda; as demais não foram percorridas.
+  corda; as demais não foram percorridas. Quinze das vinte são do Garathe: o pulo para cima
+  dele sobe 216 px (o do Jake, 79) e agarra o teto de um vão de uma célula, saindo de lado
+  para a laje 128 px acima ("JUMP + UP to grab the ceiling", `T_M_004`/`T_M_008`;
+  `garathe-movimentos.md`). Até `611d193` o porte cortava esse pulo em 84 px (fim do Jake
+  copiado), e nenhuma dessas subidas era possível; a grade da auditoria não vê pulos, e o
+  resultado dela não mudou com a correção.
 
 Resultado: **64 vencem, 1 falha** (D_M_010, abaixo); igual depois da revisão da IA da M11.
 
@@ -44,11 +49,17 @@ Resultado: **64 vencem, 1 falha** (D_M_010, abaixo); igual depois da revisão da
   (`0x40b6c3`); as gotas (70/71) só falam "Oh no it's poison" e ferem com natureza veneno,
   sem envenenar. Indício de que a missão também não se vence no original 1.00; **a conferir
   no Wine**. O porte segue o original; NEXT no resultado leva adiante mesmo na derrota.
-- **I_M_109** (suspeita): a porta (5, 3, 0) diante da saída pede a chave 62, que fica no
-  corredor de cima (981, 74, camada 0). Do início, a rota sobe 128 px duas vezes sem corda
-  (vão no teto da sala do início, x 416–480; poço x 288–352). No porte o pulo para cima do
-  Garathe sobe 84 px (o original: 88, `garathe-movimentos.md`) e a barra 47 não tem puxada:
-  sem rota conhecida. A conferir no Wine.
+- **I_M_109** ("Garathe Tutorial 5"): a porta (5, 3, 0) diante da saída pede a chave 62, no
+  corredor de cima (981, 74, camada 0). Sem cordas, a rota sobe 128 px agarrando o teto
+  (pulo 20 em voo livre, 47, mão ante mão e BAIXO sobre a laje): o vão do teto da sala do
+  início (camada 1, x 406–490; antes, pular o fosso de x 662–746), o poço de x 278–362 até o
+  corredor da porta de camada, e na camada 0 a sala de x 278–618 até o corredor da chave.
+  `real_garathe.rs` (`i_m_109_climbs_with_the_ceiling_grab`) percorre a 1ª e a da camada 0
+  (ida e volta). Falta o poço: o gerador de minas (tipo 103, 15 de vida) ocupa o canto do
+  teto dele e barra a mão ante mão; no original o 47 ataca ao soltar (`0x42a29b` →
+  `0x43b43e`), o porte não; e a plataforma `OPO` (tipo 68) ao pé do poço não tem
+  comportamento no porte. Os barris (tipo 28) do corredor da chave pedem as garras. A vitória
+  roteirizada fica para quando esses dois existirem.
 - Porta de célula que pede chave ausente da fase: I_M_106 (5, 4, 2), chave 62, fora do
   caminho. (A D_J_015 começa trancada na sala do início, mas o Jake traz a 62 da fase.)
 - Gatilhos para ids inexistentes (valem verdadeiro, `0x435bd8`): I_J_104 e D_J_012
@@ -85,7 +96,7 @@ Personagem J/G; tempo em segundos (campo 1004); objetivos além da saída.
 | I_J_104 | J | — | 2× bandeira | vence |  |
 | I_J_001 | J | 250 | 1× peça | vence |  |
 | I_J_004 | J | — | só a saída | vence |  |
-| I_M_109 | G | 300 | só a saída | vence | suspeita: chave da porta sem rota (acima) |
+| I_M_109 | G | 300 | só a saída | vence | rota pelo teto (pulo 20); falta o poço do gerador (acima) |
 | I_J_013 | J | 240 | 1× peça | vence |  |
 | I_J_010 | J | — | 1× peça, 1× chave | vence |  |
 | I_M_008 | G | — | só a saída | vence | 1 teletr. entre camadas |
