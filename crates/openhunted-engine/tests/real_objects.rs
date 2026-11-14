@@ -79,3 +79,50 @@ fn i_j_104_ledges_drip_and_steam_cycles() {
         "o vapor passa pelos quatro estados"
     );
 }
+
+/// Barris com `values[0] ≠ 0` (117 nas fases) deixam fogo no chão ao explodir (`0x40fb58`):
+/// I_J_013, detonado pelo gatilho.
+#[test]
+fn i_j_013_barrel_with_value_leaves_floor_fire() {
+    let Some(mut s) = load("I_J_013.LEV") else {
+        return;
+    };
+    let fires = |s: &Scene| {
+        s.entities
+            .iter()
+            .filter(|e| e.alive && e.kind == 42)
+            .count()
+    };
+    let before = fires(&s);
+    let i = s
+        .entities
+        .iter()
+        .position(|e| e.kind == 28 && e.values.first().is_some_and(|&v| v != 0))
+        .expect("barril com fogo");
+    let (bx, by, layer) = (s.entities[i].x, s.entities[i].y, s.entities[i].layer);
+    // gatilho armado com alvo inexistente: verdadeiro, explode no tique
+    s.entities[i].triggers = vec![(999_999, Some(11))];
+    s.tick(0);
+    s.tick(0);
+    assert!(!s.entities[i].alive);
+    let new: Vec<_> = s
+        .entities
+        .iter()
+        .filter(|e| e.alive && e.kind == 42)
+        .skip(before)
+        .collect();
+    assert!(!new.is_empty(), "fogo no chão");
+    for f in &new {
+        assert_eq!(f.layer, layer);
+        let b = f.bounds().unwrap();
+        assert!(
+            (b.x + b.w / 2 - bx).abs() <= 192 + 128,
+            "perto do barril: {b:?} {bx}"
+        );
+        assert!(
+            (b.y + b.h - by).abs() <= 128,
+            "no chão da célula: {b:?} {by}"
+        );
+    }
+    assert!(fires(&s) > before);
+}

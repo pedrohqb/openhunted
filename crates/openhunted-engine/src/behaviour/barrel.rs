@@ -66,12 +66,15 @@ fn shape(boxes: &[Rect]) -> Rect {
     }
 }
 
-/// Explosão do barril (passo 10): `0x43d629(barril, nulo, 0)`, vida 0, ligado, destruído.
-/// O fogo deixado com `values[0] ≠ 0` (`0x40fb58`) ainda não é criado.
+/// Explosão do barril (passo 10): `0x43d629(barril, nulo, 0)`, vida 0, ligado; com
+/// `values[0] ≠ 0` deixa fogo no chão (`0x40fb58(&pos, camada, 384)`); destruído.
 fn explode(e: &mut Entity, out: &mut Out) {
     e.alive = false;
     e.health = 0;
     e.on = true;
+    if e.values.first().is_some_and(|&v| v != 0) {
+        out.floor_fires.push(((e.x, e.y), e.layer));
+    }
     out.blasts.push(Blast {
         center: e.center(),
         layer: e.layer,
