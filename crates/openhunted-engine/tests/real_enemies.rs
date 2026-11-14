@@ -468,8 +468,12 @@ fn enemies_fuzz_without_panics() {
                     // quem cai num poço para fora da fase é destruído, como no original
                     // (`0x435b63` fora da fase): o sorteio das gotas e falas (M17) leva uma
                     // mina saltadora a um poço da H_J_009
-                    let c = e.center();
-                    let fell_out = c.0 < 0 || c.1 < 0 || c.0 >= s.width || c.1 >= s.height;
+                    // (`0x41bed9`/`0x41e884`: pela posição `+0x14c/+0x150`, ou sem célula nela)
+                    let fell_out = e.x < 0
+                        || e.y < 0
+                        || e.x >= s.width
+                        || e.y >= s.height
+                        || s.ai_grid().cell((e.x / 128, e.y / 128, e.layer)).is_none();
                     assert!(
                         e.health <= 0 || fell_out,
                         "{ctx}: objeto {i} (tipo {}) sumiu com vida {}",
@@ -592,8 +596,12 @@ fn fuzz_m10_levels(run: u32, difficulty: openhunted_engine::Difficulty) -> u32 {
                     // quem cai num poço para fora da fase é destruído, como no original
                     // (`0x435b63` fora da fase): o sorteio das gotas e falas (M17) leva uma
                     // mina saltadora a um poço da H_J_009
-                    let c = e.center();
-                    let fell_out = c.0 < 0 || c.1 < 0 || c.0 >= s.width || c.1 >= s.height;
+                    // (`0x41bed9`/`0x41e884`: pela posição `+0x14c/+0x150`, ou sem célula nela)
+                    let fell_out = e.x < 0
+                        || e.y < 0
+                        || e.x >= s.width
+                        || e.y >= s.height
+                        || s.ai_grid().cell((e.x / 128, e.y / 128, e.layer)).is_none();
                     assert!(
                         e.health <= 0 || fell_out,
                         "{ctx}: objeto {i} (tipo {}) sumiu com vida {}",
