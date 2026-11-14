@@ -1473,8 +1473,10 @@ impl Jake {
         self.animate();
         self.apply_ske();
         let was_rising = self.body.vy < 0;
+        let y0 = self.body.y;
         let gravity = self.gravity_on();
         step(&mut self.body, world, gravity);
+        let attacking = pressed(SHOOT | PUNCH);
         match self.state {
             // Garathe no meio do pulo: nada decide até a animação acabar
             State::Jump(_) if self.is_garathe() && !jump_over => {}
@@ -1513,6 +1515,21 @@ impl Jake {
                 self.set(State::BarHang);
             }
             s if moves::can_fall(s) && !self.body.on_ground && self.body.vy >= FALL_SPEED => {
+                self.set(State::Fall)
+            }
+            // estados de arma no ar (o ataque da barra): a queda (`0x0042415c`/`0x004292d8`)
+            // só os leva se o jogador não está atacando; atacando, ao tocar o chão vindo
+            // a 5 px ou mais por tique, aterrissa (`0x00424220`/`0x00429395` → 26/28)
+            State::Fire { .. } if attacking => {
+                if self.body.on_ground && self.body.y - y0 >= FALL_SPEED / SUB {
+                    self.body.vx = 0;
+                    self.body.vy = 0;
+                    self.set(State::Land(Landing::Fall));
+                }
+            }
+            State::Fire { .. } | State::Ready(..) | State::Recover(_) | State::Holster(_)
+                if !self.body.on_ground && self.body.vy >= FALL_SPEED =>
+            {
                 self.set(State::Fall)
             }
             _ => {}

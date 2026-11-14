@@ -610,6 +610,89 @@ mod tests {
         assert_eq!(j.state(), State::Fall);
     }
 
+    /// 47/49/50/51 (`0x42a29b`, `0x42a4af`, `0x42a7c2`, `0x42a8bb`): com ATIRAR/SOCO (e sem
+    /// recarga) o Garathe solta o teto (desliga 0x8, `+0x1b4 = 0x79`) e ataca no ar
+    /// (`0x43b43e`); cai atacando enquanto segurar o ataque e, sem ele, a queda (`0x4292d8`)
+    /// o leva ao 27.
+    #[test]
+    fn bar_attack_lets_go_and_strikes_in_the_air() {
+        let w = World::new(vec![
+            Rect {
+                x: -1000,
+                y: 300,
+                w: 3000,
+                h: 20,
+            },
+            Rect {
+                x: -1000,
+                y: 30,
+                w: 3000,
+                h: 19,
+            },
+        ]);
+        let hang = |s: State| {
+            let mut j = Jake::new(100, 44, BOX, lengths())
+                .with_skeleton(skeleton())
+                .with_character(Character::Garathe);
+            j.set(State::BarHang);
+            j.tick(0, &w);
+            if s != State::BarHang {
+                j.tick(LEFT, &w);
+                assert_eq!(j.state(), State::BarPull);
+            }
+            if s == State::BarMove {
+                run(&mut j, &w, LEFT, 7);
+            }
+            if s == State::BarDown {
+                run(&mut j, &w, LEFT, 7);
+                j.tick(0, &w);
+            }
+            assert_eq!(j.state(), s);
+            j
+        };
+        for (s, input) in [
+            (State::BarHang, SHOOT),
+            (State::BarHang, PUNCH),
+            (State::BarHang, SHOOT | DOWN | LEFT),
+            (State::BarPull, PUNCH | LEFT),
+            (State::BarMove, SHOOT | LEFT),
+            (State::BarDown, PUNCH),
+        ] {
+            let mut j = hang(s);
+            let y0 = j.body.y;
+            j.tick(input, &w);
+            assert!(
+                matches!(j.state(), State::Fire { .. }),
+                "{s:?} + {input:#x}: {:?}",
+                j.state()
+            );
+            assert!(j.body.y > y0 || j.body.vy > 0, "{s:?}: soltou (gravidade)");
+            let mut hit = false;
+            for _ in 0..3 {
+                j.tick(input & (SHOOT | PUNCH), &w);
+                hit |= j.punch.is_some();
+                assert!(
+                    matches!(j.state(), State::Fire { .. }),
+                    "{s:?}: ataca caindo"
+                );
+            }
+            assert!(hit, "{s:?}: golpe das garras no ar");
+            j.tick(0, &w);
+            assert_eq!(j.state(), State::Fall, "{s:?}: sem ataque, a queda (27)");
+        }
+        // segurando o ataque até o chão: aterrissa (`0x429395` → 28)
+        let mut j = hang(State::BarHang);
+        j.tick(SHOOT, &w);
+        for _ in 0..40 {
+            if j.body.on_ground {
+                break;
+            }
+            j.tick(SHOOT, &w);
+        }
+        assert!(j.body.on_ground);
+        assert_eq!(j.state(), State::Land(Landing::Fall));
+    }
+
     #[test]
     fn hides_in_54_to_56() {
         let w = floor_world();

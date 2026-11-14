@@ -10,7 +10,7 @@ use openhunted_formats::Skeleton;
 
 use super::{AnimMode, Climb, Jake, JumpKind, Landing, SkeReq, State};
 use crate::damage::Pending;
-use crate::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, STEALTH, UP};
+use crate::input::{DOWN, JUMP, LEFT, PUNCH, RIGHT, SHOOT, STEALTH, UP};
 use crate::physics::{CONTACT_SCENERY, Rect, SUB, World};
 
 /// Bits do tipo das zonas PR (`docs/re/jake-escalada.md`).
@@ -1094,7 +1094,14 @@ impl Jake {
         let pressed = |bit: u32| input & bit != 0;
         self.body.vx = 0;
         self.body.vy = 0;
-        if self.probe(world, 0, -1) & CONTACT_SCENERY == 0 || pressed(SHOOT) || jump_edge {
+        if self.probe(world, 0, -1) & CONTACT_SCENERY == 0 || input == JUMP | DOWN {
+            self.fall();
+            return;
+        }
+        if self.bar_attack(input, world) {
+            return;
+        }
+        if jump_edge {
             self.fall();
             return;
         }
@@ -1151,6 +1158,13 @@ impl Jake {
         }
     }
 
+    /// Ataque na barra (Jake 103–107, Garathe 47/49–51): ATIRAR ou SOCO (`0x40100`) solta o
+    /// teto (desliga 0x8; `+0x1b4` = 0x78 no Jake, 0x79 no Garathe) e chama `0x0043b43e`,
+    /// que põe o estado de ataque no ar. A queda (`0x0042415c`/`0x004292d8`) cuida do resto.
+    fn bar_attack(&mut self, input: u32, world: &World) -> bool {
+        input & (SHOOT | PUNCH) != 0 && self.start_fire(input, world)
+    }
+
     /// Barra do Garathe (`0x42a29b`, `0x42a4af`, `0x42a7c2`, `0x42a8bb`): pendurado (47);
     /// CIMA ou lado → agarrar (50, uma vez) → mão ante mão (49, k = 6 em x); sem direção →
     /// soltar a mão (51: o 50 ao contrário) → 47. Não há "subir na barra".
@@ -1158,11 +1172,14 @@ impl Jake {
         let pressed = |bit: u32| input & bit != 0;
         self.body.vx = 0;
         self.body.vy = 0;
-        if self.probe(world, 0, -1) & CONTACT_SCENERY == 0
-            || pressed(SHOOT)
-            || pressed(JUMP)
-            || (pressed(DOWN) && self.state == State::BarHang)
-        {
+        if self.probe(world, 0, -1) & CONTACT_SCENERY == 0 || input == JUMP | DOWN {
+            self.fall();
+            return;
+        }
+        if self.bar_attack(input, world) {
+            return;
+        }
+        if pressed(JUMP) || (pressed(DOWN) && self.state == State::BarHang) {
             self.fall();
             return;
         }
@@ -1470,6 +1487,62 @@ mod tests {
             j.tick(0, &w2);
             assert_ne!(j.state(), State::BarHang);
         }
+    }
+
+    /// 103–107 (`0x00424498`, `0x004247f8`, `0x00424ab4`, `0x004246c4`, `0x00424bb8`): com
+    /// ATIRAR/SOCO o Jake solta a barra (desliga 0x8, `+0x1b4 = 0x78`) e atira no ar
+    /// (`0x43b43e`); PULAR+BAIXO exatos ainda só soltam.
+    #[test]
+    fn bar_attack_lets_go_and_fires_in_the_air() {
+        let w = World::new(vec![
+            floor(100),
+            Rect {
+                x: -100,
+                y: 20,
+                w: 400,
+                h: 10,
+            },
+        ]);
+        let hang = || {
+            let mut j = jake(&w, 0);
+            j.tick(UP | JUMP, &w);
+            for _ in 0..14 {
+                j.tick(UP, &w);
+                if j.state() == State::BarHang {
+                    break;
+                }
+            }
+            assert_eq!(j.state(), State::BarHang);
+            j.tick(0, &w);
+            j
+        };
+        for (pre, input) in [
+            (0, SHOOT),
+            (0, PUNCH),
+            (RIGHT, SHOOT | RIGHT),
+            (UP, SHOOT | UP),
+        ] {
+            let mut j = hang();
+            if pre != 0 {
+                for _ in 0..3 {
+                    j.tick(pre, &w);
+                }
+                assert_ne!(j.state(), State::BarHang, "{pre:#x}");
+            }
+            j.tick(input, &w);
+            assert!(
+                matches!(j.state(), State::Fire { .. }),
+                "{pre:#x} + {input:#x}: {:?}",
+                j.state()
+            );
+            for _ in 0..30 {
+                j.tick(0, &w);
+            }
+            assert!(j.body.on_ground, "{pre:#x}: caiu");
+        }
+        let mut j = hang();
+        j.tick(JUMP | DOWN, &w);
+        assert_eq!(j.state(), State::Fall);
     }
 
     #[test]
