@@ -147,8 +147,14 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             e.health = 0;
         }
     }
-    let out_of_level =
-        center.0 < 0 || center.1 < 0 || center.0 >= ctx.level.0 || center.1 >= ctx.level.1;
+    // fora da fase pela posição `+0x14c/+0x150`, ou sem célula nela (`0x41e884`)
+    let out_of_level = e.x < 0
+        || e.y < 0
+        || e.x >= ctx.level.0
+        || e.y >= ctx.level.1
+        || ctx
+            .grid
+            .is_some_and(|g| g.cell((e.x / 128, e.y / 128, e.layer)).is_none());
     if e.health <= 0 || out_of_level {
         e.alive = false;
         if e.health <= 0 {
@@ -252,6 +258,20 @@ mod tests {
         st.settled = true;
         m.behaviour = Behaviour::Mine(st);
         m
+    }
+
+    /// `0x41e7f5` passo 3: fora da fase pela posição ou sem célula → some sem explodir.
+    #[test]
+    fn leaves_by_position_or_missing_cell() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let grid = crate::ai::CellGrid::empty((10, 10, 1));
+        c.grid = Some(&grid);
+        let mut m = mine(300, 400);
+        let mut out = Out::default();
+        tick(&mut m, &mut c, &mut out);
+        assert!(!m.alive && out.blasts.is_empty());
     }
 
     /// Oráculo `I_J_004`: sem alvo, a mina da fase em y 290 cai 2 px na primeira física e fica.

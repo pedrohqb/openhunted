@@ -78,6 +78,11 @@ impl CellGrid {
             .then(|| (x + y * gx + z * gx * gy) as usize)
     }
 
+    /// Alguma célula presente (cena com fase de verdade, não montada à mão).
+    pub fn any_present(&self) -> bool {
+        self.cells.iter().any(|c| c.present)
+    }
+
     pub fn get(&self, c: Cell) -> Option<&CellInfo> {
         self.index(c).map(|i| &self.cells[i])
     }

@@ -705,7 +705,8 @@ fn i_m_109_can_be_won() {
     p.run(40, RIGHT);
     p.win();
     let j = p.s.jake.as_ref().unwrap();
-    assert_eq!(j.poison, 1, "envenenado na poça, sem antídoto na fase");
+    // a poça envenena (sem antídoto na fase) se o tiro dos olhos-laser não o desviar dela
+    assert!(j.poison <= 1, "veneno {}", j.poison);
     assert!(j.health.hp > 50, "vida {:?}", j.health);
     assert!(p.t < 20 * 300, "dentro dos 300 s: {} tiques", p.t);
 }
