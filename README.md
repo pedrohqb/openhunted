@@ -14,7 +14,7 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 **M15: dois jogadores numa máquina.** "Multi Player" leva à disputa ou ao cooperativo: a
 lista de fases do modo, a escolha de personagem e cor de cada jogador e os limites de tempo e
 de pontos (disputa) ou o briefing (coop), a partida em tela dividida (jogador 1 em cima, cada
-metade com a sua câmera e a barra achatada; na disputa, `F − S` no lugar do cronômetro) e o
+metade com a sua câmera, camada e transição (M16) e a barra achatada; na disputa, `F − S` no lugar do cronômetro) e o
 resultado por jogador (NEXT, REPLAY, MAIN). O motor (M15a) cuida de vagas, alvos, crédito,
 renascimento e itens que renascem. As partidas a dois não mexem na campanha solo. Regras em
 `docs/superpowers/specs/2026-11-08-m15b-multijogador-casca-design.md`.
@@ -69,8 +69,7 @@ formatos (`openhunted-formats` lê o CD, pasta ou `.iso`; [`docs/formats/`](docs
 M2 visualizador; M3a o Jake corre e pula; M3b objetos sólidos e presença por modo.
 
 Ainda não há: o equilíbrio na beirada (162/163), os passos e demais sons por quadro do Jake e
-do cenário, o zumbido das minas, tesouros e segredos, a pintura por camadas (o original só mostra a camada do jogador e, nos
-buracos, as de trás escurecidas; aqui todas aparecem) e a navegação das telas pelo joystick.
+do cenário, o zumbido das minas, tesouros e segredos e a navegação das telas pelo joystick.
 Os obstáculos `OPO` (gotas, bloco que cai, portão) ainda não agem.
 
 O design e os planos estão em [`docs/superpowers/`](docs/superpowers/); as notas de engenharia
