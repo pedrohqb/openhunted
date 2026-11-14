@@ -227,10 +227,9 @@ corpo (10,8) 20×44, topo (16,5) 8×3, base (16,52) 8×4 (pés em y + 56; Jake y
 
 ## Em aberto
 
-- Ataque no ar fora da barra: os pulos 19, 20 e 21 e a queda 27 (`0x429719`, `0x429604`,
-  `0x429876`, `0x4293ef`; o 20 zera antes `+0x168`) chamam `0x43b43e` com ATIRAR/SOCO, como os
-  16, 17, 25 e 27 do Jake (`0x424d02`, `0x424e0a`, `0x42427a`, `0x424fa8`). O porte só começa
-  ataques no chão e na barra (acima).
+- Ataque no ar fora da barra: feito no porte (`docs/auditoria/garathe-movimentos.md`; o 20 e
+  o 21 zeram `+0x168`, o 19 e o 27 não; confirmado no oráculo). O 22 e o 25 animam a cada
+  tique (`0x406c71` direto), apesar do atraso 1 da tabela.
 - A queda 25 do Jake (`0x42424d`) também chama `0x408205`; o porte usa nela só a inversão
   de vx (`air_reverse`). Não mexido (o Jake fica idêntico); a conferir.
 
