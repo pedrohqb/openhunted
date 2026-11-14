@@ -244,7 +244,13 @@ pub const SOUND_SENTINEL_ON_BARREL: u16 = 5056;
 /// para e a vítima leva a linha `(tipo, vítima)` do `DAMAGE.TBL` — a `(106, 28)` no barril,
 /// senão a `(tipo, 0)` (dano direto, sem natureza). Ruling: os inimigos da M7a não param
 /// nem são feridos pelos tiros (eles nascem nas bocas, dentro das caixas de quem atira).
-pub fn object_hits(entities: &mut [Entity], rng: &mut crate::rng::Rng, out: &mut Out) {
+/// Devolve (vítima, tiro) das vítimas vivas: herdam o crédito do tiro (`0x43d708`).
+pub fn object_hits(
+    entities: &mut [Entity],
+    rng: &mut crate::rng::Rng,
+    out: &mut Out,
+) -> Vec<(usize, usize)> {
+    let mut hits = Vec::new();
     for si in 0..entities.len() {
         let shot = &entities[si];
         let Behaviour::EnemyShot(st) = &shot.behaviour else {
@@ -297,9 +303,13 @@ pub fn object_hits(entities: &mut [Entity], rng: &mut crate::rng::Rng, out: &mut
                 ..Default::default()
             }
         };
+        if super::interact::credited(&entities[vi]) {
+            hits.push((vi, si));
+        }
         super::interact::hurt(&mut entities[vi], &p);
         impact(&mut entities[si], rng, out);
     }
+    hits
 }
 
 #[cfg(test)]

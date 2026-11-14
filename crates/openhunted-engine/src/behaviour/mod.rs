@@ -109,9 +109,11 @@ pub struct Ctx<'a> {
     pub difficulty: crate::Difficulty,
     /// Qualquer personagem pega qualquer item (disputa, `itens.md` passo 2).
     pub any_taker: bool,
+    /// Os outros jogadores (com dois): índice do jogador, corpo e camada. Vazio no solo.
+    pub others: &'a [(usize, &'a Jake, i32)],
 }
 
-impl Ctx<'_> {
+impl<'a> Ctx<'a> {
     /// Células da camada `layer` (a do Jake é `cells`; camada sem mundo próprio também).
     pub fn cells_for(&self, layer: i32) -> &World {
         if layer == self.jake_layer {
@@ -126,6 +128,21 @@ impl Ctx<'_> {
     /// Caixa do Jake, se ele está vivo e em jogo.
     pub fn jake_bounds(&self) -> Option<Rect> {
         self.jake.filter(|j| j.is_active()).map(|j| j.body.bounds())
+    }
+
+    /// Todos os jogadores, para quem fere ou conta todo objeto que toca (fogo, cerca, raio,
+    /// pistão, zona, porta): `None` = o do contexto (`jake`), `Some(i)` = o jogador `i`.
+    pub fn players(&self) -> impl Iterator<Item = (Option<usize>, &'a Jake, i32)> + '_ {
+        let own = self.jake.map(|j| (None, j, self.jake_layer));
+        own.into_iter()
+            .chain(self.others.iter().map(|&(i, j, l)| (Some(i), j, l)))
+    }
+
+    /// Caixas dos jogadores em jogo (vivos, fora da porta e da viagem) na camada `layer`.
+    pub fn active_in(&self, layer: i32) -> impl Iterator<Item = (Option<usize>, Rect)> + '_ {
+        self.players()
+            .filter(move |(_, j, l)| *l == layer && j.is_active())
+            .map(|(k, j, _)| (k, j.body.bounds()))
     }
 }
 
@@ -163,6 +180,18 @@ pub struct Out {
     pub blast_credits: Vec<(usize, u8)>,
     /// Crédito dos objetos de `spawn` criados por quem tem crédito (o chumbo que se divide).
     pub spawn_credits: Vec<(usize, u8)>,
+    /// Dano aos outros jogadores (`Ctx::others`): (índice do jogador, dano).
+    pub seat_damage: Vec<(usize, Pending)>,
+}
+
+impl Out {
+    /// Dano a um jogador de `Ctx::players` (`None` = o do contexto).
+    pub fn hurt_player(&mut self, who: Option<usize>, p: &Pending) {
+        match who {
+            None => self.jake_damage.add(p),
+            Some(i) => self.seat_damage.push((i, *p)),
+        }
+    }
 }
 
 /// Área que fere quem a cruza na mesma camada (`0x43d629` de fogo e cerca sobre os objetos).
@@ -174,6 +203,8 @@ pub struct Hazard {
     /// Faísca de cerca (posição do poste principal): pega pelo centro x da vítima e, com
     /// acerto, põe a cerca na recarga (`0x41494b`). `None` = fogo (cruzar a área basta).
     pub source: Option<(i32, i32)>,
+    /// Índice da entidade que fere (a cena o põe): a vítima herda o crédito dela.
+    pub from: usize,
 }
 
 /// Ângulo de 16 bits de (dx, dy) com y para baixo (`0x46718e`, atan2): 0 = direita,
@@ -326,6 +357,7 @@ pub(crate) mod test_support {
             level: (10_000, 10_000),
             difficulty: crate::Difficulty::Normal,
             any_taker: false,
+            others: &[],
         }
     }
 }

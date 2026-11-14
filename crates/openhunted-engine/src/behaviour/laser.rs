@@ -172,19 +172,23 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         st.stop();
         return;
     }
-    let hit_jake = ctx.jake_layer == layer
-        && ctx
-            .jake_bounds()
-            .zip(swept_bounds(e))
-            .is_some_and(|(j, b)| j.overlaps(&b));
-    if hit_jake {
+    // o raio fere o que atravessa: todo jogador na caixa varrida
+    let hit: Vec<Option<usize>> = swept_bounds(e).map_or(Vec::new(), |b| {
+        ctx.active_in(layer)
+            .filter(|(_, j)| j.overlaps(&b))
+            .map(|(k, _)| k)
+            .collect()
+    });
+    if !hit.is_empty() {
         let Behaviour::Laser(st) = &mut e.behaviour else {
             return;
         };
         let mut p = st.damage();
         p.shove = true;
         p.push = (st.vx.signum() * SHOVE, 0);
-        out.jake_damage.add(&p);
+        for &k in &hit {
+            out.hurt_player(k, &p);
+        }
         out.effects.push((
             Blast {
                 center: c,

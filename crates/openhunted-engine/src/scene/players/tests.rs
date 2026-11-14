@@ -756,3 +756,194 @@ fn point_blank_rocket_explodes_with_area_damage() {
     );
     assert!(s.entities[m].health < hp0, "a área fere a mina atrás");
 }
+
+fn hp(s: &Scene, i: usize) -> i32 {
+    s.player_jake(i).unwrap().health.hp
+}
+
+/// Os dois jogadores no mesmo ponto (o 2 sobre o 1), parados.
+fn stacked(mode: Mode, x: i32) -> Scene {
+    let mut s = duo(mode, (100, FISTS), (700, FISTS));
+    s.place_player(0, (x, FLOOR - 47), 0);
+    s.place_player(1, (x, FLOOR - 47), 0);
+    run(&mut s, [0, 0], 2);
+    s
+}
+
+/// Fogo (`0x4104a3`): queima todo objeto presente na caixa, os dois jogadores inclusive.
+#[test]
+fn fire_burns_both_players_inside() {
+    use crate::behaviour::fire::FireState;
+    let mut s = duo(Mode::Coop, (100, FISTS), (700, FISTS));
+    s.place_player(0, (100, FLOOR - 47), 0);
+    s.place_player(1, (150, FLOOR - 47), 0);
+    run(&mut s, [0, 0], 2);
+    // altura 32 (caixa 96 × 32) ancorada em (140, chão): cobre os dois
+    let vals = [0, 0, 0, 32, 32, 0, 0, 0, 0, 0, 140, FLOOR, 0, 1000];
+    let mut f = logic(crate::entity::FIRE, 92, FLOOR - 32, &vals);
+    f.flags = 0x8002d;
+    f.behaviour = Behaviour::Fire(FireState::new(&vals, (92, FLOOR - 32), (96, 32), 32));
+    s.entities.push(f);
+    run(&mut s, [0, 0], 4);
+    assert!(hp(&s, 0) < 100, "o 1 queima: {}", hp(&s, 0));
+    assert!(hp(&s, 1) < 100, "o 2 queima: {}", hp(&s, 1));
+}
+
+/// Cerca (`0x41494b`): a faísca fere todas as vítimas ao alcance; uma recarga só.
+#[test]
+fn fence_zaps_both_players_in_the_spark() {
+    use crate::behaviour::fence::{FenceState, SPARKING};
+    let mut s = stacked(Mode::Coop, 300);
+    // centro x dos dois = 300 + 2 + 9; a faísca anda 1 px antes do choque
+    let cx = 300 + 2 + 9;
+    let mut f = logic(crate::entity::FENCE, cx - 5 - 1, FLOOR - 45, &[0]);
+    f.flags = 0xa4829;
+    f.boxes = vec![Rect {
+        x: 0,
+        y: 0,
+        w: 5,
+        h: 5,
+    }];
+    let mut st = FenceState::new(0);
+    st.state = SPARKING;
+    st.partner = true;
+    f.on = true;
+    f.behaviour = Behaviour::Fence(st);
+    s.entities.push(f);
+    let k = s.entities.len() - 1;
+    run(&mut s, [0, 0], 0);
+    assert!(
+        matches!(&s.entities[k].behaviour, Behaviour::Fence(st) if st.recharge == crate::behaviour::fence::RECHARGE),
+        "uma recarga"
+    );
+    run(&mut s, [0, 0], 3);
+    assert!(
+        hp(&s, 0) < 100 && hp(&s, 1) < 100,
+        "{} {}",
+        hp(&s, 0),
+        hp(&s, 1)
+    );
+}
+
+/// Raio laser: fere o que atravessa — os dois jogadores no caminho.
+#[test]
+fn laser_bolt_hits_both_players_it_crosses() {
+    let mut s = stacked(Mode::Coop, 300);
+    s.entities.push(crate::behaviour::laser::bolt(
+        (280, FLOOR - 30),
+        (24, 0),
+        0,
+        0,
+    ));
+    run(&mut s, [0, 0], 4);
+    assert!(hp(&s, 0) < 100, "o 1: {}", hp(&s, 0));
+    assert!(hp(&s, 1) < 100, "o 2: {}", hp(&s, 1));
+}
+
+/// Coleta (`0x40b3f5`): o item lê um contato só (`+0x21c`, o último que se moveu contra ele,
+/// `0x437350`); com os dois na caixa, fica com o 2 (o que se move depois), mesmo mais longe.
+#[test]
+fn item_both_touch_goes_to_the_last_mover() {
+    let mut s = duo(Mode::Coop, (100, FISTS), (700, FISTS));
+    s.place_player(0, (300, FLOOR - 47), 0);
+    s.place_player(1, (310, FLOOR - 47), 0);
+    run(&mut s, [0, 0], 2);
+    for i in 0..2 {
+        s.player_jake_mut(i).unwrap().health.hp = 50;
+    }
+    // caixa 300..320: o 1 (centro 311) dentro, o 2 (centro 321) a 1 px — o 1 é o mais perto
+    s.entities.push(health_item(300));
+    let k = s.entities.len() - 1;
+    assert_eq!(s.entity_targets()[k], 1, "o alvo é quem toca por último");
+    run(&mut s, [0, 0], 1);
+    assert!(!s.entities[k].alive);
+    assert_eq!((hp(&s, 0), hp(&s, 1)), (50, 75));
+}
+
+/// Zona (`0x40e14e`): conta qualquer jogador vivo na caixa, mesmo o que entra na porta (fora
+/// de jogo para os alvos), e não só o mais perto.
+#[test]
+fn zone_counts_any_player_inside() {
+    use crate::behaviour::test_support::zone;
+    let mut s = duo(Mode::Coop, (100, FISTS), (700, FISTS));
+    exit_at(&mut s, 95);
+    // dura enquanto ocupada (`values[3] = 0`)
+    s.entities
+        .push(zone(80, FLOOR - 60, 70, 60, &[0, 0, 0, 0, 0, 0]));
+    let k = s.entities.len() - 1;
+    run(&mut s, [0, 0], 2);
+    assert!(s.entities[k].on, "o 1 na zona");
+    run(&mut s, [UP, 0], 0);
+    for _ in 0..10 {
+        s.tick_players([0, 0]);
+        assert!(!s.player_jake(0).unwrap().is_active(), "o 1 entra na porta");
+        assert!(s.entities[k].on, "o 1 ainda conta");
+    }
+    // o 2 sozinho também liga uma zona
+    s.entities
+        .push(zone(690, FLOOR - 60, 50, 60, &[0, 0, 0, 0, 0, 0]));
+    let z = s.entities.len() - 1;
+    run(&mut s, [0, 0], 1);
+    assert!(s.entities[z].on, "o 2 na zona dele");
+}
+
+/// Barril de vida 1 pousado no chão em `x`.
+fn barrel(x: i32) -> Entity {
+    use crate::behaviour::barrel::BarrelState;
+    let mut b = logic(crate::entity::BARREL, x, FLOOR - 32, &[]);
+    b.flags = 0x80181;
+    b.health = 1;
+    b.solid_shapes = true;
+    b.behaviour = Behaviour::Barrel(BarrelState::new(1, vec![]));
+    b
+}
+
+/// Fogo e raio põem o crédito deles (0) na vítima viva, como todo golpe (`0x43d708`–
+/// `0x43d71b`): o barril que o 2 marcou deixa de ser dele.
+#[test]
+fn zero_credit_attackers_overwrite_the_victims_credit() {
+    use crate::behaviour::fire::FireState;
+    let mut s = duo(duel([J, J]), (100, FISTS), (900, FISTS));
+    s.entities.push(barrel(400));
+    let b = s.entities.len() - 1;
+    let vals = [0, 0, 0, 32, 32, 0, 0, 0, 0, 0, 416, FLOOR, 0, 1000];
+    let mut f = logic(crate::entity::FIRE, 368, FLOOR - 32, &vals);
+    f.flags = 0x8002d;
+    f.behaviour = Behaviour::Fire(FireState::new(&vals, (368, FLOOR - 32), (96, 32), 32));
+    s.entities.push(f);
+    s.set_credit(b, 2);
+    run(&mut s, [0, 0], 0);
+    assert_eq!(s.credit_of(b), 0, "fogo");
+    s.entities.push(barrel(600));
+    let c = s.entities.len() - 1;
+    s.set_credit(c, 2);
+    s.entities.push(crate::behaviour::laser::bolt(
+        (560, FLOOR - 20),
+        (24, 0),
+        0,
+        0,
+    ));
+    run(&mut s, [0, 0], 4);
+    assert_eq!(s.credit_of(c), 0, "raio");
+}
+
+/// Só os projéteis que um objeto com crédito cria (o chumbo que se divide) herdam o crédito;
+/// o par da cerca, os raios do olho e afins não.
+#[test]
+fn only_projectiles_inherit_the_spawner_credit() {
+    use crate::behaviour::fence::FenceState;
+    let mut s = duo(duel([J, J]), (100, FISTS), (900, FISTS));
+    let mut f = logic(crate::entity::FENCE, 500, FLOOR - 45, &[0]);
+    f.flags = 0xa4829;
+    f.behaviour = Behaviour::Fence(FenceState::new(0));
+    s.entities.push(f);
+    let k = s.entities.len() - 1;
+    s.set_credit(k, 2);
+    let n = s.entities.len();
+    run(&mut s, [0, 0], 0);
+    let p = (n..s.entities.len())
+        .find(|&i| matches!(s.entities[i].behaviour, Behaviour::Fence(_)))
+        .expect("o par");
+    assert_eq!(s.credit_of(p), 0);
+    assert!(s.human_shots.iter().all(|(i, _)| *i != p));
+}

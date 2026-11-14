@@ -323,9 +323,15 @@ impl Scene {
             .collect()
     }
 
-    /// Contra quem cada entidade age neste tique (índice do jogador). Ruling (M15a): o
-    /// jogador ativo mais perto da caixa da entidade, preferindo a mesma camada; empate → o de
-    /// menor número; sem ativo, o 1.
+    /// Contra quem cada entidade age neste tique (índice do jogador).
+    ///
+    /// - Quem lê um contato só (`0x4076d0`: o `+0x21c` do objeto, o último que se moveu contra
+    ///   ele no tique, `0x437350`) — itens, peça do carro, estrela cravada, teletransporte e
+    ///   mina — age contra o último jogador (os assentos se movem em ordem) que o toca.
+    /// - Ruling (M15a): os demais, e esses sem contato, contra o jogador ativo mais perto da
+    ///   caixa da entidade, preferindo a mesma camada; empate → o de menor número; sem ativo,
+    ///   o 1. Quem fere ou conta todo objeto que toca (fogo, cerca, raio, pistão, zona, porta)
+    ///   vê os dois pelo `Ctx::players`.
     pub(super) fn entity_targets(&self) -> Vec<usize> {
         let humans = self.human_boxes();
         if humans.len() < 2 {
@@ -340,6 +346,9 @@ impl Scene {
                     w: 0,
                     h: 0,
                 });
+                if let Some(i) = self.contact_seat(e, &r) {
+                    return i;
+                }
                 humans
                     .iter()
                     .filter(|h| h.3)
@@ -347,6 +356,21 @@ impl Scene {
                     .map_or(0, |h| h.0)
             })
             .collect()
+    }
+
+    /// O último jogador que toca a entidade `e` (caixa `r`), para quem lê um contato só.
+    fn contact_seat(&self, e: &Entity, r: &Rect) -> Option<usize> {
+        let in_play: fn(&Jake) -> bool = match &e.behaviour {
+            Behaviour::Pickup(_) | Behaviour::CarPiece | Behaviour::Mine(_) => Jake::is_active,
+            Behaviour::Star(s) if !s.in_flight() => Jake::is_active,
+            // o passageiro conta pela caixa do corpo mesmo em viagem
+            Behaviour::Teleporter(_) => |j| !j.is_dead(),
+            _ => return None,
+        };
+        (0..self.players.len()).rev().find(|&i| {
+            self.player_jake(i)
+                .is_some_and(|j| j.layer() == e.layer && in_play(j) && j.body.bounds().overlaps(r))
+        })
     }
 
     /// Crédito da entidade `i` (`+0x1b0`; 0 = ninguém).
@@ -373,6 +397,13 @@ impl Scene {
             .is_some_and(|e| e.alive && e.health > 0);
         if alive {
             self.set_credit(victim, self.credit_of(attacker));
+        }
+    }
+
+    /// As vítimas (vivas ao levar o golpe) herdam o crédito dos atacantes: (vítima, atacante).
+    pub(super) fn pass_credits(&mut self, hits: &[(usize, usize)]) {
+        for &(v, a) in hits {
+            self.set_credit(v, self.credit_of(a));
         }
     }
 

@@ -242,10 +242,19 @@ fn zap(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         layer: e.layer,
         damage: zap,
         source: Some((e.x, e.y)),
+        from: 0,
     });
-    let hit = ctx.jake_layer == e.layer && ctx.jake_bounds().is_some_and(|j| in_spark(&zone, &j));
-    if hit {
-        out.jake_damage.add(&zap);
+    // `0x41494b`: toda vítima na faísca (os dois jogadores inclusive); acerto em alguma →
+    // uma recarga e um som
+    let hit: Vec<Option<usize>> = ctx
+        .active_in(e.layer)
+        .filter(|(_, j)| in_spark(&zone, j))
+        .map(|(k, _)| k)
+        .collect();
+    for &k in &hit {
+        out.hurt_player(k, &zap);
+    }
+    if !hit.is_empty() {
         st.recharge = RECHARGE;
         let id = SOUNDS[ctx.rng.below(2) as usize];
         out.events.push(Event::Sound(Cue::at(

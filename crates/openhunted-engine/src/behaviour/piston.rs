@@ -87,17 +87,24 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         )));
     }
     // esmaga (`0x004108c0`): caixa do quadro 2 px mais baixa contra o Jake na camada
-    let (Some(r), Some(j)) = (e.sprite_rect(), ctx.jake_bounds()) else {
+    let Some(r) = e.sprite_rect() else {
         return;
     };
     let r = crate::physics::Rect { y: r.y + 2, ..r };
-    if e.layer == ctx.jake_layer && r.overlaps(&j) {
-        out.jake_damage.add(&Pending {
-            amount: DAMAGE,
-            knockdown: true,
-            push: (PUSH.0 * dir, PUSH.1),
-            ..Default::default()
-        });
+    let crush = Pending {
+        amount: DAMAGE,
+        knockdown: true,
+        push: (PUSH.0 * dir, PUSH.1),
+        ..Default::default()
+    };
+    // todo jogador sob o pistão
+    let hit: Vec<Option<usize>> = ctx
+        .active_in(e.layer)
+        .filter(|(_, j)| r.overlaps(j))
+        .map(|(k, _)| k)
+        .collect();
+    for k in hit {
+        out.hurt_player(k, &crush);
     }
 }
 

@@ -134,14 +134,21 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         fire: true,
         ..Default::default()
     };
-    if ctx.jake_layer == e.layer && ctx.jake_bounds().is_some_and(|j| j.overlaps(&r)) {
-        out.jake_damage.add(&burn);
+    // `0x4104a3`: todo objeto presente na caixa (os dois jogadores inclusive)
+    let hit: Vec<Option<usize>> = ctx
+        .active_in(e.layer)
+        .filter(|(_, j)| j.overlaps(&r))
+        .map(|(k, _)| k)
+        .collect();
+    for k in hit {
+        out.hurt_player(k, &burn);
     }
     out.hazards.push(Hazard {
         rect: r,
         layer: e.layer,
         damage: burn,
         source: None,
+        from: 0,
     });
 }
 
