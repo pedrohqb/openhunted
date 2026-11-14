@@ -465,8 +465,13 @@ fn enemies_fuzz_without_panics() {
                 if e.alive {
                     check_enemy(&s, i, inside, &ctx);
                 } else {
+                    // quem cai num poço para fora da fase é destruído, como no original
+                    // (`0x435b63` fora da fase): o sorteio das gotas e falas (M17) leva uma
+                    // mina saltadora a um poço da H_J_009
+                    let c = e.center();
+                    let fell_out = c.0 < 0 || c.1 < 0 || c.0 >= s.width || c.1 >= s.height;
                     assert!(
-                        e.health <= 0,
+                        e.health <= 0 || fell_out,
                         "{ctx}: objeto {i} (tipo {}) sumiu com vida {}",
                         e.kind,
                         e.health
@@ -584,8 +589,13 @@ fn fuzz_m10_levels(run: u32, difficulty: openhunted_engine::Difficulty) -> u32 {
                 if e.alive {
                     check_enemy(&s, i, inside, &ctx);
                 } else {
+                    // quem cai num poço para fora da fase é destruído, como no original
+                    // (`0x435b63` fora da fase): o sorteio das gotas e falas (M17) leva uma
+                    // mina saltadora a um poço da H_J_009
+                    let c = e.center();
+                    let fell_out = c.0 < 0 || c.1 < 0 || c.0 >= s.width || c.1 >= s.height;
                     assert!(
-                        e.health <= 0,
+                        e.health <= 0 || fell_out,
                         "{ctx}: objeto {i} (tipo {}) sumiu com vida {}",
                         e.kind,
                         e.health

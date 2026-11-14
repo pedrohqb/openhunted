@@ -76,7 +76,7 @@ Não são plataformas. A inicialização carrega o `OPO.BRD` só no 71 (os demai
 | Tipo | `+0x1c0` | `+0x1c8` | Comportamento |
 |---|---|---|---|
 | 68, 69 | `0x0040f459` | `0x0040fa16` | poça de veneno: `0x00406c71(obj, 1)` (animação em laço) e o teste abaixo |
-| 70 | `0x0040f46b` | `0x0040fa16` | saliência que goteja: animação em laço; se `+0x264` ≠ 0, quando o temporizador `+0x27c` vence cria um objeto de tipo 71 (gota) sob si, numa posição horizontal sorteada dentro da própria largura, com escala 8/altura e 0x10 ligado, e rearma o temporizador sorteando a partir de `+0x264`; liga 0x20 em si (só contato); e o teste abaixo |
+| 70 | `0x0040f46b` | `0x0040fa16` | saliência que goteja: animação em laço; se `+0x264` ≠ 0, quando o temporizador `+0x27c` vence cria um objeto de tipo 71 (gota) sob si, numa posição horizontal sorteada dentro da própria largura, com escala 8/largura (o retângulo de `0x447ff0` é x, y, largura, altura) e 0x10 ligado, e rearma o temporizador sorteando a partir de `+0x264`; liga 0x20 em si (só contato); e o teste abaixo |
 | 71 | `0x0040f60a` | — | a gota: carrega `OPO.BRD` (caixa 3 × 2); estado 0 → ao fim da animação, estado 100: desliga 0x8 e 0x20 (ganha gravidade), y += 17; ao tocar algo (`0x004076d0`) ou sair da fase, se tocou o jogador aplica `0x0040b9eb(…, 0xe85, 0xe99, 200, 200)`, estado 200 (respingo), 0x28 ligado, velocidade zero; estado 200 → ao fim da animação, destruída (`0x00435b63`). Rótulo = 71 + estado (71, 171, 271). A inicialização ainda põe `+0x18c = +0x190 − +0x184`, `+0x184 = 0` e liga 0x4 |
 | 72 | `0x0040f801` | `0x0040fa16` | portão: estados 1 (aberto, espera `+0x26c`), 2 (fechado, espera `+0x268`), 3 (fechando, animação invertida), 4 (abrindo); troca quando os gatilhos (`0x00435bd8` sobre `+0x11c`) disparam ou o temporizador vence; rótulos pela tabela `0x00472070` = {0, 72, 272, 172, 172}; sons 0xc60 (fechar) e 0xc62 (abrir); escala forçada a 64/altura (`+0x1f0 = 0x40`), `+0x278 = 0` e chama a rotina já na inicialização. Nos dados começa no rótulo 272 (estado 2) |
 
@@ -113,18 +113,14 @@ D_J_009, D_J_012.
 **No porte** (`behaviour::opo`): 68, 69 e 70 têm o teste (o retângulo do quadro de
 referência, guardado no estado; sem caixa, para não barrar nem mudar o que a IA vê) e
 envenenam pelo dano (`Pending::poisons`). Os jogadores humanos levam o dano e a fala;
-barris e personagens da IA levam o dano pela área (`apply_hazards`; o da IA também se
-envenena). O 72 fica parado no rótulo 272, que é o estado 2: não testa, como no original
-nesse estado.
+barris e personagens da IA levam o dano pela área (`apply_hazards`). O 70 solta gotas (71)
+e o 72 cicla pelos estados, com o teste fora do estado 2 (M17,
+[`../auditoria/itens-objetos.md`](../auditoria/itens-objetos.md); medidos no oráculo).
 
 ### Em aberto
 
-- As gotas do 70 (`0x0040f46b` → tipo 71) não nascem no porte; a saliência só fere por
-  contato direto.
-- O portão 72 (`0x0040f801`): estados, temporizadores, gatilhos e sons; hoje é decoração
-  fechada.
 - O teste pega todo objeto presente; o porte só fere jogadores, barris e personagens da IA
-  (como o fogo).
+  (como o fogo); a gota atravessa os personagens da IA.
 
 ## Tipo 6: grafite [confirmado, M6a]
 

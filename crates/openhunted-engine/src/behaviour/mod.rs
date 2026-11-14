@@ -183,6 +183,9 @@ pub struct Out {
     pub spawn_credits: Vec<(usize, u8)>,
     /// Dano aos outros jogadores (`Ctx::others`): (índice do jogador, dano).
     pub seat_damage: Vec<(usize, Pending)>,
+    /// Fogo no chão pedido pelo barril que explode (`0x40fb58(&pos, camada, 384)`): posição
+    /// e camada; a cena olha as células (`fire::floor_fires`).
+    pub floor_fires: Vec<((i32, i32), i32)>,
 }
 
 impl Out {

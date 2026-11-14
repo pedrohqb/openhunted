@@ -46,6 +46,14 @@ pub const KEYS: std::ops::RangeInclusive<u32> = 62..=67;
 pub const FLAGS: std::ops::RangeInclusive<u32> = 80..=85;
 /// Som "Pickup flag or key".
 pub const SOUND_KEY: u16 = 5060;
+/// "Secret discovered" (`0xc15`), no lugar do som da coleta de um item-segredo.
+pub const SOUND_SECRET: u16 = 3093;
+/// "Ah hah!" (`0xe86`; Garathe 3731, `0xe93`) ao achar um segredo.
+pub const SPEECH_SECRET: u16 = 3718;
+/// "Ahh!" do Jake ao aceitar vida, comida ou antídoto (`0xe74`); o Garathe diz 3735 ou 3738
+/// (`0xe97`, `0xe9a`).
+pub const SPEECH_HEAL: u16 = 3700;
+pub const SPEECH_HEAL_OTHER: u16 = 3735;
 /// Teto da munição (`0x40a36d`).
 pub const AMMO_CAP: i32 = 99;
 
@@ -191,7 +199,7 @@ pub struct PickupState {
 /// Sem `0x8` vindo da fase, o item cai (pistola e comida dos tutoriais).
 const NO_GRAVITY: i32 = 0x8;
 
-pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
+pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     if e.layer != ctx.jake_layer {
         return;
     }
@@ -217,11 +225,6 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
             }
         }
     }
-    // o Jake pega com 0x100, o Garathe com 0x200 (`itens.md`, passo 2); na disputa, qualquer um
-    let can_take = ctx.jake.map_or(0x100, |j| j.profile().take_bit);
-    if !ctx.any_taker && e.flags & can_take == 0 {
-        return;
-    }
     let (Some(item), Some(j)) = (e.bounds(), ctx.jake_bounds()) else {
         return;
     };
@@ -229,6 +232,23 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         return;
     }
     let Some(jake) = ctx.jake else { return };
+    // o Jake pega com 0x100, o Garathe com 0x200 (`itens.md`, passo 2); na disputa, qualquer
+    // um. A aceitação (`0x40b6ed`, com a fala) vem antes: quem toca sem poder pegar fala e
+    // deixa o item (`0x40b4b3`)
+    let can = ctx.any_taker || e.flags & jake.profile().take_bit != 0;
+    let ch = jake.character();
+    let health = out.heal.unwrap_or(jake.health);
+    let poisoned = out.poison.unwrap_or(jake.poison);
+    let speech = accept_speech(e.kind, health.hp, poisoned, ch, ctx);
+    if !can {
+        if let Some(s) = speech {
+            out.events.push(Event::Sound(crate::sound::Cue::ui(
+                s,
+                crate::sound::PRIORITY_PICKUP,
+            )));
+        }
+        return;
+    }
     let mut inv = out
         .inventory
         .clone()
@@ -237,39 +257,65 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     if let Some(ok) = take_weapon_at(e.kind, v, &mut inv, ctx.difficulty) {
         if ok {
             out.inventory = Some(inv);
-            out.events.push(Event::Sound(crate::sound::Cue::ui(
-                pickup_sound(e.kind),
-                crate::sound::PRIORITY_PICKUP,
-            )));
-            // apanhado fica ligado (`+0x178 = 0x40`, `itens.md` passo 11)
-            e.on = true;
-            e.alive = false;
+            collected(e, ch, speech, out);
         }
         return;
     }
-    let mut poison = out.poison.unwrap_or(jake.poison);
+    let mut poison = poisoned;
     if let Some(ok) = take_poison(e.kind, &mut poison) {
         if ok {
             out.poison = Some(poison);
-            out.events.push(Event::Sound(crate::sound::Cue::ui(
-                SOUND_PICKUP,
-                crate::sound::PRIORITY_PICKUP,
-            )));
-            e.on = true;
-            e.alive = false;
+            collected(e, ch, speech, out);
         }
         return;
     }
-    let mut h = out.heal.unwrap_or(jake.health);
+    let mut h = health;
     if take(e.kind, &mut h) {
         out.heal = Some(h);
-        out.events.push(Event::Sound(crate::sound::Cue::ui(
-            SOUND_PICKUP,
-            crate::sound::PRIORITY_PICKUP,
-        )));
-        e.on = true;
-        e.alive = false;
+        collected(e, ch, speech, out);
     }
+}
+
+/// Fala da aceitação (`0x40b6ed`) de vida (32 com vida < 100, 34 com < 199) e antídoto (37
+/// envenenado): Jake 3700, o outro 3735 ou 3738 (`0x460a74 & 1`); veneno (33, 35): 3717/3737.
+fn accept_speech(kind: u32, hp: i32, poison: i32, ch: Character, ctx: &mut Ctx) -> Option<u16> {
+    let heal = match kind {
+        HEALTH_ITEM => hp < 100,
+        34 => hp < 199,
+        37 => poison != 0,
+        33 | 35 => return Some(ch.speech(super::opo::SPEECH)),
+        _ => return None,
+    };
+    if !heal {
+        return None;
+    }
+    let other = if ctx.rng.next_u16() & 1 != 0 {
+        SPEECH_HEAL_OTHER
+    } else {
+        SPEECH_HEAL_OTHER + 3
+    };
+    Some(match ch {
+        Character::Jake => SPEECH_HEAL,
+        _ => other,
+    })
+}
+
+/// O item apanhado (`0x40b4b3`…): a fala da aceitação, o segredo (`+0x1ac & 1`: fala 3718 e
+/// som 3093 no lugar do da coleta), o som e o item ligado e fora do jogo (`+0x178 = 0x40`).
+fn collected(e: &mut Entity, ch: Character, speech: Option<u16>, out: &mut Out) {
+    let cue = |id| Event::Sound(crate::sound::Cue::ui(id, crate::sound::PRIORITY_PICKUP));
+    if let Some(s) = speech {
+        out.events.push(cue(s));
+    }
+    let mut sound = pickup_sound(e.kind);
+    if e.objective & 1 != 0 && !e.on {
+        sound = SOUND_SECRET;
+        out.events.push(cue(ch.speech(SPEECH_SECRET)));
+    }
+    out.events.push(cue(sound));
+    // apanhado fica ligado (`+0x178 = 0x40`, `itens.md` passo 11)
+    e.on = true;
+    e.alive = false;
 }
 
 #[cfg(test)]
@@ -300,17 +346,21 @@ mod tests {
         let (j, w) = ctx_with_jake(100, 0);
         let on = |_: i32| None;
         let mut out = Out::default();
-        tick(&mut item, &ctx(&j, &w, &on), &mut out);
+        tick(&mut item, &mut ctx(&j, &w, &on), &mut out);
         assert!(!item.alive);
         assert_eq!(out.heal, Some(Health { hp: 75, armor: 0 }));
         assert_eq!(
             out.events,
-            vec![Event::Sound(crate::sound::Cue::ui(SOUND_PICKUP, 200))]
+            vec![
+                Event::Sound(crate::sound::Cue::ui(SPEECH_HEAL, 200)),
+                Event::Sound(crate::sound::Cue::ui(SOUND_PICKUP, 200))
+            ],
+            "a fala da aceitação (`0x40b6ed`) antes do som da coleta"
         );
         // dois itens no mesmo tique: os dois contam
         let mut armor = logic(ARMOR_ITEM, 100, 0, &[]);
         armor.flags = 0x803a9;
-        tick(&mut armor, &ctx(&j, &w, &on), &mut out);
+        tick(&mut armor, &mut ctx(&j, &w, &on), &mut out);
         assert_eq!(out.heal, Some(Health { hp: 75, armor: 25 }));
         // comida (+100 até 199) e armaduras 76/77/78
         let mut h = Health { hp: 150, armor: 0 };
@@ -326,7 +376,7 @@ mod tests {
         item.flags = 0x803a9;
         let (j, w) = ctx_with_jake(400, 0);
         let mut out = Out::default();
-        tick(&mut item, &ctx(&j, &w, &on), &mut out);
+        tick(&mut item, &mut ctx(&j, &w, &on), &mut out);
         assert!(item.alive && out.heal.is_none());
     }
 
@@ -362,12 +412,12 @@ mod tests {
         let (j, w) = ctx_with_jake(300, 0);
         let on = |_: i32| None;
         for _ in 0..20 {
-            tick(&mut gun, &ctx(&j, &w, &on), &mut Out::default());
+            tick(&mut gun, &mut ctx(&j, &w, &on), &mut Out::default());
         }
         assert_eq!(gun.y + 15, 47, "pousou no chão");
         let (j, w) = ctx_with_jake(95, 0);
         let mut out = Out::default();
-        tick(&mut gun, &ctx(&j, &w, &on), &mut out);
+        tick(&mut gun, &mut ctx(&j, &w, &on), &mut out);
         assert!(!gun.alive);
         assert_eq!(out.inventory.unwrap().slots[PISTOL].0, 1);
     }
@@ -381,7 +431,7 @@ mod tests {
         for kind in [HEALTH_ITEM, GRENADE_ITEM] {
             let mut item = logic(kind, 100, 0, &[3]);
             item.flags = 0x803a9;
-            tick(&mut item, &ctx(&j, &w, &on), &mut Out::default());
+            tick(&mut item, &mut ctx(&j, &w, &on), &mut Out::default());
             assert!(!item.alive && item.on, "tipo {kind}");
         }
     }
@@ -439,7 +489,7 @@ mod tests {
         let mut item = logic(33, 100, 0, &[]);
         item.flags = 0x803a9;
         let mut out = Out::default();
-        tick(&mut item, &ctx(&j, &w, &on), &mut out);
+        tick(&mut item, &mut ctx(&j, &w, &on), &mut out);
         assert_eq!(out.poison, Some(1));
         assert!(!item.alive);
     }
@@ -483,5 +533,95 @@ mod tests {
         assert_eq!(take_weapon(CLUB_ITEM, 1, &mut jake), None);
         assert_eq!(take_weapon(GRENADE_ITEM, 3, &mut jake), Some(true));
         assert_eq!(jake.slots[GRENADES], (1, 3));
+    }
+
+    fn sounds(out: &Out) -> Vec<u16> {
+        out.events.iter().filter_map(Event::sound_id).collect()
+    }
+
+    /// `0x40b6ed`: vida, comida e antídoto aceitos fazem o jogador falar (Jake 3700, Garathe
+    /// 3735 ou 3738 por sorteio); veneno, 3717/3737; recusado, nada.
+    #[test]
+    fn accepting_health_poison_or_antidote_speaks() {
+        let on = |_: i32| None;
+        let take_with = |kind: u32, j: &crate::Jake, w: &crate::World| {
+            let mut item = logic(kind, j.body.x, 0, &[]);
+            item.flags = 0x803a9;
+            let mut out = Out::default();
+            tick(&mut item, &mut ctx(j, w, &on), &mut out);
+            (item.alive, sounds(&out))
+        };
+        let (j, w) = ctx_with_jake(100, 0);
+        assert_eq!(take_with(34, &j, &w), (false, vec![3700, SOUND_PICKUP]));
+        assert_eq!(take_with(33, &j, &w), (false, vec![3717, SOUND_PICKUP]));
+        assert_eq!(take_with(37, &j, &w), (true, vec![]), "antídoto sem veneno");
+        let mut sick = j.clone();
+        sick.poison = 1;
+        assert_eq!(take_with(37, &sick, &w), (false, vec![3700, SOUND_PICKUP]));
+        let mut full = j.clone();
+        full.health.hp = 100;
+        assert_eq!(take_with(HEALTH_ITEM, &full, &w), (true, vec![]));
+        assert_eq!(
+            take_with(76, &j, &w),
+            (false, vec![SOUND_PICKUP]),
+            "armadura: só o som"
+        );
+        // Garathe: 3735 ou 3738
+        let g = j.clone().with_character(Character::Garathe);
+        let mut seen = std::collections::BTreeSet::new();
+        let mut c = ctx(&g, &w, &on);
+        for _ in 0..40 {
+            let mut item = logic(HEALTH_ITEM, g.body.x, 0, &[]);
+            item.flags = 0x803a9;
+            let mut out = Out::default();
+            tick(&mut item, &mut c, &mut out);
+            let s = sounds(&out);
+            assert_eq!(s.len(), 2);
+            seen.insert(s[0]);
+        }
+        assert_eq!(seen.into_iter().collect::<Vec<_>>(), vec![3735, 3738]);
+        assert_eq!(take_with(35, &g, &w).1, vec![3737, SOUND_PICKUP]);
+    }
+
+    /// A aceitação vem antes do bit de quem pode pegar (`0x40b49a`): o Garathe que toca a
+    /// comida do Jake (0x100) fala, mas não a apanha.
+    #[test]
+    fn garathe_touching_jake_food_speaks_without_taking_it() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(100, 0);
+        let g = j.with_character(Character::Garathe);
+        let mut food = logic(34, 100, 0, &[]);
+        food.flags = 0x801a1;
+        let mut out = Out::default();
+        tick(&mut food, &mut ctx(&g, &w, &on), &mut out);
+        assert!(food.alive && out.heal.is_none());
+        let s = sounds(&out);
+        assert!(s == vec![3735] || s == vec![3738], "{s:?}");
+    }
+
+    /// Item com o bit 1 de objetivo (segredo, 22 nas fases): 3093 "Secret discovered" no
+    /// lugar do som da coleta e a fala 3718 "Ah hah!" (Garathe 3731).
+    #[test]
+    fn secret_items_sound_secret_and_speak() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(100, 0);
+        let mut gun = logic(SHOTGUN_ITEM, 100, 0, &[10]);
+        gun.flags = 0x801a9;
+        gun.objective = 1;
+        let mut out = Out::default();
+        tick(&mut gun, &mut ctx(&j, &w, &on), &mut out);
+        assert!(!gun.alive);
+        assert_eq!(sounds(&out), vec![SPEECH_SECRET, SOUND_SECRET]);
+        let mut food = logic(34, 100, 0, &[]);
+        food.flags = 0x803a9;
+        food.objective = 1;
+        let g = j.with_character(Character::Garathe);
+        let mut out = Out::default();
+        let mut food2 = food.clone();
+        food2.flags = 0x803a9;
+        tick(&mut food2, &mut ctx(&g, &w, &on), &mut out);
+        let s = sounds(&out);
+        assert_eq!(&s[1..], &[3731, SOUND_SECRET], "{s:?}");
+        let _ = food;
     }
 }

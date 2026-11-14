@@ -1631,12 +1631,12 @@ impl Scene {
                 match e.behaviour {
                     Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, out),
                     Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, out),
-                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &ctx, out),
+                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &mut ctx, out),
                     Behaviour::LaserEye(_) => behaviour::laser_eye::tick(e, &mut ctx, out),
                     Behaviour::Laser(_) => behaviour::laser::tick(e, &ctx, out),
                     Behaviour::Barrel(_) => behaviour::barrel::tick(e, &ctx, out),
                     Behaviour::Fire(_) => behaviour::fire::tick(e, &ctx, out),
-                    Behaviour::Opo(_) => behaviour::opo::tick(e, &ctx, out),
+                    Behaviour::Opo(_) => behaviour::opo::tick(e, &mut ctx, out),
                     Behaviour::Fence(_) => behaviour::fence::tick(e, &mut ctx, out),
                     Behaviour::Graffiti(_) => behaviour::graffiti::tick(e, &ctx, out),
                     Behaviour::CarPiece => behaviour::car_piece::tick(e, &ctx, out),
@@ -1724,6 +1724,7 @@ impl Scene {
             out.hazards.append(&mut o.hazards);
             out.enemy_spawns.append(&mut o.enemy_spawns);
             out.launches.append(&mut o.launches);
+            out.floor_fires.append(&mut o.floor_fires);
             extra.push(o);
         }
         // a explosão do foguete ou da granada à queima-roupa (`weapon_impact` na passada
@@ -1829,6 +1830,7 @@ impl Scene {
         }
         behaviour::catapult::apply(&mut self.entities, &out.launches);
         self.spawn_enemy_objects(&mut out);
+        self.spawn_floor_fires(&mut out);
         let base = self.entities.len();
         self.entities.extend(out.spawn);
         for (n, c) in out.spawn_credits {
@@ -2025,6 +2027,61 @@ impl Scene {
                 }
             };
             out.spawn.push(e);
+        }
+    }
+
+    /// O fogo no chão dos barris que explodiram (`behaviour::fire::floor_fires`): as células
+    /// da linha (bits de `+0x04` e as caixas do BRD atual) e o `OFI.ANM`.
+    fn spawn_floor_fires(&mut self, out: &mut Out) {
+        for (at, layer) in std::mem::take(&mut out.floor_fires) {
+            let grid = &self.ai_grid;
+            let borders = &self.borders;
+            let cell = |cx: i32, cy: i32| {
+                let info = grid.get((cx, cy, layer)).filter(|c| c.present)?;
+                let (ox, oy) = (cx * CELL, cy * CELL);
+                Some(behaviour::fire::FloorCell {
+                    bits: info.bits,
+                    boxes: borders
+                        .iter()
+                        .filter(|(x, y, z, b)| (*x, *y, *z) == (ox, oy, layer) && b.kind == BOX)
+                        .map(|(_, _, _, b)| Rect {
+                            x: i32::from(b.x),
+                            y: i32::from(b.y),
+                            w: i32::from(b.width),
+                            h: i32::from(b.height),
+                        })
+                        .collect(),
+                })
+            };
+            let fires = behaviour::fire::floor_fires(
+                at,
+                behaviour::fire::BARREL_RANGE,
+                self.width,
+                &cell,
+                &mut self.rng,
+            );
+            let anim = self.assets_anim("OFI.ANM");
+            let fh = anim
+                .as_ref()
+                .and_then(|a| a.frames.first().map(|f| i32::from(f.height)))
+                .unwrap_or(1);
+            for f in fires {
+                let mut e = behaviour::fire::floor_fire_entity(&f, layer, fh);
+                if let (Some(anim), Behaviour::Fire(st)) = (anim.clone(), &e.behaviour) {
+                    let player = AnimPlayer::from_frame(&anim, 0);
+                    e.sprite = Some(Sprite {
+                        layer: Layer::Object,
+                        anim,
+                        player,
+                        x: e.x,
+                        y: e.y,
+                        frozen: false,
+                        scale: (st.height, fh.max(1)),
+                        mirror: f.mirror,
+                    });
+                }
+                out.spawn.push(e);
+            }
         }
     }
 
@@ -2825,7 +2882,8 @@ mod tests {
         let mut o = object(72, 0, 0, "OPO.ANM");
         o.start_label = Some(272);
         let (ref_frame, player, frozen) = object_start(&o, &a);
-        assert_eq!((ref_frame, player.frame(), frozen), (1, 1, false));
+        // o vapor (72) escolhe os próprios quadros (`behaviour::opo`)
+        assert_eq!((ref_frame, player.frame(), frozen), (1, 1, true));
         // sem rótulo inicial (ou rótulo inexistente): quadro 0
         o.start_label = None;
         assert_eq!(object_start(&o, &a).0, 0);
