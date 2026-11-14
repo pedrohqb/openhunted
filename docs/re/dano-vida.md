@@ -135,8 +135,16 @@ projéteis 108 e 25.
 
 `0x40d20c(rótulo, &centro, vel, camada, dano_área, empurrão, raio, dono)` cria um objeto
 tipo 86 "Explosion" (`oex.anm`; rótulos `oex01`–`oex05`, `oex11`–`oex15`), sinalizadores
-`0x99`, `+0x260 = max(raio, 2)`, escala tal que o sprite meça `2·raio` px, centrado no
-ponto; espelhado conforme a direção. Por tique (`0x40d45a`) avança um quadro e se destrói no
+`0x99`, `+0x260 = max(raio, 2)`, centrado no ponto; espelhado conforme a direção. Escala
+`+0x1f0 / +0x1f4` com `+0x1f0 = 2·max(raio, 2)` e `+0x1f4` = o maior lado entre a maior
+largura e a maior altura dos quadros do rótulo: o inicial (`0x43585c` em 1:1, `+0x1f0 =
++0x1f4 = 1`) e os seguintes pelo registro do quadro (`0x44714b`) até antes do quadro em que
+começa outro rótulo ou do fim da animação (`0x446fda` ≠ 0; laço em `0x40d367…0x40d3a5`).
+Assim o **maior** quadro do rótulo mede `2·raio` px. O primeiro quadro de vários rótulos do
+`OEX.ANM` mede 1 px (rótulo 2: 1 × 1; os maiores lados são 116, 67, 56, 123, 120 nos
+rótulos 1–5, 16, 23, 23, 37, 17 nos 11–15): medir só por ele dava escalas como 192/1 e
+explosões que cobriam a tela a ~1600 px. A posição é o centro menos metade do quadro
+inicial já escalado (`0x40d3e4…0x40d41a`). Por tique (`0x40d45a`) avança um quadro e se destrói no
 fim do rótulo. Com dano de área ≠ 0, roda **uma vez** `0x40d499`:
 
 - `R = 1,5 · raio`; para cada objeto presente, `+0x178 & 0x80003 = 0x80001`, na mesma

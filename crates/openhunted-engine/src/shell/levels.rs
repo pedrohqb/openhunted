@@ -2,12 +2,14 @@
 //! Escolher missão (`SLEVL.ITF`, `0x43fa7c` + `0x43fc68`; `docs/re/menu.md`,
 //! `menus-restantes.md`). Decisão do port: as sete áreas 22019–22025 mostram a lista de
 //! missões solo (título; marca nas vencidas), com rolagem pelas setas e pela barra; CIMA/BAIXO
-//! do teclado mudam a escolhida; LOAD escolhe. Os modos de dois jogadores não existem.
+//! do teclado mudam a escolhida; LOAD escolhe. Os grupos 22016–22018 trocam o modo
+//! (`0x4413aa`): a aplicação reabre a tela com a lista dele (M15b).
 
 use std::rc::Rc;
 
 use openhunted_formats::Font;
 
+use super::Party;
 use super::page::{Page, Reply};
 use super::screen::{CANCEL, Dir, Input, Screen, draw_text_in, flags};
 use crate::physics::Rect;
@@ -56,6 +58,7 @@ pub struct LevelSelect {
     entries: Vec<Entry>,
     selected: usize,
     first: usize,
+    party: Party,
 }
 
 impl LevelSelect {
@@ -81,9 +84,30 @@ impl LevelSelect {
             entries,
             selected,
             first: 0,
+            party: Party::Solo,
         };
         l.select(selected);
         l
+    }
+
+    /// A lista é a do modo `party`: marca o grupo dele.
+    pub fn with_party(mut self, party: Party) -> Self {
+        self.party = party;
+        for (id, p) in Self::GROUPS {
+            self.screen.set_marked(id, p == party);
+        }
+        self
+    }
+
+    /// Grupos do modo (22016 um jogador, 22017 disputa, 22018 cooperação).
+    const GROUPS: [(u16, Party); 3] = [
+        (ONE_PLAYER, Party::Solo),
+        (HEAD2HEAD, Party::Deathmatch),
+        (COOP, Party::Coop),
+    ];
+
+    pub fn party(&self) -> Party {
+        self.party
     }
 
     pub fn selected(&self) -> usize {
@@ -153,7 +177,10 @@ impl Page for LevelSelect {
         match self.screen.handle(input)? {
             LOAD if !self.entries.is_empty() => Some(Reply::Pick(self.selected)),
             CANCEL_BUTTON | CANCEL => Some(Reply::Close),
-            HEAD2HEAD | COOP => Some(Reply::Unavailable),
+            id @ (ONE_PLAYER | HEAD2HEAD | COOP) => Self::GROUPS
+                .iter()
+                .find(|g| g.0 == id && g.1 != self.party)
+                .map(|g| Reply::Party(g.1)),
             UP => {
                 self.scroll(true);
                 None

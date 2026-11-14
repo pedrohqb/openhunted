@@ -17,7 +17,6 @@ use openhunted_engine::shell::generic::GenericBox;
 use openhunted_engine::shell::heroes::{Car, Heroes, Info, InfoKind, NameEntry};
 use openhunted_engine::shell::intro::{self, Roll, Scroller, Splash};
 use openhunted_engine::shell::keys::{self, KeyScreen};
-use openhunted_engine::shell::levels::{Entry, LevelSelect};
 use openhunted_engine::shell::options::Options;
 use openhunted_engine::shell::results::{Choice, Results};
 use openhunted_engine::shell::{Dir, Input, Page, Placement, Reply, Screen, menu, next_mission};
@@ -69,6 +68,12 @@ pub enum PageKind {
     SaveName,
     /// Nome do jogo a carregar (menu → Restore).
     LoadName,
+    /// Personagem e cor de um jogador da disputa (`SEGOC`).
+    Choose,
+    /// Limites da disputa (`SHVLD`) sobre o primeiro quadro da fase.
+    Limits,
+    /// Resultado de dois jogadores (`SH2HS`).
+    Duo,
 }
 
 /// Um passo da sequência de filmes.
@@ -163,6 +168,8 @@ pub(super) struct Casca {
     joys: Vec<JoyRaw>,
     reader: InputReader,
     joy_page: usize,
+    /// Leitura do jogador 2 (M15b).
+    reader2: InputReader,
 }
 
 fn nav(k: Key) -> Option<Input> {
@@ -349,7 +356,7 @@ impl App {
 
     // ---- telas ----
 
-    fn open_page(
+    pub(super) fn open_page(
         &mut self,
         itf: &str,
         placement: Placement,
@@ -398,25 +405,7 @@ impl App {
                     self.set_notice(NO_STORAGE);
                 }
             }
-            menu::CHOOSE_LEVEL => {
-                let entries: Vec<Entry> = self
-                    .missions
-                    .iter()
-                    .zip(&self.records)
-                    .map(|(m, &r)| Entry {
-                        title: m.title.clone(),
-                        won: r != 0,
-                        garathe: m.player == 2,
-                        colors: self.dls_table(m.extra),
-                    })
-                    .collect();
-                let sel = self.index.unwrap_or(0);
-                if let Some(f) = font {
-                    self.open_page("SLEVL.ITF", Placement::Full, PageKind::Levels, |s, _| {
-                        Box::new(LevelSelect::new(s, f, entries, sel))
-                    });
-                }
-            }
+            menu::CHOOSE_LEVEL => self.open_levels(openhunted_engine::shell::Party::Solo),
             menu::OPTIONS => {
                 let c = self.m9.config.clone();
                 self.open_page("SOPTI.ITF", Placement::Full, PageKind::Options, |s, _| {
@@ -468,7 +457,7 @@ impl App {
         resolve(self.m9.config.devices, self.joysticks())
     }
 
-    fn open_input(&mut self) {
+    pub(super) fn open_input(&mut self) {
         let (c, n) = (self.m9.config.clone(), self.joysticks());
         self.open_page("SINPU.ITF", Placement::Full, PageKind::Input, |s, _| {
             Box::new(DeviceScreen::new(s, c, n))
@@ -513,13 +502,13 @@ impl App {
     }
 
     /// Tabela de cor `n` do `DLS.TBL` (48 × 256 bytes).
-    fn dls_table(&self, n: u16) -> Option<std::rc::Rc<[u8; 256]>> {
+    pub(super) fn dls_table(&self, n: u16) -> Option<std::rc::Rc<[u8; 256]>> {
         let d = self.assets.archive().get("DLS.TBL").ok()?;
         let t: [u8; 256] = d.get(usize::from(n) * 256..)?.get(..256)?.try_into().ok()?;
         Some(std::rc::Rc::new(t))
     }
 
-    fn set_notice(&mut self, text: &str) {
+    pub(super) fn set_notice(&mut self, text: &str) {
         let okay = self.sys_text(super::text::OKAY);
         let (Some(b), Some(f)) = (self.generic.clone(), self.font.clone()) else {
             return;
@@ -532,7 +521,7 @@ impl App {
         }
     }
 
-    fn go_menu(&mut self) {
+    pub(super) fn go_menu(&mut self) {
         if let Err(e) = self.open_menu() {
             eprintln!("erro: {e}");
             self.quit = true;
@@ -543,8 +532,10 @@ impl App {
         let (Some(reply), Some(kind)) = (reply, self.page_kind()) else {
             return;
         };
+        if self.dispatch_duo(kind, reply.clone()) {
+            return;
+        }
         match (kind, reply) {
-            (_, Reply::Unavailable) => self.set_notice(openhunted_engine::shell::page::UNAVAILABLE),
             (PageKind::Options | PageKind::Input, Reply::Config(c)) => self.apply_config(c, true),
             (PageKind::Keys, Reply::Config(c)) => {
                 self.apply_config(c, true);
@@ -713,6 +704,12 @@ impl App {
 
     pub(super) fn casca_render(&mut self) {
         self.fb.clear(0);
+        // a `SHVLD` fica sobre o primeiro quadro da fase, como o briefing
+        if self.page_kind() == Some(PageKind::Limits) {
+            if let Some(v) = self.viewer.as_mut() {
+                self.fb.pixels.copy_from_slice(&v.render().pixels);
+            }
+        }
         match &self.state {
             State::Page { page, kind, notice } => {
                 if matches!(kind, PageKind::HeroName | PageKind::SaveName) {
@@ -983,6 +980,7 @@ impl App {
             i = next_mission(i, &self.records, &self.playable).unwrap_or(i);
         }
         self.index = Some(i);
+        self.m15.party = openhunted_engine::shell::Party::Solo;
         self.start_mission(Back::Menu);
         true
     }
@@ -1165,17 +1163,29 @@ impl App {
                 return true;
             }
         }
-        let keys = self.m9.config.keys[0];
-        let keyboard = self.devices()[0].is_keyboard();
+        let keys = self.m9.config.keys;
+        let devices = self.devices();
         if let (State::Play { pause: None, .. }, Some(v)) = (&self.state, self.viewer.as_mut()) {
             use openhunted_engine::devices::slot;
             use openhunted_engine::input::{JUMP, UP};
-            // com a dica aberta, a tecla só a fecha (não vira pulo nem CIMA)
-            if keyboard && v.modal().is_none() {
-                if vk == keys[slot::JUMP] {
-                    v.tap(JUMP);
+            // com a dica aberta, a tecla só a fecha (não vira pulo nem CIMA); o jogador 2 só
+            // com a tela dividida, pelas teclas dele (`InputKeys2`)
+            let players = if v.split() { 2 } else { 1 };
+            for (p, keys) in keys.iter().enumerate().take(players) {
+                if !devices[p].is_keyboard() || v.modal().is_some() {
+                    continue;
+                }
+                let bit = if vk == keys[slot::JUMP] {
+                    JUMP
                 } else if vk == keys[slot::UP] {
-                    v.tap(UP);
+                    UP
+                } else {
+                    continue;
+                };
+                if p == 0 {
+                    v.tap(bit);
+                } else {
+                    v.tap2(bit);
                 }
             }
         }
@@ -1211,20 +1221,34 @@ impl App {
         }
     }
 
-    /// Entrada do jogador 1 neste quadro pelo dispositivo dele (`0x407e2d`): o teclado pelas
-    /// teclas do `HUNTER.INI` (`pressed(vk)`), ou o joystick escolhido no `SINPU`.
-    pub fn read_input(&mut self, pressed: &dyn Fn(u8) -> bool, select: u8) {
-        let st = match self.devices()[0] {
+    /// Estado do dispositivo do jogador `p` (`0x407e2d`): o teclado pelas teclas dele no
+    /// `HUNTER.INI` (`pressed(vk)`; os dois conjuntos no mesmo teclado), ou o joystick
+    /// escolhido no `SINPU` com o mapa de botões dele.
+    fn device_state(&self, p: usize, pressed: &dyn Fn(u8) -> bool) -> DeviceState {
+        let c = &self.m9.config;
+        match self.devices()[p] {
             Device::Joystick(n) => match self.m9.joys.get(usize::from(n - 1)) {
-                Some(j) => {
-                    DeviceState::joystick(j.x, j.y, j.buttons, j.count, &self.m9.config.buttons[0])
-                }
-                None => DeviceState::keyboard(&self.m9.config.keys[0], pressed),
+                Some(j) => DeviceState::joystick(j.x, j.y, j.buttons, j.count, &c.buttons[p]),
+                None => DeviceState::keyboard(&c.keys[p], pressed),
             },
-            _ => DeviceState::keyboard(&self.m9.config.keys[0], pressed),
-        };
+            _ => DeviceState::keyboard(&c.keys[p], pressed),
+        }
+    }
+
+    /// Entrada dos jogadores neste quadro pelos dispositivos deles; o jogador 2 só com a tela
+    /// dividida.
+    pub fn read_input(&mut self, pressed: &dyn Fn(u8) -> bool, select: u8) {
+        let st = self.device_state(0, pressed);
         let bits = self.m9.reader.bits(&st);
         self.set_input(bits, select);
+        if self.viewer.as_ref().is_some_and(|v| v.split()) {
+            let st = self.device_state(1, pressed);
+            let bits = self.m9.reader2.bits(&st);
+            if let (State::Play { pause: None, .. }, Some(v)) = (&self.state, self.viewer.as_mut())
+            {
+                v.set_input2(bits);
+            }
+        }
     }
 }
 
@@ -1787,7 +1811,7 @@ mod tests {
     }
 
     #[test]
-    fn two_player_modes_stay_unavailable() {
+    fn menu_pages_open_and_close() {
         let root = temp("app-multi");
         let Some(mut a) = app(&root, None) else {
             return;
@@ -1795,16 +1819,8 @@ mod tests {
         let mut rgba = vec![0u8; 640 * 480 * 4];
         click(&mut a, menu::MULTI_PLAYER);
         assert_eq!(a.page_kind(), Some(PageKind::Multi));
-        click(
-            &mut a,
-            openhunted_engine::shell::heroes::info_ids::MULTI_H2H,
-        );
-        assert_eq!(
-            a.notice(),
-            Some(openhunted_engine::shell::page::UNAVAILABLE)
-        );
         a.key_down(Key::Escape);
-        a.key_down(Key::Escape);
+        run(&mut a, 1);
         assert_eq!(a.mode(), super::super::Mode::Menu);
         for id in [menu::HERO_LIST, menu::HELP, menu::INPUT_DEVICES] {
             click(&mut a, id);

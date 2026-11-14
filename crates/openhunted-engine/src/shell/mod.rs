@@ -4,18 +4,22 @@
 //! `pausa.md`, `fim-de-missao.md`).
 
 pub mod briefing;
+pub mod choose;
 pub mod config;
 pub mod devices;
+pub mod duo;
 pub mod generic;
 pub mod heroes;
 pub mod hud;
 pub mod intro;
 pub mod keys;
 pub mod levels;
+pub mod limits;
 pub mod options;
 pub mod page;
 pub mod results;
 pub mod screen;
+pub mod views;
 
 pub use page::{Page, Reply};
 pub use screen::{CANCEL, Dir, Input, Placement, Screen};
@@ -59,6 +63,36 @@ pub mod text {
     pub const IMPROVED: u16 = 10043;
     /// Base do `SYSTEM.RES`.
     pub const SYSTEM_BASE: u16 = 10000;
+}
+
+/// Modo de jogo da casca (`0x497300`/`0x497304`) e a lista dele em `0x4974b4`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Party {
+    #[default]
+    Solo,
+    /// Disputa (`MMU_HEAD2HEAD`, lista 0x5601, `p=3`).
+    Deathmatch,
+    /// Cooperativo (`MMU_COOPERATIVE`, lista 0x5602, `p=4`).
+    Coop,
+}
+
+impl Party {
+    /// Dois jogadores.
+    pub fn two(self) -> bool {
+        self != Party::Solo
+    }
+}
+
+/// Missões da lista do modo (`0x4406d3`), na ordem do `ENGLEVEL.TXT`: solo sem `p=3`/`p=4`;
+/// disputa só `p=3`; cooperativo só `p=4`.
+pub fn missions_for(list: &[MissionInfo], party: Party) -> Vec<MissionInfo> {
+    match party {
+        Party::Solo => solo_missions(list),
+        Party::Deathmatch | Party::Coop => {
+            let p = if party == Party::Deathmatch { 3 } else { 4 };
+            list.iter().filter(|m| m.player == p).cloned().collect()
+        }
+    }
 }
 
 /// Missões do modo solo (`0x4406d3` com o modo 0x5600): a lista do `ENGLEVEL.TXT` sem as de
@@ -110,6 +144,16 @@ mod tests {
         let l = [m("A", 1), m("B", 3), m("C", 2), m("D", 4), m("E", 1)];
         let s: Vec<_> = solo_missions(&l).into_iter().map(|m| m.file).collect();
         assert_eq!(s, ["A", "C", "E"]);
+    }
+
+    #[test]
+    fn mode_lists_keep_the_file_order() {
+        let l = [m("A", 1), m("B", 3), m("C", 4), m("D", 3), m("E", 2)];
+        let f = |p| -> Vec<String> { missions_for(&l, p).into_iter().map(|m| m.file).collect() };
+        assert_eq!(f(Party::Solo), ["A", "E"]);
+        assert_eq!(f(Party::Deathmatch), ["B", "D"]);
+        assert_eq!(f(Party::Coop), ["C"]);
+        assert!(Party::Coop.two() && !Party::Solo.two());
     }
 
     #[test]

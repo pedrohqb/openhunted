@@ -89,11 +89,13 @@ desenhados**; o valor é limitado ao máximo de dígitos.
 |---|---|---|---|
 | 17 / 18 / 19 (51×37) | 3 | 20–29 / 30–39 / 40–49 (13×29) | (x + 32, y + 4) |
 | 50 / 51 (31×44) | 2 | 72–81 / 82–91 (11×29) | (x + 14, y + 8) |
-| 196 | 2 | 20–29 | (x + 20, y + 4) |
+| 195 (`0x40a836`; antes lido como 196) | 2 | 20–29 | (x + 20, y + 4) |
 
 ## Em aberto
 
 - Quem liga cada sinal de `+0x10` (coleta, dano, troca de arma).
 - O que é `+0x270` do jogador (rosto alternativo 93: veneno?).
-- `0x40b089` (pontos no modo disputa) e os quadros 94+ além do cronômetro (194–210).
+- Os quadros 94+ além do cronômetro e dos pontos (196–210). `0x40b089` (disputa): moldura
+  194 encostada à direita em `y + 30`, `max(0, F − S)` no estilo 195 em `+38, +5`
+  (`multijogador.md`; metade disso na barra achatada).
 - Conferir no Wine a faixa da vista (640×405) e as posições acima.

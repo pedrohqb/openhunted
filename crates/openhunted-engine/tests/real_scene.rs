@@ -72,17 +72,22 @@ fn tutorial_render_matches_reference() {
 /// minas flutuantes saem pela tabela de cor 40 (verdes), conferidas visualmente.
 const REFERENCE: u64 = 0xfd21_fcb0_8501_b294;
 
-/// Camadas z ≥ 1 usam o índice 0 como transparência: nada de índice 0 pode chegar à tela.
+/// Camadas (M16): a camada da vista sai opaca; o índice 0 dela só é preenchido pelas de trás
+/// dentro dos buracos das células (pixel a pixel em `real_layers.rs`). Aqui: nas fases de
+/// várias camadas, nada fica com a cor de fundo do quadro (a vista cobre tudo, com 245 nas
+/// células vazias) e há índice 0 só onde a camada da vista o tem.
 #[test]
-fn multilayer_level_has_no_transparent_holes() {
+fn multilayer_level_view_covers_the_frame() {
     use openhunted_engine::{Framebuffer, SCREEN_H, SCREEN_W};
     for lev in ["I_J_101.LEV", "H_J_001.LEV", "C_J_027.LEV"] {
         let Some((s, mut a)) = load(lev) else { return };
         let mut fb = Framebuffer::new(SCREEN_W, SCREEN_H);
-        fb.clear(37);
+        fb.clear(1);
         s.draw(&mut a, &mut fb, (0, 0), false);
-        let holes = fb.pixels.iter().filter(|&&p| p == 0).count();
-        assert_eq!(holes, 0, "{lev}: {holes} pixels de índice 0");
+        let mut other = Framebuffer::new(SCREEN_W, SCREEN_H);
+        other.clear(2);
+        s.draw(&mut a, &mut other, (0, 0), false);
+        assert_eq!(fb, other, "{lev}: sobrou fundo do quadro");
     }
 }
 
@@ -980,5 +985,66 @@ fn random_moves_never_enter_solids() {
         "Land",
     ] {
         assert!(seen.contains(st), "{st} nunca visitado: {seen:?}");
+    }
+}
+
+/// Fases em que a explosão nascia com a escala tirada do primeiro quadro do rótulo (1 px de
+/// altura no `OEX.ANM`) e cobria a tela a ~1600 px de distância (revisão da M16).
+const BLAST_LEVELS: [&str; 13] = [
+    "I_M_003.LEV",
+    "I_J_108.LEV",
+    "H_M_003.LEV",
+    "H_J_024.LEV",
+    "H_J_012.LEV",
+    "D_M_024.LEV",
+    "H_J_013.LEV",
+    "H_J_027.LEV",
+    "D_M_010.LEV",
+    "C_2_018.LEV",
+    "C_2_009.LEV",
+    "C_J_015.LEV",
+    "M_2_004.LEV",
+];
+
+/// Maior lado desenhado do sprite de `e` (bitmaps dos desenhos do quadro atual, com a escala).
+fn drawn_size(e: &openhunted_engine::Entity, a: &mut Assets) -> i64 {
+    let Some(sp) = e.sprite.as_ref() else {
+        return 0;
+    };
+    let (num, den) = (i64::from(sp.scale.0), i64::from(sp.scale.1.max(1)));
+    openhunted_engine::draw_ops(&sp.anim, sp.player.frame())
+        .iter()
+        .filter_map(|op| {
+            let b = a.bitmap(&op.bitmap).ok()?;
+            let f = b.frames.get(op.frame as usize)?;
+            Some(i64::from(f.width.max(f.height)) * num / den)
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// Em 600 tiques parados, nenhuma entidade viva é desenhada com mais de 640 px de lado.
+#[test]
+fn no_entity_is_drawn_larger_than_the_screen() {
+    for name in BLAST_LEVELS {
+        let Some((mut s, mut a)) = load(name) else {
+            return;
+        };
+        for t in 0..600 {
+            s.tick(0);
+            for e in s.entities.iter().filter(|e| e.visible()) {
+                let Some(sp) = e.sprite.as_ref() else {
+                    continue;
+                };
+                let size = drawn_size(e, &mut a);
+                assert!(
+                    size <= 640,
+                    "{name} tique {t}: tipo {} quadro {} escala {:?} desenhado com {size} px",
+                    e.kind,
+                    sp.player.frame(),
+                    sp.scale
+                );
+            }
+        }
     }
 }

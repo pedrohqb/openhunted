@@ -29,6 +29,10 @@ use crate::viewer::{Action, Viewer};
 mod casca;
 pub use casca::{PageKind, Show};
 
+// dois jogadores da M15b (`docs/superpowers/specs/2026-11-08-m15b-multijogador-casca-design.md`)
+#[path = "dois.rs"]
+mod dois;
+
 /// Espera entre o veredito e a tela de resultado (no original, o anúncio do locutor).
 pub const END_DELAY_MS: u32 = 2000;
 
@@ -88,6 +92,13 @@ enum Back {
     Menu,
     /// O resultado e a missão de antes (índice e fase), restaurados se o jogador cancela.
     Results(Box<Results>, Option<usize>, (String, String, String)),
+    /// Uma tela de resultado da casca (`SH2HS`), com o índice na lista do modo e a fase.
+    Page(
+        Box<dyn openhunted_engine::shell::Page>,
+        PageKind,
+        Option<usize>,
+        (String, String, String),
+    ),
 }
 
 enum State {
@@ -160,6 +171,8 @@ pub struct App {
     last_menu_button: u16,
     /// Estado da M9: configuração, campanha, arquivos, música e filmes.
     m9: casca::Casca,
+    /// Dois jogadores (M15b): modo, lista, escolhas e limites.
+    m15: dois::Dois,
 }
 
 impl App {
@@ -187,7 +200,8 @@ impl App {
         mut assets: Assets,
         levels: LevelArchive,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let missions = solo_missions(&parse_mission_list(&levels.get("ENGLEVEL.TXT")?)?);
+        let all = parse_mission_list(&levels.get("ENGLEVEL.TXT")?)?;
+        let missions = solo_missions(&all);
         let palette = display_palette(&Palette::parse(assets.archive().get("WORLD.PAL")?)?);
         let mut lut = [[0u8; 4]; 256];
         for (l, c) in lut.iter_mut().zip(palette.0.iter()) {
@@ -237,6 +251,7 @@ impl App {
             quit: false,
             last_menu_button: menu::NEW_GAME,
             m9: casca::Casca::default(),
+            m15: dois::Dois::new(all),
         };
         app.open_menu()?;
         Ok(app)
@@ -378,24 +393,26 @@ impl App {
         Ok(())
     }
 
-    /// Carrega a fase e abre o briefing por cima do primeiro quadro dela.
-    fn start_briefing(&mut self, file: &str, back: Back) -> Result<(), Box<dyn std::error::Error>> {
+    /// Carrega a fase no modo da casca (solo, coop ou disputa), com a câmera no jogador e a
+    /// dificuldade das opções.
+    fn load_viewer(&mut self, file: &str) -> Result<(Viewer, Level), Box<dyn std::error::Error>> {
         let lv = Level::parse(&self.levels.get(file)?).map_err(|e| e.in_resource(file))?;
-        let mut viewer = Viewer::from_level(&lv, self.assets.clone())?;
+        let mut viewer = Viewer::from_level_with(&lv, self.assets.clone(), self.scene_mode())?;
         viewer.follow();
         // a dificuldade gravada nas opções (`0x487854`)
         viewer.set_difficulty(openhunted_engine::Difficulty::from_index(
             self.config().difficulty,
         ));
+        Ok((viewer, lv))
+    }
+
+    /// Carrega a fase e abre o briefing por cima do primeiro quadro dela.
+    fn start_briefing(&mut self, file: &str, back: Back) -> Result<(), Box<dyn std::error::Error>> {
+        let (viewer, lv) = self.load_viewer(file)?;
         // o título e a descrição vêm da lista de missões; fase fora dela, do cabeçalho
-        let (title, desc) = match self
-            .missions
-            .iter()
-            .find(|m| m.file.eq_ignore_ascii_case(file))
-        {
-            Some(m) => (m.title.clone(), m.description.clone()),
-            None => (lv.title.clone(), lv.description.clone()),
-        };
+        let (title, desc) = self
+            .mission_texts(file)
+            .unwrap_or_else(|| (lv.title.clone(), lv.description.clone()));
         let itf = self.itf("SLEVD.ITF")?;
         let screen = Screen::new(&itf, &mut self.assets, Placement::Centered)?;
         let dlg = Briefing::new(screen, self.font()?, &title, &desc);
@@ -423,6 +440,9 @@ impl App {
 
     /// Fim da partida: anúncio, recorde e tela de resultado (`0x444174`).
     fn open_results(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.m15.party.two() {
+            return self.open_duo_results();
+        }
         let Some(v) = self.viewer.as_ref() else {
             return Ok(());
         };
@@ -719,6 +739,7 @@ impl App {
                 // `0x440fe0`: zera a campanha e começa da primeira missão solo
                 self.records.iter_mut().for_each(|r| *r = 0);
                 self.new_campaign();
+                self.m15.party = openhunted_engine::shell::Party::Solo;
                 self.index = Some(0);
                 self.start_mission(Back::Menu);
             }
@@ -750,21 +771,8 @@ impl App {
                 let State::Briefing { back, .. } = old else {
                     return;
                 };
-                match back {
-                    Back::Menu => {
-                        if let Err(e) = self.open_menu() {
-                            eprintln!("erro: {e}");
-                            self.quit = true;
-                        }
-                    }
-                    Back::Results(mut r, index, level) => {
-                        // a missão volta a ser a do resultado (o REPLAY repete ela)
-                        self.index = index;
-                        self.level = level;
-                        r.from_game = false;
-                        self.state = State::Results(r);
-                    }
-                }
+                // a missão volta a ser a do resultado (o REPLAY repete ela)
+                self.go_back(back);
             }
             None => {}
         }

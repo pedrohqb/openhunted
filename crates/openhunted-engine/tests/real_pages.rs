@@ -133,7 +133,15 @@ fn level_select_scrolls_marks_and_picks() {
     assert_eq!(l.selected(), 3, "clique na 1ª linha visível");
     assert_eq!(click(&mut l, levels::UP), None);
     assert_eq!(l.first(), 2);
-    assert_eq!(click(&mut l, levels::HEAD2HEAD), Some(Reply::Unavailable));
+    assert_eq!(
+        click(&mut l, levels::HEAD2HEAD),
+        Some(Reply::Party(openhunted_engine::shell::Party::Deathmatch))
+    );
+    assert_eq!(
+        click(&mut l, levels::ONE_PLAYER),
+        None,
+        "já é o modo da lista"
+    );
     let mut fb = Framebuffer::new(640, 480);
     l.draw(&mut fb);
     assert_eq!(click(&mut l, levels::LOAD), Some(Reply::Pick(3)));
@@ -212,7 +220,11 @@ fn heroes_name_car_and_info_pages() {
     let mut m = Info::new(s, InfoKind::Multi, None, &[]);
     assert_eq!(
         click(&mut m, info_ids::MULTI_COOP),
-        Some(Reply::Unavailable)
+        Some(Reply::Party(openhunted_engine::shell::Party::Coop))
+    );
+    assert_eq!(
+        click(&mut m, info_ids::MULTI_H2H),
+        Some(Reply::Party(openhunted_engine::shell::Party::Deathmatch))
     );
     assert_eq!(click(&mut m, info_ids::MULTI_CANCEL), Some(Reply::Close));
     let s = screen(&mut a, "SINPU.ITF", Placement::Full);

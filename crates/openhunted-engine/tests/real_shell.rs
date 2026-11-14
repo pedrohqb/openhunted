@@ -198,6 +198,7 @@ fn hud_bar_frames_match_the_docs() {
         slots,
         weapon: 2,
         timer: 125 * 20,
+        score: None,
     };
     hud::draw_hud(&mut fb, &bar, 0, hud::VIEW_H, 640, &s);
     assert!(
