@@ -265,13 +265,15 @@ pub fn step(b: &mut Body, world: &World, gravity: bool) {
         contact_y = true;
     }
     if contact_y {
-        b.vy = friction(bounce(b.vy));
+        b.vy = bounce(b.vy);
     }
     b.on_ground = world.standing_on(&b.bounds(), 1);
-    if contact_y || b.on_ground {
+    // atrito uma vez em cada eixo, também na componente normal depois do rebote
+    // (`0x00404842`; a cápsula quica na parede a −4 px/tique no oráculo)
+    if contact_x || contact_y || b.on_ground {
         b.vx = friction(b.vx);
     }
-    if contact_x {
+    if contact_x || contact_y {
         b.vy = friction(b.vy);
     }
 }

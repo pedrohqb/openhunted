@@ -656,8 +656,9 @@ fn complete(s: &mut Scene, o: &Objective) -> Result<(), String> {
                 if e.alive && !enemy::hurt(e, &lethal, true) && !interact::hurt(e, &lethal) {
                     return Err(format!("o tipo {} não aceita dano", o.kind));
                 }
-                // perto do alvo, mas acima dele (fora do caminho)
-                teleport(s, (c.0, c.1 - 64), layer);
+                // perto do alvo, mas acima dele (fora do caminho), dentro da fase: fora dela o
+                // Jake renasce no início e a câmera leva o alvo para fora da ativação
+                teleport(s, (c.0, (c.1 - 64).max(32)), layer);
                 god_tick(s, 0);
                 if done(s) {
                     return Ok(());

@@ -161,6 +161,22 @@ pub fn init_draws(kind: u32) -> u32 {
     }
 }
 
+/// Raio da ativação por distância (`0x00435e7f`, tabela de saltos em `0x00435efb`): `None` =
+/// sempre ativo (99999: jogadores, projéteis, laser, fogo, paredes `OH`, a gota 71, explosões
+/// e efeitos); 400 px para sentinela, mina saltadora, barril, dardo, cerca, Manta, mina, olho,
+/// Anticorpo, Entidade e formiga; 600 para os demais. O bit `0x100000` de `+0x178` (`+0x17a &
+/// 0x10`) também deixa sempre ativo.
+pub fn activation_radius(kind: u32, flags: i32) -> Option<i32> {
+    if flags & 0x0010_0000 != 0 {
+        return None;
+    }
+    match kind {
+        1 | 2 | 19..=21 | 36 | 42 | 50..=52 | 71 | 86 | 99 | 100 | 106 | 108 => None,
+        10 | 11 | 28 | 29 | 40 | 89 | 102 | 104 | 105 | 107 | 109 => Some(400),
+        _ => Some(600),
+    }
+}
+
 /// Tipos que ficam no quadro sorteado na carga (a inicialização não troca o rótulo depois do
 /// sorteio genérico): os itens genéricos (`0x0040b2c8`), as chaves (`0x0040f214`) e a mina
 /// flutuante (`0x0041e6bc`).
@@ -184,7 +200,7 @@ pub enum Behaviour {
     Laser(LaserState),
     Barrel(BarrelState),
     Fire(FireState),
-    /// Obstáculo `OPO` que envenena (68–70).
+    /// Obstáculo `OPO` (68–72): poça, saliência que goteja, gota e vapor de veneno.
     Opo(crate::behaviour::opo::OpoState),
     Fence(FenceState),
     Graffiti(GraffitiState),
@@ -325,7 +341,8 @@ pub fn object_start(o: &LevelObject, a: &Animation) -> (usize, AnimPlayer, bool)
     let frozen = matches!(
         o.kind,
         GRAFFITI | LASER_EYE | BARREL | FENCE | TELEPORTER | PISTON | SWITCH
-    ) || DOORS.contains(&o.kind)
+    ) || o.kind == crate::behaviour::opo::STEAM
+        || DOORS.contains(&o.kind)
         || ENEMIES.contains(&o.kind);
     let state = o.fields.get(5).copied().unwrap_or(0);
     let label = match o.kind {
@@ -487,11 +504,29 @@ pub fn from_object(o: &LevelObject, assets: &mut Assets, warnings: &mut Vec<Stri
             Behaviour::Fire(st)
         }
         // poça de veneno e saliência que goteja: o retângulo do quadro de referência, sem
-        // caixa (não barram nem são contato; `0x0040fa16` testa o retângulo)
-        68..=70 => Behaviour::Opo(crate::behaviour::opo::OpoState::new(
+        // caixa (não barram nem são contato; `0x0040fa16` testa o retângulo); a saliência
+        // dá à gota as caixas do `OPO.BRD` (`0x0040f342`)
+        68 | 69 => Behaviour::Opo(crate::behaviour::opo::OpoState::new(
             frame_box.unwrap_or(own_box(0, 0)),
             value(0),
         )),
+        70 => {
+            let drop = assets
+                .archive()
+                .get("OPO.BRD")
+                .and_then(Border::parse)
+                .map(|b| border_boxes(&b))
+                .unwrap_or_default();
+            Behaviour::Opo(crate::behaviour::opo::OpoState::ledge(
+                frame_box.unwrap_or(own_box(0, 0)),
+                &o.values,
+                drop,
+            ))
+        }
+        // o vapor: o retângulo é o do rótulo de cada estado
+        crate::behaviour::opo::STEAM => {
+            Behaviour::Opo(crate::behaviour::opo::OpoState::steam(&o.values))
+        }
         FENCE => Behaviour::Fence(FenceState::from_values(&o.values)),
         GRAFFITI => {
             let lines = assets

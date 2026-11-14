@@ -394,6 +394,11 @@ fn check_enemy(s: &Scene, i: usize, started_inside: bool, ctx: &str) {
     let Some(b) = e.bounds() else {
         return;
     };
+    // inativo (longe da vista, `0x435e7f`): não se atualiza; a formiga nascida dentro do
+    // formigueiro na parede fica lá até a vista chegar
+    if !s.awake.get(i).copied().unwrap_or(true) {
+        return;
+    }
     let c = (b.x + b.w / 2, b.y + b.h / 2);
     assert!(
         c.0 >= 0 && c.1 >= 0 && c.0 < s.width && c.1 < s.height,
@@ -469,8 +474,13 @@ fn enemies_fuzz_without_panics() {
                 if e.alive {
                     check_enemy(&s, i, inside, &ctx);
                 } else {
+                    // quem cai num poço para fora da fase é destruído, como no original
+                    // (`0x435b63` fora da fase): o sorteio das gotas e falas (M17) leva uma
+                    // mina saltadora a um poço da H_J_009
+                    let c = e.center();
+                    let fell_out = c.0 < 0 || c.1 < 0 || c.0 >= s.width || c.1 >= s.height;
                     assert!(
-                        e.health <= 0,
+                        e.health <= 0 || fell_out,
                         "{ctx}: objeto {i} (tipo {}) sumiu com vida {}",
                         e.kind,
                         e.health
@@ -588,8 +598,13 @@ fn fuzz_m10_levels(run: u32, difficulty: openhunted_engine::Difficulty) -> u32 {
                 if e.alive {
                     check_enemy(&s, i, inside, &ctx);
                 } else {
+                    // quem cai num poço para fora da fase é destruído, como no original
+                    // (`0x435b63` fora da fase): o sorteio das gotas e falas (M17) leva uma
+                    // mina saltadora a um poço da H_J_009
+                    let c = e.center();
+                    let fell_out = c.0 < 0 || c.1 < 0 || c.0 >= s.width || c.1 >= s.height;
                     assert!(
-                        e.health <= 0,
+                        e.health <= 0 || fell_out,
                         "{ctx}: objeto {i} (tipo {}) sumiu com vida {}",
                         e.kind,
                         e.health
@@ -850,7 +865,11 @@ fn t_m_008_ant_walks_away_from_its_hill() {
     let n0 = s.entities.len();
     let mut born = None;
     let mut far = 0;
+    let hill_layer = s.entities[hill].layer;
     for t in 0..600 {
+        // a vista sobre o formigueiro: só o que está perto dela se atualiza (`0x435e7f`)
+        s.view_centers = vec![(hx, hy)];
+        s.views[0].layer = hill_layer;
         s.tick(0);
         let Some(a) = (n0..s.entities.len()).find(|&k| s.entities[k].kind == 109) else {
             continue;

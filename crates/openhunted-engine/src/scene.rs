@@ -98,6 +98,11 @@ pub struct Marker {
     pub y: i32,
 }
 
+/// Passo máximo da câmera por tique (`0x004365ae`: 18 px ao longo do vetor).
+pub const CAMERA_STEP: i32 = 18;
+/// Salto do alvo da câmera (px por eixo num tique) acima do qual ela recentra.
+pub const CAMERA_JUMP: i32 = 64;
+
 /// Cena de uma fase.
 #[derive(Debug, Clone)]
 pub struct Scene {
@@ -183,6 +188,18 @@ pub struct Scene {
     cell_map: view::CellMap,
     /// Estado da vista de cada jogador (camada, distância, transição).
     pub views: Vec<view::ViewState>,
+    /// Centro de cada vista no mundo (`+0x00/+0x04` da vista, `0x00436386`): a câmera que
+    /// decide quem fica ativo. Vazio (cenas montadas à mão): todos ativos.
+    pub view_centers: Vec<(i32, i32)>,
+    /// Alvo da câmera no tique anterior (salto → recentra).
+    view_targets: Vec<(i32, i32)>,
+    /// Ativação por distância do tique (`0x00435e7f`), pelo índice da entidade; as criadas
+    /// depois dela no tique contam como ativas.
+    pub awake: Vec<bool>,
+    /// Entidades da carga que vieram da lista de uma célula (itens, decoração animada): só
+    /// se atualizam depois do primeiro desenho (o oráculo as mostra no quadro sorteado no fim
+    /// do tique 0).
+    pub cell_objects: Vec<bool>,
     /// Dificuldade (`0x487854`): a casca a põe pela opção gravada; padrão médio.
     pub difficulty: crate::Difficulty,
     /// Confusão do jogador (`+0x264`): tiques com os pares de direção trocados (Entidade).
@@ -358,6 +375,10 @@ impl Scene {
             sprite_cells: Vec::new(),
             cell_map: view::CellMap::default(),
             views: Vec::new(),
+            view_centers: Vec::new(),
+            view_targets: Vec::new(),
+            awake: Vec::new(),
+            cell_objects: Vec::new(),
             mode: Mode::Solo,
             players: Vec::new(),
             parked: Vec::new(),
@@ -601,6 +622,11 @@ impl Scene {
         if solo {
             objects.retain(|o| present(o, SOLO) || is_player_start(o, SOLO));
         }
+        let global: std::collections::HashSet<*const LevelObject> = level
+            .objects
+            .iter()
+            .map(|o| o as *const LevelObject)
+            .collect();
         let list: Vec<(&LevelObject, Option<usize>)> = if mode == Mode::Solo {
             objects.into_iter().map(|o| (o, None)).collect()
         } else {
@@ -643,6 +669,7 @@ impl Scene {
                 // personagem sem jogador: a IA (M11)
                 if let Some(e) = ai::ai_entity(o, assets, &mut s.warnings) {
                     s.entities.push(e);
+                    s.cell_objects.push(false);
                     continue;
                 }
             }
@@ -661,6 +688,8 @@ impl Scene {
                 });
             }
             s.entities.push(e);
+            s.cell_objects
+                .push(!global.contains(&(o as *const LevelObject)));
         }
         for (p, h) in humans.into_iter().enumerate() {
             let Some((j, sp, fl)) = h else {
@@ -717,6 +746,7 @@ impl Scene {
         s.views = (0..s.players.len().max(1))
             .map(|i| view::ViewState::new(s.layer_of(i).unwrap_or(s.layers - 1)))
             .collect();
+        s.center_cameras();
         // o campo 1004 não vale na disputa (`0x488e54 = 0`)
         if s.mode.duel().is_none() {
             s.time_limit = i32::from(level.field_1004.max(0));
@@ -807,6 +837,7 @@ impl Scene {
             // o `rand` volta ao estado do executável antes do tique 0 (`rng.rs`)
             self.rng.reset();
         }
+        self.activate();
         let seats = self.seats();
         let prev: Vec<Option<crate::State>> = (0..self.players.len().max(1))
             .map(|i| self.player_jake(i).map(Jake::state))
@@ -870,7 +901,17 @@ impl Scene {
             let anim = sp.anim.clone();
             sp.player.tick(&anim);
         }
-        for e in self.entities.iter_mut().filter(|e| e.alive) {
+        let awake = std::mem::take(&mut self.awake);
+        for (k, e) in self
+            .entities
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, e)| e.alive)
+        {
+            if !awake.get(k).copied().unwrap_or(true) {
+                // inativo: sem atualização, o quadro fica (`0x00435e7f`)
+                continue;
+            }
             if matches!(e.behaviour, Behaviour::AiPlayer(_)) {
                 // o sprite segue o corpo (`tick_ai_players`)
                 continue;
@@ -886,7 +927,90 @@ impl Scene {
                 }
             }
         }
+        self.awake = awake;
+        self.tick_camera();
         self.tick_count = self.tick_count.saturating_add(1);
+    }
+
+    /// Alvo da câmera de uma vista (`0x00436386`): centro horizontal e topo do quadro do
+    /// jogador seguido, na posição de depois da física (o porte usa a caixa do corpo).
+    fn camera_target(&self, i: usize) -> Option<(i32, i32)> {
+        let j = self.player_jake(i)?;
+        let b = j.body.bounds();
+        Some((b.x.saturating_add(b.w / 2), j.body.y))
+    }
+
+    /// Câmera de cada vista (`0x00436386`, no fim do tique): anda até o alvo no máximo 18 px
+    /// por tique ao longo do vetor (`d·18/|d|`). O tremor (`+0x274`, dois `rand % 10 − 5`) e
+    /// o ponto fixo das células (bit 1 de `+0x5c`) ainda não. Ruling (como a câmera do
+    /// `viewer.rs`): o alvo que salta mais de 64 px num tique (renascer, teletransporte,
+    /// o modo deus da auditoria) recentra na hora.
+    fn tick_camera(&mut self) {
+        self.view_targets
+            .resize(self.view_centers.len(), (i32::MIN, 0));
+        for i in 0..self.view_centers.len() {
+            let Some(t) = self.camera_target(i) else {
+                continue;
+            };
+            let last = std::mem::replace(&mut self.view_targets[i], t);
+            if last.0 == i32::MIN
+                || (t.0 - last.0).abs() > CAMERA_JUMP
+                || (t.1 - last.1).abs() > CAMERA_JUMP
+            {
+                self.view_centers[i] = t;
+                continue;
+            }
+            let c = self.view_centers[i];
+            let (mut dx, mut dy) = (t.0 - c.0, t.1 - c.1);
+            let len = f64::from(dx).hypot(f64::from(dy)) as i32;
+            if len > CAMERA_STEP {
+                dx = dx * 2 * 9 / len;
+                dy = dy * 2 * 9 / len;
+            }
+            self.view_centers[i] = (c.0 + dx, c.1 + dy);
+        }
+    }
+
+    /// Ativação por distância (`0x00435e7f`, no começo do tique, pela câmera do tique
+    /// anterior): com raio finito, só fica ativo o objeto a menos do raio do centro de alguma
+    /// vista e numa camada desenhada (a da vista ou atrás dela).
+    fn activate(&mut self) {
+        if self.view_centers.is_empty() {
+            self.awake.clear();
+            return;
+        }
+        let layers: Vec<i32> = self.views.iter().map(|v| v.layer).collect();
+        let centers = self.view_centers.clone();
+        let first = self.tick_count == 0;
+        let cells = std::mem::take(&mut self.cell_objects);
+        self.awake = self
+            .entities
+            .iter()
+            .enumerate()
+            .map(|(k, e)| {
+                if first && cells.get(k).copied().unwrap_or(false) {
+                    return false;
+                }
+                let Some(r) = crate::entity::activation_radius(e.kind, e.flags) else {
+                    return true;
+                };
+                centers.iter().enumerate().any(|(i, c)| {
+                    let vl = layers.get(i).copied().unwrap_or(0);
+                    if e.layer < vl {
+                        return false;
+                    }
+                    let (dx, dy) = (i64::from(c.0 - e.x), i64::from(c.1 - e.y));
+                    dx * dx + dy * dy < i64::from(r) * i64::from(r)
+                })
+            })
+            .collect();
+        self.cell_objects = cells;
+    }
+
+    /// Centra as câmeras nos jogadores (início da fase).
+    pub fn center_cameras(&mut self) {
+        let n = self.players.len().max(1);
+        self.view_centers = (0..n).filter_map(|i| self.camera_target(i)).collect();
     }
 
     /// O tique do jogador do assento ativo: entrada (confusão), corpo, fim da morte na
@@ -1643,7 +1767,7 @@ impl Scene {
                 .collect();
             let any_taker = self.mode.duel().is_some();
             for (k, e) in self.entities.iter_mut().enumerate() {
-                if !e.alive {
+                if !e.alive || !self.awake.get(k).copied().unwrap_or(true) {
                     continue;
                 }
                 let t = targets.get(k).copied().unwrap_or(0).min(views.len() - 1);
@@ -1669,12 +1793,12 @@ impl Scene {
                 match e.behaviour {
                     Behaviour::Zone(_) => behaviour::zone::tick(e, &ctx, out),
                     Behaviour::Hint(_) => behaviour::hint::tick(e, &ctx, out),
-                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &ctx, out),
+                    Behaviour::Pickup(_) => behaviour::pickup::tick(e, &mut ctx, out),
                     Behaviour::LaserEye(_) => behaviour::laser_eye::tick(e, &mut ctx, out),
                     Behaviour::Laser(_) => behaviour::laser::tick(e, &ctx, out),
                     Behaviour::Barrel(_) => behaviour::barrel::tick(e, &ctx, out),
                     Behaviour::Fire(_) => behaviour::fire::tick(e, &ctx, out),
-                    Behaviour::Opo(_) => behaviour::opo::tick(e, &ctx, out),
+                    Behaviour::Opo(_) => behaviour::opo::tick(e, &mut ctx, out),
                     Behaviour::Fence(_) => behaviour::fence::tick(e, &mut ctx, out),
                     Behaviour::Graffiti(_) => behaviour::graffiti::tick(e, &ctx, out),
                     Behaviour::CarPiece => behaviour::car_piece::tick(e, &ctx, out),
@@ -1762,6 +1886,7 @@ impl Scene {
             out.hazards.append(&mut o.hazards);
             out.enemy_spawns.append(&mut o.enemy_spawns);
             out.launches.append(&mut o.launches);
+            out.floor_fires.append(&mut o.floor_fires);
             extra.push(o);
         }
         // a explosão do foguete ou da granada à queima-roupa (`weapon_impact` na passada
@@ -1867,6 +1992,7 @@ impl Scene {
         }
         behaviour::catapult::apply(&mut self.entities, &out.launches);
         self.spawn_enemy_objects(&mut out);
+        self.spawn_floor_fires(&mut out);
         let base = self.entities.len();
         self.entities.extend(out.spawn);
         for (n, c) in out.spawn_credits {
@@ -2063,6 +2189,61 @@ impl Scene {
                 }
             };
             out.spawn.push(e);
+        }
+    }
+
+    /// O fogo no chão dos barris que explodiram (`behaviour::fire::floor_fires`): as células
+    /// da linha (bits de `+0x04` e as caixas do BRD atual) e o `OFI.ANM`.
+    fn spawn_floor_fires(&mut self, out: &mut Out) {
+        for (at, layer) in std::mem::take(&mut out.floor_fires) {
+            let grid = &self.ai_grid;
+            let borders = &self.borders;
+            let cell = |cx: i32, cy: i32| {
+                let info = grid.get((cx, cy, layer)).filter(|c| c.present)?;
+                let (ox, oy) = (cx * CELL, cy * CELL);
+                Some(behaviour::fire::FloorCell {
+                    bits: info.bits,
+                    boxes: borders
+                        .iter()
+                        .filter(|(x, y, z, b)| (*x, *y, *z) == (ox, oy, layer) && b.kind == BOX)
+                        .map(|(_, _, _, b)| Rect {
+                            x: i32::from(b.x),
+                            y: i32::from(b.y),
+                            w: i32::from(b.width),
+                            h: i32::from(b.height),
+                        })
+                        .collect(),
+                })
+            };
+            let fires = behaviour::fire::floor_fires(
+                at,
+                behaviour::fire::BARREL_RANGE,
+                self.width,
+                &cell,
+                &mut self.rng,
+            );
+            let anim = self.assets_anim("OFI.ANM");
+            let fh = anim
+                .as_ref()
+                .and_then(|a| a.frames.first().map(|f| i32::from(f.height)))
+                .unwrap_or(1);
+            for f in fires {
+                let mut e = behaviour::fire::floor_fire_entity(&f, layer, fh);
+                if let (Some(anim), Behaviour::Fire(st)) = (anim.clone(), &e.behaviour) {
+                    let player = AnimPlayer::from_frame(&anim, 0);
+                    e.sprite = Some(Sprite {
+                        layer: Layer::Object,
+                        anim,
+                        player,
+                        x: e.x,
+                        y: e.y,
+                        frozen: false,
+                        scale: (st.height, fh.max(1)),
+                        mirror: f.mirror,
+                    });
+                }
+                out.spawn.push(e);
+            }
         }
     }
 
@@ -2863,7 +3044,8 @@ mod tests {
         let mut o = object(72, 0, 0, "OPO.ANM");
         o.start_label = Some(272);
         let (ref_frame, player, frozen) = object_start(&o, &a);
-        assert_eq!((ref_frame, player.frame(), frozen), (1, 1, false));
+        // o vapor (72) escolhe os próprios quadros (`behaviour::opo`)
+        assert_eq!((ref_frame, player.frame(), frozen), (1, 1, true));
         // sem rótulo inicial (ou rótulo inexistente): quadro 0
         o.start_label = None;
         assert_eq!(object_start(&o, &a).0, 0);
