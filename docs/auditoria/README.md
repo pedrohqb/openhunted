@@ -29,7 +29,7 @@ depois "Correções", "Em aberto". O README desta pasta lista as áreas e o plac
 
 | Área | Arquivo | Situação |
 |---|---|---|
-| Oráculo (original no Wine) | `oraculo.md` | em andamento |
+| Oráculo (original no Wine) | `oraculo.md` | pronto: `tools/oraculo/` + `ohtool render --trace-json` |
 | Movimentos do Jake | `jake-movimentos.md` | em andamento |
 | Movimentos do Garathe | `garathe-movimentos.md` | em andamento |
 | Armas, projéteis e reações a dano | `armas.md` | em andamento |
