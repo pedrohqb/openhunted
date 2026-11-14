@@ -68,8 +68,10 @@ pub(super) fn anim(s: State) -> (u16, u32) {
         State::Push => (46, 1),
         State::StandJump => (21, 0),
         State::RunUp => (24, 1),
-        State::Jump(JumpKind::Medium) => (22, 1),
-        State::Jump(_) => (25, 1),
+        // a tabela diz atraso 1, mas o 22 e o 25 chamam `0x406c71(obj, 0xa)` direto a cada
+        // tique (`0x429ee7`, `0x429d21`): um quadro por tique (oráculo)
+        State::Jump(JumpKind::Medium) => (22, 0),
+        State::Jump(_) => (25, 0),
         State::Fall => (27, 0),
         State::WildFall => (29, 0),
         State::Land(Landing::Fall) => (28, 0),
@@ -125,11 +127,17 @@ pub(super) fn knocked_label(right: bool, facing_right: bool) -> u16 {
     if right == facing_right { 32 } else { 33 }
 }
 
-/// Estados que tocam o rótulo ao contrário: 5 (4), 38 (37), 55 (54), 51 (50), 26 (24).
+/// Estados que tocam o rótulo ao contrário: 5 (4), 38 (37), 55 (54), 51 (50), 26 (24) e
+/// guardar a arma (`0x43ba0b` → `0x423894`; oráculo: o 111 entra no último quadro).
 pub(super) fn reversed(s: State) -> bool {
     matches!(
         s,
-        State::LetGo | State::StandUp | State::Unhide | State::BarDown | State::Land(Landing::Long)
+        State::LetGo
+            | State::StandUp
+            | State::Unhide
+            | State::BarDown
+            | State::Land(Landing::Long)
+            | State::Holster(_)
     )
 }
 

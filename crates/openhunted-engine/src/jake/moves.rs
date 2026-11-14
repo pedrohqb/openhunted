@@ -815,10 +815,15 @@ impl Jake {
                 self.air_control(world, side);
             }
             State::Land(Landing::Medium | Landing::Long) if self.is_garathe() => {
-                // 23 e 26: deslizam pelo esqueleto com k = 1; no fim, parado
-                if self.anim_done() {
+                // 23 e 26 deslizam pelo esqueleto com k = 1; o 26 decide em pé antes de tudo
+                // (`0x429fec`); no fim, `0x407009` e a rotina do parado (decisão ou 1)
+                if self.state == State::Land(Landing::Long)
+                    && self.decide(input, env, jump_edge, side)
+                {
+                } else if self.anim_done() {
                     self.body.vx = 0;
-                    self.set(State::Idle);
+                    self.body.vy = 0;
+                    self.decide_or_idle(input, env, jump_edge, side);
                 } else {
                     self.ske_req = Some(SkeReq {
                         k: 1,
@@ -1327,8 +1332,13 @@ impl Jake {
                 }
             }
             State::BarMove => {
-                if side.is_none() {
+                // sem CIMA nem lado, solta a mão; só CIMA fica no quadro (`0x42a573`)
+                if side.is_none() && !pressed(UP) {
                     self.set(State::BarDown);
+                    return;
+                }
+                if side.is_none() {
+                    self.anim_mode = AnimMode::Hold;
                     return;
                 }
                 let b = self.body.bounds();

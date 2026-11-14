@@ -371,3 +371,106 @@ fn facing_follows_the_input_in_the_air() {
     assert_eq!(j.body.vx, -8 * SUB);
     assert!(!j.facing_right(), "olha para onde vai");
 }
+
+/// 49 (`0x42a573`): só sem CIMA nem lado (`0x487a2c & 0xd = 0`) solta a mão (51); com CIMA
+/// sozinho fica no 49, parado no quadro (oráculo, `T_M_002` "10*,UJ,60*U": 47 → 50 → 49
+/// e fica).
+#[test]
+fn up_alone_holds_hand_over_hand() {
+    let w = World::new(vec![
+        crate::physics::Rect {
+            x: -1000,
+            y: 300,
+            w: 3000,
+            h: 20,
+        },
+        crate::physics::Rect {
+            x: -1000,
+            y: 30,
+            w: 3000,
+            h: 19,
+        },
+    ]);
+    let mut j = Jake::new(100, 44, super::tests::BOX, super::tests::lengths())
+        .with_skeleton(super::tests::skeleton())
+        .with_character(crate::character::Character::Garathe);
+    j.set(State::BarHang);
+    j.tick(0, &w);
+    let mut seen = vec![];
+    for _ in 0..30 {
+        j.tick(UP, &w);
+        if seen.last() != Some(&j.state()) {
+            seen.push(j.state());
+        }
+    }
+    assert_eq!(seen, vec![State::BarPull, State::BarMove], "{seen:?}");
+    let (x, f) = (j.body.x, j.frame());
+    j.tick(UP, &w);
+    assert_eq!((j.body.x, j.frame()), (x, f), "parado no quadro");
+    j.tick(0, &w);
+    assert_eq!(j.state(), State::BarDown);
+}
+
+/// 22 e 25 animam a cada tique (`0x429ee7`, `0x429d21`: `0x406c71(obj, 0xa)` direto, sem o
+/// atraso `+0x18 = 1` da tabela); oráculo `T_M_002` "10*,4*R,RJ,30*R": 22 q0…q6 em 7 tiques.
+#[test]
+fn medium_and_long_jumps_animate_every_tick() {
+    let w = floor_world();
+    let mut j = garathe(&w, 0);
+    j.tick(RIGHT, &w);
+    j.tick(RIGHT | JUMP, &w);
+    assert_eq!(j.state(), State::Jump(super::super::JumpKind::Medium));
+    let mut frames = vec![j.frame()];
+    for _ in 0..3 {
+        j.tick(RIGHT, &w);
+        frames.push(j.frame());
+    }
+    assert_eq!(frames, vec![0, 1, 2, 3]);
+    assert_eq!(super::anim(State::Jump(super::super::JumpKind::Long)).1, 0);
+}
+
+/// 26 (`0x429fec`) decide em pé antes de tudo (o oráculo sai do 26 para a corrida no tique
+/// seguinte ao pouso, com a direita apertada); 23 (`0x42a0b6`) no fim chama a rotina do
+/// parado no mesmo tique (decisão: com a direita, corre já).
+#[test]
+fn landings_23_and_26_hand_over_to_the_decision() {
+    let w = floor_world();
+    let mut j = garathe(&w, 0);
+    j.set(State::Land(Landing::Long));
+    j.tick(RIGHT, &w);
+    assert_eq!(j.state(), State::Run, "26 interrompido pela decisão");
+    let mut j = garathe(&w, 0);
+    j.set(State::Land(Landing::Medium));
+    j.tick(RIGHT, &w);
+    assert_eq!(
+        j.state(),
+        State::Land(Landing::Medium),
+        "23 não decide no meio"
+    );
+    let mut n = 0;
+    while j.state() == State::Land(Landing::Medium) {
+        j.tick(RIGHT, &w);
+        n += 1;
+        assert!(n < 30);
+    }
+    assert_eq!(j.state(), State::Run, "fim do 23: decisão no mesmo tique");
+}
+
+/// Guardar a arma (`0x43ba0b` → `0x423894`) toca o rótulo de trás para a frente (oráculo,
+/// `T_M_002` "10*,P,25*": o 111 entra no quadro 9 e desce).
+#[test]
+fn holster_plays_backwards() {
+    let w = floor_world();
+    let mut j = garathe(&w, 0);
+    j.tick(PUNCH, &w);
+    let mut n = 0;
+    while !matches!(j.state(), State::Holster(_)) {
+        j.tick(0, &w);
+        n += 1;
+        assert!(n < 80, "{:?}", j.state());
+    }
+    let first = j.frame();
+    assert!(first > 0, "começa do fim: {first}");
+    run(&mut j, &w, 0, 2);
+    assert!(j.frame() < first || j.state() != State::Holster(1));
+}
