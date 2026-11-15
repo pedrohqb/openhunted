@@ -11,7 +11,7 @@ Oráculo (sessões sem entrada salvo indicação, campos internos lidos com
 contagem do `--trace-json`). **Núcleo** = diferença do núcleo comum (ordem física/atualização,
 sorteios, ativação), fora desta área (`audit/nucleo`).
 
-Placar (51 linhas): **27 igual** (1 a confirmar no oráculo), **18 corrigidas** (17 diferente +
+Placar (52 linhas): **27 igual** (1 a confirmar no oráculo), **19 corrigidas** (18 diferente +
 1 não implementado), **3 núcleo**, **3 em aberto** (diferente).
 
 ## Robô de segurança (8)
@@ -80,6 +80,7 @@ Placar (51 linhas): **27 igual** (1 a confirmar no oráculo), **18 corrigidas** 
 | 13 e −2 só nos tiques ímpares | `0x41764b/77` | 1 q/tique | 13: q0,1,1,2,2…; 12 no t 15 | diferente → corrigido | `looking_around…` e152544 |
 | 12 e andar (1/2, vx da tabela `0x472498`) | `0x417a68` | iguais | x 616 → 636 em 1, t 37–48 | igual | — |
 | ataques, fogo, terremoto, metade do dano, imune a fogo | `0x41750b`, `0x417ae0` | iguais | — | igual | `bruiser_*` |
+| terremoto no Jake: `+0x274` tiques; cada um desconta e, fora dos isentos (sem gravidade `+0x178 & 8`; estados 11, 12, 16, 17, 25, 27–30, 32, 34, 35 pela tabela `0x426fae`; 76–78, 80–87, 103–107, 162–166, 177, 179), põe o estado 15 com a rotina do parado `0x426ecc`; zerado, a rotina do parado | `0x426f6a`, `0x42705f` | choque elétrico a cada tique no chão (contador da cena) | — | diferente → corrigido | `quake_staggers_the_jake_in_state_15` |
 | esmagar (15, derrubada) atribui | `0x417308` | somava | — | diferente → corrigido | 44e6dab |
 
 ## Olho-laser (104) e raio (36)
@@ -105,7 +106,8 @@ Placar (51 linhas): **27 igual** (1 a confirmar no oráculo), **18 corrigidas** 
 b33c25d (robô: patrulha/giro/flutuação/perseguição; `Ctx` ganha `grid`, `zones` e `at`),
 421e25e (1ª física de robôs e minas; oscilação), 44e6dab (`Pending::assign`/`Out::hit_player`:
 golpe direto atribui), 504f8cd (olho), 41942e6 (saída da fase de 11/102), b45d795
-(gerador), e152544 (Bruiser). Ferramenta: b3366e8 (`ORACULO_CAMPOS`/`ORACULO_TIPOS`).
+(gerador), e152544 (Bruiser), a040d86 (terremoto no Jake;
+o contador `Scene::quake` deixa de dar choque). Ferramenta: b3366e8 (`ORACULO_CAMPOS`/`ORACULO_TIPOS`).
 Roteiros adaptados: `i_j_002_can_be_won` (porta, retorno do vão, robôs do vão fora da caça,
 vida reposta — `TOUGH` — e o robô que patrulha atrás da porta abatido direto),
 `i_m_109_can_be_won` (BAIXO solta o teto; a poça deixa de ser exigida).
