@@ -50,14 +50,21 @@ pub const SPECIAL_DAMAGE: i32 = 15;
 /// Alcance do especial: distância entre centros < 70 px (`0x00427643`).
 pub const SPECIAL_RADIUS: i32 = 70;
 
-/// Espaço livre acima para a decisão em pé no 77 (`0x0040718d(0, −25)`).
+/// Espaço livre acima no 77, 78, 83, 84, 162 e 163 (`0x0040718d(0, −25)`).
 const HEADROOM_77: i32 = 25;
 /// Sondas de 4 px (corda, barra, engatinhar).
 const PROBE: i32 = 4;
 /// Controle no ar dos pulos parado e para cima (`0x00408205`): 8 px/tique.
 const AIR_CONTROL: i32 = 8;
+/// Alcance da sonda de parede do empurrar (`0x00425c5c`: `0x40718d(±32, 0)`).
+const PUSH_REACH: i32 = 32;
+/// Som do empurrar, no fim do 100 (`0x00425cdb`, `0x13b3`).
+const SOUND_PUSH: u16 = 5043;
 /// Quadro até o qual o pulo parado/para cima pode virar pulo lançado.
 const LAUNCH_WINDOW: usize = 10;
+/// Pulo da corda do Jake (17): quadro do impulso e a vertical (`0x00424ee2`, −160/8).
+const ROPE_JUMP_FRAME: usize = 9;
+const ROPE_JUMP_VY: i32 = -20;
 
 /// Zona PR de uma célula, em px da fase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,6 +323,32 @@ pub fn joltable(s: State) -> bool {
     )
 }
 
+/// Estados em que o Jake sente o tranco (`0x004233e3`): parado, correr, aterrissagem 26,
+/// levantar, agachar, empurrar, empurrado e os de arma; a corda (30/32) vira queda.
+pub fn jake_joltable(s: State) -> bool {
+    matches!(
+        s,
+        State::Idle
+            | State::Taunt
+            | State::Run
+            | State::Land(Landing::Fall)
+            | State::GetUp
+            | State::Shake
+            | State::KnockRise(true)
+            | State::Crouch
+            | State::Crawl
+            | State::StandUp
+            | State::Push
+            | State::PushEnd
+            | State::Pushed
+            | State::Fire { .. }
+            | State::Ready(..)
+            | State::Holster(_)
+            | State::Recover(_)
+            | State::Climb(_)
+    )
+}
+
 /// Estados "no chão" que viram queda quando o chão some (`0x0042415c`).
 pub fn can_fall(s: State) -> bool {
     matches!(
@@ -335,6 +368,7 @@ pub fn can_fall(s: State) -> bool {
             | State::Land(_)
             | State::GetUp
             | State::Rise
+            | State::KnockRise(_)
             | State::Shake
             | State::Special(_)
             | State::Taunt
@@ -377,6 +411,7 @@ impl Jake {
             State::JumpUp(true) if self.is_garathe() => {
                 self.ticks as usize >= super::garathe::ROPE_JUMP_FRAME
             }
+            State::JumpUp(true) => self.ticks as usize >= ROPE_JUMP_FRAME,
             s => gravity(s),
         }
     }
@@ -404,10 +439,20 @@ impl Jake {
     /// chão, nada; no ar, o lado pedido põe ±8 px/tique (0 com parede a 8 px desse lado) e,
     /// sem lado, a horizontal fica como está. **Ruling (OpenHunted)**: o original sonda a
     /// parede à esquerda (−8 px) também para a direita (`personagem.md`); aqui, do lado pedido.
+    ///
+    /// Jake: o lado só conta se o deslocamento real do tique anterior (`+0x15c`) ainda não
+    /// chega a 8 px para ele (`0x00408224`: ESQ com > −64; `0x408280`: DIR com < 64): depois
+    /// de um tique a 8 px a seta não age e fica a velocidade do esqueleto.
     pub(super) fn air_control(&mut self, world: &World, side: Option<bool>) {
         if self.body.on_ground {
             return;
         }
+        let limit = AIR_CONTROL * SUB;
+        let side = match side {
+            Some(true) if !self.is_garathe() && self.moved >= limit => None,
+            Some(false) if !self.is_garathe() && self.moved <= -limit => None,
+            s => s,
+        };
         if let Some(right) = side {
             let b = self.body.bounds();
             let x = if right {
@@ -520,7 +565,16 @@ impl Jake {
             && new.y >= old.y
             && new.x + new.w <= old.x + old.w
             && new.y + new.h <= old.y + old.h;
-        if inside || !world.blocked(&new) {
+        // Jake: os sólidos que a caixa já cruza (nasceu ou ficou sobreposto) não impedem.
+        let g = self.is_garathe();
+        let blocked = |r: &Rect| {
+            if g {
+                world.blocked(r)
+            } else {
+                world.blocked_from(&old, r)
+            }
+        };
+        if inside || !blocked(&new) {
             self.body.boxr = want;
         } else if (self.body.boxr == self.box_crawl
             || (self.is_garathe()
@@ -552,12 +606,16 @@ impl Jake {
             self.set(State::Taunt);
             return true;
         }
+        // Jake correndo ou andando: PULAR sem CIMA escolhe pela sonda mesmo sem seta
+        // (`0x423f4d`, o lado é o `+0x288`)
+        let moving =
+            !self.is_garathe() && matches!(self.state, State::Run | State::Stealth) && !pressed(UP);
         if jump_edge && self.body.on_ground {
             self.body.vx = 0;
-            if side.is_some() {
+            if side.is_some() || moving {
                 match self.choose_jump(world) {
-                    // Garathe: PULAR+CIMA+lado → longo direto (`0x428f56`)
-                    _ if self.is_garathe() && pressed(UP) => self.launch(JumpKind::Long),
+                    // PULAR+CIMA+lado → longo direto (Jake `0x423f35`, Garathe `0x428f56`)
+                    _ if pressed(UP) => self.launch(JumpKind::Long),
                     JumpKind::Long if self.is_garathe() => self.set(State::RunUp),
                     JumpKind::Extended => self.set(State::RunUp),
                     k => self.launch(k),
@@ -607,6 +665,47 @@ impl Jake {
             } else {
                 self.set(State::Hide);
             }
+            return true;
+        }
+        false
+    }
+
+    /// Decisão diante da corda do Jake (`0x00423b2b`, estados 3, 7 e 8): quatro direções →
+    /// pose; CIMA/BAIXO nas portas de camada; CIMA na corda → escalar direto; lados →
+    /// correr ou andar. Sem pulo, sem agachar, sem esconder.
+    fn decide_rope(&mut self, input: u32, env: &Env, side: Option<bool>) -> bool {
+        let pressed = |bit: u32| input & bit != 0;
+        if input == super::TAUNT_INPUT {
+            self.body.vx = 0;
+            self.set(State::Taunt);
+            return true;
+        }
+        if pressed(UP) || pressed(DOWN) {
+            let z = self.zones_under(env);
+            let layer_up = pressed(UP) && z & zone::LAYER_UP != 0 && self.layer > 0;
+            let layer_down =
+                pressed(DOWN) && z & zone::LAYER_DOWN != 0 && self.layer < env.layers - 1;
+            if layer_up || layer_down {
+                return self.zone_action(input, env);
+            }
+            if pressed(UP) && z & zone::ROPE != 0 {
+                self.body.vx = 0;
+                self.body.vy = 0;
+                self.set(State::Climb(Climb::Vertical));
+                return true;
+            }
+            return false;
+        }
+        if side.is_some() {
+            let next = if pressed(STEALTH) {
+                State::Stealth
+            } else {
+                State::Run
+            };
+            if next == State::Run {
+                self.body.vx = self.profile().run * SUB * self.dir();
+            }
+            self.set(next);
             return true;
         }
         false
@@ -865,7 +964,51 @@ impl Jake {
             {
                 self.tick_bar_garathe(input, world, side)
             }
+            State::JumpUp(true) if !self.is_garathe() => {
+                // 17 (`0x424dd0`): no chão, aterrissa (`0x424220` → 26); ATIRAR/SOCO ataca;
+                // até o quadro 9, PULAR + lado lança; teto de barra (depois da física) e
+                // corda; parado e sem gravidade até o quadro 9, então vy = −20 com
+                // gravidade (`0x424ee2`). O rótulo para no fim e o voo segue até o chão.
+                // Controle no ar em todo tique.
+                if self.body.on_ground {
+                    self.body.vx = 0;
+                    self.body.vy = 0;
+                    self.set(State::Land(Landing::Fall));
+                    return;
+                }
+                if pressed(SHOOT | PUNCH) && self.start_fire(input, world) {
+                    return;
+                }
+                if self.frame < ROPE_JUMP_FRAME && pressed(JUMP) && side.is_some() {
+                    self.launch_from(input, world, false);
+                    return;
+                }
+                if self.try_grab_in_air(input, env) {
+                    return;
+                }
+                if self.anim_done() {
+                    self.anim_mode = AnimMode::Hold;
+                }
+                let n = self.ticks as usize;
+                if n < ROPE_JUMP_FRAME {
+                    self.body.vx = 0;
+                    self.body.vy = 0;
+                } else if n == ROPE_JUMP_FRAME {
+                    self.body.vy = ROPE_JUMP_VY * SUB;
+                }
+                self.air_side = Some(side);
+            }
             State::StandJump | State::JumpUp(_) => {
+                // Jake: ATIRAR/SOCO ataca no ar (`0x424f89`, `0x424ce3`: zera a vertical
+                // pedida; o 17, `0x424df3`, não)
+                if !self.is_garathe() && pressed(SHOOT | PUNCH) {
+                    if self.state != State::JumpUp(true) {
+                        self.body.vy = 0;
+                    }
+                    if self.start_fire(input, world) {
+                        return;
+                    }
+                }
                 // Garathe: ataque antes de tudo, com a vertical zerada (`0x4295fd`,
                 // `0x42986f`)
                 if self.is_garathe() && self.air_attack(input, world, true) {
@@ -886,9 +1029,12 @@ impl Jake {
                     return;
                 }
                 if self.anim_done() {
+                    // fim (`0x424d92`, `0x425103`): parado e, no mesmo tique, a decisão em
+                    // pé (`0x426ecc`), que com PULAR segurado pula de novo
                     self.body.vx = 0;
                     self.body.vy = 0;
                     self.set(State::Idle);
+                    self.decide_or_idle(input, env, jump_edge, side);
                     return;
                 }
                 if self.is_garathe() {
@@ -907,22 +1053,19 @@ impl Jake {
                     self.air_control(world, side);
                     return;
                 }
+                // `0x406fc0` com k = 3 nos dois eixos (o Δx dos rótulos 16 e 27 é 0), depois
+                // o controle no ar `0x408205`, que no chão não faz nada (sem deslize)
                 self.ske_req = Some(SkeReq {
                     k: if self.state == State::StandJump {
                         self.profile().k.stand_jump
                     } else {
                         self.profile().k.jump_up
                     },
-                    x: false,
+                    x: true,
                     y: true,
                     diag: 0,
                 });
-                self.body.vx = match side {
-                    Some(_) if self.free_ahead(world, AIR_CONTROL) => {
-                        AIR_CONTROL * SUB * self.dir()
-                    }
-                    _ => 0,
-                };
+                self.air_side = Some(side);
             }
             State::Land(Landing::Fall) => {
                 if !self.decide(input, env, jump_edge, side) && self.anim_done() {
@@ -956,16 +1099,36 @@ impl Jake {
                     return;
                 }
                 if self.anim_done() {
-                    if self.free_above(world, self.profile().headroom) {
+                    if self.free_above(world, HEADROOM_77) {
                         self.set(State::GetUp);
                     } else {
                         self.set(State::Crawl);
                     }
                 }
             }
-            State::GetUp => {
+            State::KnockRise(false) => {
+                // 83 (`0x00425b99`): com 25 px livres, decisão em pé; fim → 84
                 self.body.vx = 0;
-                if !self.free_above(world, self.profile().headroom) || pressed(DOWN) {
+                if self.free_above(world, HEADROOM_77) && self.decide(input, env, jump_edge, side) {
+                } else if self.anim_done() {
+                    self.set(State::KnockRise(true));
+                }
+            }
+            State::KnockRise(true) => {
+                // 84 (`0x00425bdf`): teto a menos de 25 px ou BAIXO → 86; decisão; fim →
+                // parado
+                self.body.vx = 0;
+                if !self.free_above(world, HEADROOM_77) || pressed(DOWN) {
+                    self.set(State::Crawl);
+                } else if self.decide(input, env, jump_edge, side) {
+                } else if self.anim_done() {
+                    self.set(State::Idle);
+                }
+            }
+            State::GetUp => {
+                // 78 (`0x00424421`): a mesma sonda de 25 px do 77
+                self.body.vx = 0;
+                if !self.free_above(world, HEADROOM_77) || pressed(DOWN) {
                     self.set(State::Crawl);
                 } else if self.decide(input, env, jump_edge, side) {
                 } else if self.anim_done() {
@@ -987,6 +1150,15 @@ impl Jake {
             }
             State::Stealth => self.decide_or_idle(input, env, jump_edge, side),
             State::Special(_) => self.tick_special(input, world),
+            State::Grab if !self.is_garathe() => {
+                // 3 (`0x427089`): ATIRAR/SOCO ataca; no fim, a decisão diante da corda
+                // (`0x4270c9` → `0x423b2b`), senão o 8
+                self.body.vx = 0;
+                if pressed(SHOOT | PUNCH) && self.start_fire(input, world) {
+                } else if self.anim_done() && !self.decide_rope(input, env, side) {
+                    self.set(State::LetGo);
+                }
+            }
             State::Grab => {
                 self.body.vx = 0;
                 if pressed(SHOOT) {
@@ -996,6 +1168,17 @@ impl Jake {
                         self.set(State::Climb(Climb::Vertical));
                     } else {
                         self.set(State::LetGo);
+                    }
+                }
+            }
+            State::LetGo if !self.is_garathe() => {
+                // 8 (`0x4270e5`): a decisão diante da corda (`0x423b2b`), senão o 3 ao
+                // contrário até o fim → parado
+                if pressed(SHOOT | PUNCH) && self.start_fire(input, world) {
+                } else if !self.decide_rope(input, env, side) {
+                    self.body.vx = 0;
+                    if self.anim_done() {
+                        self.set(State::Idle);
                     }
                 }
             }
@@ -1016,9 +1199,43 @@ impl Jake {
                 self.tick_hide(input, env, jump_edge, side)
             }
             State::BarHang | State::BarMove | State::BarPull | State::BarUp | State::BarDown => {
-                self.tick_bar(input, world, jump_edge, side)
+                self.tick_bar(input, world, side)
             }
             _ => self.decide_or_idle(input, env, jump_edge, side),
+        }
+    }
+
+    /// Empurrar do Jake (`0x00425c34` no 100, `0x00425d04` no 101): sai sem seta, com
+    /// ATIRAR/SOCO (`0x423d3e`, o tiro fica para o tique seguinte), sem parede a 32 px à
+    /// frente ou sem chão a 4 px: do 100 para o parado, do 101 para o 102 (`0x425ced`). No
+    /// 101, BAIXO agacha. PULAR não conta. vx = ±4 px/tique; no fim do 100, som 5043
+    /// (`0x13b3`) e o laço 101, cuja primeira entrada pede a porta da zona 0x20.
+    pub(super) fn tick_push(&mut self, input: u32, env: &Env, side: Option<bool>) {
+        let world = env.world;
+        if self.push_loop && input & DOWN != 0 {
+            self.body.vx = 0;
+            self.set(State::Crouch);
+            return;
+        }
+        let wall = !self.free_ahead(world, PUSH_REACH);
+        let floor = self.probe(world, 0, 1) != 0;
+        if input & (SHOOT | PUNCH) != 0 || side.is_none() || !wall || !floor {
+            self.body.vx = 0;
+            let next = if self.push_loop {
+                State::PushEnd
+            } else {
+                State::Idle
+            };
+            self.set(next);
+            return;
+        }
+        self.body.vx = self.profile().push * SUB * self.dir();
+        if !self.push_loop && self.anim_done() {
+            self.push_loop = true;
+            self.frame = 0;
+            self.label_changed = true;
+            self.sound = Some(SOUND_PUSH);
+            self.door_push = true;
         }
     }
 
@@ -1039,8 +1256,13 @@ impl Jake {
         if input & UP != 0 || one_side || t > self.profile().special.end {
             self.state = State::Special(t);
             let shoot = input & SHOOT != 0 && self.body.on_ground;
-            if !(shoot && self.start_fire(input, world)) {
+            if shoot && self.start_fire(input, world) {
+            } else if self.is_garathe() {
                 self.set(State::Idle);
+            } else {
+                // Jake: sem tiro, o `0x43b43e` põe a pose de arma pronta (oráculo: 9 → 18)
+                let w = self.inventory.weapon as u8;
+                self.set(State::Ready(0, w));
             }
             return;
         }
@@ -1071,7 +1293,9 @@ impl Jake {
         let world = env.world;
         self.body.vx = 0;
         self.body.vy = 0;
-        if self.zones_under(env) & zone::ROPE == 0 || pressed(SHOOT) {
+        // ATIRAR/SOCO solta (Jake `0x427161`: `0x40100`)
+        let attack = pressed(SHOOT) || (!self.is_garathe() && pressed(PUNCH));
+        if self.zones_under(env) & zone::ROPE == 0 || attack {
             self.set(State::LetGo);
             return;
         }
@@ -1227,8 +1451,10 @@ impl Jake {
     }
 
     /// Barra (`0x00424498`, `0x004247f8`, `0x00424ab4`, `0x004246c4`, `0x00424bb8`).
-    fn tick_bar(&mut self, input: u32, world: &World, jump_edge: bool, side: Option<bool>) {
+    fn tick_bar(&mut self, input: u32, world: &World, side: Option<bool>) {
         let pressed = |bit: u32| input & bit != 0;
+        // PULAR acabado de apertar (`0x200` e a mudança `0x4000`, `0x00424667`)
+        let jump_edge = pressed(JUMP) && self.prev_input & JUMP == 0;
         self.body.vx = 0;
         self.body.vy = 0;
         if self.probe(world, 0, -1) & CONTACT_SCENERY == 0 || input == JUMP | DOWN {
@@ -1562,12 +1788,23 @@ mod tests {
         assert_eq!(vys[10], y0 - 42);
         assert_eq!(vys[11], y0 - 43);
         assert!(vys[16] == y0, "volta ao chão: {vys:?}");
-        // controle no ar: 8 px/tique para o lado apertado
+        // controle no ar (`0x408205`): no chão (quadros 0–8) nada; no ar, 8 px para o lado
+        // apertado a cada dois tiques (depois de andar 8 px ele não age)
         let mut j = jake(&w, 0);
         j.tick(JUMP, &w);
         let x0 = j.body.x;
         j.tick(RIGHT, &w);
-        assert_eq!(j.body.x - x0, 8);
+        assert_eq!(j.body.x - x0, 0, "agachado não desliza");
+        for _ in 0..8 {
+            j.tick(RIGHT, &w);
+        }
+        let mut dx = Vec::new();
+        for _ in 0..4 {
+            let x1 = j.body.x;
+            j.tick(RIGHT, &w);
+            dx.push(j.body.x - x1);
+        }
+        assert_eq!(dx, vec![8, 0, 8, 0]);
         assert_eq!(j.state(), State::StandJump);
         for _ in 0..30 {
             j.tick(0, &w);
@@ -2231,9 +2468,9 @@ mod tests {
             assert_eq!(j.state(), State::Special(t));
             assert!(j.special.is_some(), "efeito no t = {t}");
         }
-        // t = 6 > 5 (`+0x18`): volta ao `0x43b43e`; sem ATIRAR, parado
+        // t = 6 > 5 (`+0x18`): volta ao `0x43b43e`; sem ATIRAR, a pose de arma pronta
         j.tick(0, &w);
-        assert_eq!(j.state(), State::Idle);
+        assert!(matches!(j.state(), State::Ready(..)), "{:?}", j.state());
         assert!(j.special.is_none());
         j.tick(0, &w);
         assert_eq!(
