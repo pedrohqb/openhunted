@@ -86,7 +86,13 @@ pub(super) fn character(
     };
     let crawl = brd(assets, prof.crawl_brd, crate::jake::CRAWL_BOX);
     let bar = brd(assets, prof.bar_brd, crate::jake::BAR_BOX);
-    let boxr = brd(assets, &o.names[1], JAKE_BOX);
+    // Jake: a caixa padrão é a do estado 1 (`JK_DEFLT.BRD`, posta na criação, `0x422878`),
+    // seja qual for o BRD do objeto (a M_2_048 traz `JK_EXTND.BRD`)
+    let default_brd = match ch {
+        Character::Jake => "JK_DEFLT.BRD",
+        Character::Garathe => o.names[1].as_str(),
+    };
+    let boxr = brd(assets, default_brd, JAKE_BOX);
     let layer = o.fields.get(4).copied().unwrap_or(0);
     let player = AnimPlayer::at_label(&a, 1).unwrap_or(player);
     let field = |i: usize| o.fields.get(i).copied().unwrap_or(0);

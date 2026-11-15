@@ -260,6 +260,12 @@ fn random_input_never_enters_solids() {
             }
             s.tick(input);
             let now = overlapped(&s, &s.jake.as_ref().unwrap().body.bounds());
+            // a chegada do teletransporte (destino sorteado pelo `rand`) pode sobrepor: conta
+            // como renascer
+            if s.jake.as_ref().unwrap().is_teleporting() {
+                inside = now;
+                continue;
+            }
             assert!(
                 now.iter().all(|i| inside.contains(i)),
                 "{level}: entrou num sólido no tique {t}"

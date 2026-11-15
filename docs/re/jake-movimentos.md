@@ -70,10 +70,16 @@ Chamada pelos estados parados e pelo fim de vários outros; na ordem:
 - Sem PULAR, CIMA/BAIXO numa zona PR 4 → agarra a corda (30).
 - No 16/17: contato com teto (`0x0040712f`: normal para baixo, |ny| > 2|nx|) e `+0x220 = 2`
   → pendura na barra (103).
-- Velocidade: esqueleto com k = 3 (`ske.md`); **controle no ar** `0x00408205`: ESQ/DIR põe
-  vx = ∓8 px/tique se a sonda de 8 px estiver livre (senão 0).
-- Fim da animação (26 quadros) → pose 1, velocidade zero, parado. O 17 (`0x00424dd0`) é o
-  pulo que sai da corda com PULAR+CIMA; usa a entrada 17 do esqueleto, igual à 16.
+- Velocidade: esqueleto com k = 3 (`ske.md`); **controle no ar** `0x00408205`: no chão
+  nada; ESQ/DIR põe vx = ∓8 px/tique se a sonda de 8 px estiver livre (senão 0), **só se o
+  deslocamento real do tique anterior (`+0x15c`) ainda não chega a 8 px** para esse lado
+  (`0x408224`); no 27 isso dá 8 px a cada 2 tiques (oráculo).
+- ATIRAR/SOCO no 16/27 zera a vertical pedida e ataca no ar (`0x43b43e`).
+- Fim da animação (26 quadros) → pose 1, velocidade zero e, no mesmo tique, a decisão em
+  pé (PULAR segurado pula de novo). O 17 (`0x00424dd0`) é o pulo que sai da corda com
+  PULAR+CIMA: **não usa o esqueleto**; parado e sem gravidade até o quadro 9, então
+  vy = −20 px/tique (`0x424ee2`); o rótulo para no fim e o voo segue até o chão (26).
+  Oráculo (T_J_003): 10 tiques parado, sobe 18, 16… (pico 90 px).
 
 ## Impulso (31) e pulo estendido (80) [confirmado]
 
@@ -122,19 +128,32 @@ estados sem controle (derrubada etc.) a caixa menor fica até a padrão caber.
 
 ## Empurrar (100, 101) [confirmado]
 
-100 (`PUSHSHLD`): ESQ/DIR contra parede; anima 100 até o fim → 101 (`0x00425d04`). Em 101:
+100 (`PUSHSHLD`): ESQ/DIR contra parede; anima 100 até o fim → 101 (`0x00425d04`). Sai
+(`0x423d3e`) sem seta ou com ATIRAR/SOCO; PULAR não conta (oráculo: 100 ×6, laço 101). Em 101:
 BAIXO → agachar; sem bloqueio a 32 px à frente ou sem chão a 4 px → 102 (`0x00425ced`) →
 parado; numa zona PR **0x20** (só na primeira entrada no 101) chama `0x0040f040(célula,
 máscara das chaves +0x94…+0xbc, 1)`: a porta da célula (`itens-campanha.md`); vx =
 ±4 px/tique (32), vy = 0; anima 101 em laço. Som 0x13b3 ao começar.
+
+## Derrubada, tranco e empurrão [confirmado, oráculo]
+
+- Derrubada (`0x4235fc`, fora de 11/12): empurrado para o lado em que olha → 81 (morte 177,
+  rótulo 77), senão 82 (morte 179). 81 só olha o chão no fim do rótulo: 77, ou 76 no ar;
+  82 no fim, no chão → 83 (`BK2STAND`, decisão com 25 px) → 84 (25 px ou BAIXO → 86;
+  decisão; fim → parado).
+- Tranco (`0x4233e3`): em 1, 4, 6, 10, 18, 19, 22, 23, 26, 49, 54–56, 62, 64, 66–68, 73,
+  78, 79, 84–87, 100–102, 108, 109, 112, 122–125, 127, 128, 131, 141–144, 146, 147,
+  149–155, 163, 168, 186–188, 193–196 → 169 (rótulo 173, `JK_COLPS`, k = 2 em x) → 84; em
+  30/32 → queda 25. Oráculo (T_J_003): 169 por 16 tiques, 84 por 18.
+- Empurrão (`0x423366`): só em 1, 6, 79, 164–166 (167).
+- Choque (`0x423577`): `+0x284 = 10`; o `0x4235c4` consome o tique enquanto conta, o
+  rótulo 15 fica no quadro 0 por 9 tiques.
+- Parado 6 (rótulo 146): `0x42dc43`, jogador ou inimigo vivo na camada a < 40 px.
 
 ## Em aberto
 
 - `0x0043b0cb`, `0x00426f6a`, `0x004235c4` (pré-tratamentos) e o estado 4.
 - (resolvido: `0x0040f040` é a porta de célula, `itens-campanha.md`)
 - Se a pose 1 no ar (contato durante o pulo) é só visual até a queda.
-- Atrasos da tabela que o código do Jake ainda ignora (usa 0): `+0x18 = 1` nos estados 15
-  (choque), 49, 73, 109, 112, 128, 131, 146/147 (pronto/guardar dos punhos) e 187/188 —
-  entre eles as poses de arma (pronto/guardar/recuperação). O Garathe já segue a tabela
-  dele nessas poses (81, 82, 85, 111, 128–130, 140–142, 152–154); no Jake a mudança mexeria
-  nos tempos testados das armas (M3/M4) e fica para conferir estado a estado.
+- (resolvido na auditoria M17: os atrasos `+0x18` das poses de arma do Jake valem no
+  porte; o 15 do choque não anda)

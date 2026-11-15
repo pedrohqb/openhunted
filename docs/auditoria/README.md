@@ -31,7 +31,7 @@ depois "Correções", "Em aberto". O README desta pasta lista as áreas e o plac
 |---|---|---|
 | Oráculo (original no Wine) | `oraculo.md` | pronto: `tools/oraculo/` + `ohtool render --trace-json` |
 | Núcleo: ordem do tique, contato com o chão, animação, `rand`, ativação | `nucleo.md` | feito (em aberto: ordem global das entidades) |
-| Movimentos do Jake | `jake-movimentos.md` | em andamento |
+| Movimentos do Jake | `jake-movimentos.md`, `jake-movimentos-2.md` | feito: 17 iguais, 29 corrigidos, 10 de outras áreas, 3 não implementados |
 | Movimentos do Garathe | `garathe-movimentos.md` | feita: 24 igual, 18 corrigidas, 2 decisão, 5 em aberto |
 | Armas, projéteis e reações a dano | `armas.md`, `armas-projeteis.md` | feita (32 corrigidos, 7 em aberto, 6 a confirmar) |
 | Itens, objetos de fase e colisões de objetos | `itens-objetos.md` | feito: 19 iguais, 7 corrigidos, 6 em aberto |

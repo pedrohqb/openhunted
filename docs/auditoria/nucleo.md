@@ -75,5 +75,9 @@ refazer pelas áreas de movimentos.
 - Da área de armas: dano de área medido do centro do **quadro** da vítima (28 e (15, 7) no
   original × 21 e (10, −3)); efeitos criados no meio da atualização vivem 8 tiques (porte 7:
   ordem global das entidades); quique da granada 8 × 10 px/tique (conferir com o atrito novo).
+- Da auditoria do Jake: (1) metade do vetor com vy 0 e (2) 11/12 px da corrida — resolvidos
+  aqui pela fração do vetor (não pelo "atrito antes": a mina saltadora −25 → −2 só sai pela
+  fração); (3) quique na parede vx −29 × −33 agora (era −40); (4) teto 1 px; (5) entrar no
+  quadro 1 nos estados de dois quadros por tique: feito no 85, falta 164, 34 e 35.
 - Para as áreas de movimentos: pulo correndo (29), +1 px na virada do Garathe, furtivo do
   Garathe; para inimigos: a formiga anda a `±0x40` (8 px) no original, o porte usa 2 px.

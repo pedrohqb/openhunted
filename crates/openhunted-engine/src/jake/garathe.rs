@@ -65,7 +65,7 @@ pub(super) fn anim(s: State) -> (u16, u32) {
     match s {
         State::Idle | State::Teleporting(_) | State::Shake => (1, 1),
         State::Run => (10, 0),
-        State::Push => (46, 1),
+        State::Push | State::PushEnd => (46, 1),
         State::StandJump => (21, 0),
         State::RunUp => (24, 1),
         // a tabela diz atraso 1, mas o 22 e o 25 chamam `0x406c71(obj, 0xa)` direto a cada

@@ -118,7 +118,7 @@ pub fn class_of(s: State, ch: Character) -> u8 {
         | State::Rise => LAND,
         State::Fall => FALL,
         State::Crouch | State::Crawl | State::StandUp => CROUCH,
-        State::Push => PUSH,
+        State::Push | State::PushEnd => PUSH,
         State::Hide | State::Hidden | State::Unhide => HIDDEN,
         State::BarHang | State::BarMove | State::BarPull | State::BarUp | State::BarDown => BAR,
         State::Climb(_) => CLIMB,
