@@ -69,8 +69,10 @@ fn tutorial_render_matches_reference() {
 }
 
 /// Atualizado na M4a: a saída mostra o rótulo 8 (`osw08`, o portão "EXIT"); na M12, as três
-/// minas flutuantes saem pela tabela de cor 40 (verdes), conferidas visualmente.
-const REFERENCE: u64 = 0xfd21_fcb0_8501_b294;
+/// minas flutuantes saem pela tabela de cor 40 (verdes), conferidas visualmente; na M17, os
+/// decalques espelhados com a célula (o ventilador da célula 5 entra na borda direita),
+/// conferidos no oráculo.
+const REFERENCE: u64 = 0x3f3d_734b_7f90_22ff;
 
 /// Camadas (M16): a camada da vista sai opaca; o índice 0 dela só é preenchido pelas de trás
 /// dentro dos buracos das células (pixel a pixel em `real_layers.rs`). Aqui: nas fases de
