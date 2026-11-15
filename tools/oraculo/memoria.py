@@ -85,6 +85,9 @@ def ler(mem, o):
     return d
 
 
+VISTAS = 0x493B70
+
+
 def quadro(mem, t, bits, ids, todos):
     """Uma linha do rastro. `ids` dá a cada endereço um número estável (ordem de chegada)."""
     objs = []
@@ -98,7 +101,13 @@ def quadro(mem, t, bits, ids, todos):
         d["id"] = ids[o]
         objs.append(d)
     return {"t": t, "in": bits, "in_jogo": mem.i32(ENTRADA), "tique": mem.i32(TIQUE),
-            "rng": rng_indices(mem), "obj": objs}
+            "rng": rng_indices(mem), "vista": vista(mem), "obj": objs}
+
+
+def vista(mem):
+    """Câmera da 1ª vista (`[0x493b70]`, `0x436386`): centro x, y no mundo e distância `d`."""
+    v = mem.u32(VISTAS)
+    return [mem.i32(v), mem.i32(v + 4), mem.i32(v + 8)] if v else None
 
 
 def rng_indices(mem):

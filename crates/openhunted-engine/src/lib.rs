@@ -8,6 +8,7 @@ pub mod assets;
 #[cfg(feature = "audit")]
 pub mod audit;
 pub mod behaviour;
+pub mod camera;
 pub mod character;
 pub mod damage;
 pub mod devices;

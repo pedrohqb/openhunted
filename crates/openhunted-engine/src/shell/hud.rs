@@ -30,6 +30,45 @@ pub struct HudState {
     pub score: Option<i32>,
 }
 
+impl HudState {
+    /// A barra do jogador `i` da cena; na disputa, `F − S` no lugar do cronômetro
+    /// (`0x40b089`). Sem corpo (fase sem personagem controlável), a barra do Garathe zerada.
+    pub fn of(scene: &crate::Scene, i: usize) -> Self {
+        let score = scene
+            .mode
+            .duel()
+            .and(scene.players.get(i))
+            .map(|p| p.stats.score());
+        let jake = if i == 0 {
+            scene.jake.as_ref()
+        } else {
+            scene.player_jake(i)
+        };
+        let (character, health, armor, slots, weapon, face_alt) = match jake {
+            Some(j) => (
+                j.character(),
+                j.health.hp,
+                j.health.armor,
+                j.inventory.slots,
+                j.inventory.weapon,
+                // rosto 93 com veneno (`+0x270 ≠ 0`)
+                j.poison != 0,
+            ),
+            None => (Character::Garathe, 0, 0, [(0, 0); 30], 1, false),
+        };
+        HudState {
+            character,
+            health,
+            armor,
+            face_alt,
+            slots,
+            weapon,
+            timer: scene.timer,
+            score,
+        }
+    }
+}
+
 /// Tabela das armas por personagem: (quadro se tem, par, quadro se não tem), na ordem da
 /// barra (`0x471cd1` / `0x471ce9`).
 const JAKE_WEAPONS: [(usize, usize, usize); 6] = [

@@ -164,7 +164,8 @@ a de trás se aproxima (34 → 27); no fim a vista passa a ela (23). O Jake fica
   ausentes ou invisíveis (`0x405b8c` não limpa o quadro; `0x45cfae` só guarda o recorte), então
   o resto ficaria com o que havia no quadro; o porte pinta 245 em toda a área antes do cenário.
 - Campo `+0x1b4` (ordem de desenho) e a separação lista da célula / global no porte.
-- Zoom absoluto e ponto fixo da câmera (`+0x5c` bit 0, `+0x64/+0x68`) na câmera do porte.
+- Ponto fixo da câmera (`+0x5c` bit 0, `+0x64/+0x68`) na câmera do porte. O zoom absoluto, o
+  alvo, o passo de 18 px e a vista sem limite já estão (`openhunted_engine::camera`, M17).
 - O tremor (`+0x274`, ±5 px) e o `0x47d474`.
 - Perto das bordas da fase, o zoom da transição sai fora do centro: a câmera do porte é
   limitada à cena (`clamp_camera`, `crates/openhunted/src/viewer.rs` em `follow` e no tique),

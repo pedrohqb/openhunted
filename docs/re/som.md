@@ -101,10 +101,19 @@ Outros grupos/quadros servem ao cenário (`0x431fd6` toca por rótulo de animaç
 `0x40b9eb(obj, fala_jake, fala_outro, vol, …)` escolhe a fala pelo tipo do objeto e não
 repete uma fala em curso (`itens.md`).
 
+**Fila do locutor** [confirmado, M17]: `0x43c868(id1, id2, id3, p1, p2, p3)` põe uma sequência
+de até 3 falas na primeira de 10 vagas de 36 bytes (`0x49718c`; sem vaga, perde-se);
+`0x43c814(id)` diz se o id está em alguma vaga; `0x43c8cd`, por tique e no laço da dica, toca
+a fala da frente (`0x43c93d(id, p, 0, 0, −1, 0)`) e, quando ela para de tocar (`0x44e130`), passa
+à seguinte. Usada pela porta trancada (3715 → 3714/3719, Garathe 3730 → 3732, prioridade 200,
+só se nenhuma já está na fila) e pelas provocações da Morte (sequências de 3760–3762,
+prioridade 0). No porte: `sound::Announcer` e `Event::Speech`.
+
 ## Em aberto
 
 - `0x44b8e3` (DirectSound): escala real de volume (0–100 → dB?) e de pan.
 - Valor de `volume = −1` nas chamadas não posicionais; o 6º argumento de `0x43c93d`.
 - Reavaliação dos laços a cada tique (se pan/volume acompanham a câmera).
 - Classe 1–3 (`id/1000`) e o id 4999.
-- Onde toca o 3016 da mina.
+- ~~Onde toca o 3016 da mina~~: em lugar nenhum. O id não aparece no executável nem no
+  `SOUND.TBL` (M17).
