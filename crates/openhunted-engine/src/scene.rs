@@ -1537,12 +1537,7 @@ impl Scene {
                     j.hurt(p);
                     hit.push(s.player);
                 }
-                Some(crate::jake::PlayerHit::Quake(t))
-                    if j.character() == crate::character::Character::Garathe =>
-                {
-                    j.start_quake(t)
-                }
-                Some(crate::jake::PlayerHit::Quake(t)) => s.quake = s.quake.max(t),
+                Some(crate::jake::PlayerHit::Quake(t)) => j.start_quake(t),
                 None => {}
             }
         }
@@ -1936,23 +1931,14 @@ impl Scene {
             }
             return;
         }
+        // o Jake também: `+0x274` e o estado 15 (`0x426f6a`), não um choque
         if let Some(q) = quake {
             self.quake = self.quake.max(q);
+            if let Some(j) = self.jake.as_mut().filter(|j| j.is_active()) {
+                j.start_quake(q);
+            }
         }
-        if self.quake == 0 {
-            return;
-        }
-        self.quake -= 1;
-        if let Some(j) = self
-            .jake
-            .as_mut()
-            .filter(|j| j.is_active() && j.body.on_ground)
-        {
-            j.hurt(crate::damage::Pending {
-                electric: true,
-                ..Default::default()
-            });
-        }
+        self.quake = self.quake.saturating_sub(1);
     }
 
     /// Sons com intervalo mínimo global entre todos os objetos do tipo (o zumbido da
