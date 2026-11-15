@@ -273,15 +273,24 @@ impl View {
         }
     }
 
-    /// Retângulo do mundo (distância `d`) → quadro, pelos dois cantos.
+    /// Retângulo do mundo (distância `d`) → quadro (`0x436916`): o canto pela projeção do
+    /// ponto e a largura e a altura cada uma por `(v·s + d − 1)/d` (`0x43682e`), não pela
+    /// diferença dos cantos.
     pub fn project_rect(&self, r: Rect, d: i32) -> Rect {
         let (x0, y0) = self.project((r.x, r.y), d);
-        let (x1, y1) = self.project((r.x.saturating_add(r.w), r.y.saturating_add(r.h)), d);
+        let s = i64::from(self.reference());
+        let size = |v: i32| {
+            if i64::from(d) == s {
+                return v;
+            }
+            let d = i64::from(d.max(1));
+            ((i64::from(v) * s + d - 1) / d).clamp(-(1 << 30), 1 << 30) as i32
+        };
         Rect {
             x: x0,
             y: y0,
-            w: x1 - x0,
-            h: y1 - y0,
+            w: size(r.w),
+            h: size(r.h),
         }
     }
 }
@@ -428,6 +437,31 @@ mod tests {
         // a escala do original: 30/23 na própria camada
         v.reference = Some(REFERENCE);
         assert_eq!(v.project((1023, 500), d), (350, 202));
+    }
+
+    /// `0x436916`: o canto pela projeção do ponto e a largura e a altura cada uma por
+    /// `(v·30 + d − 1)/d`; um bloco de 128 px sai sempre com 167 px a 30/23 (medido no
+    /// oráculo: a `T_J_001` cobre 2 px a mais que pela diferença dos cantos).
+    #[test]
+    fn rect_size_is_projected_on_its_own() {
+        let mut v = solo(1);
+        v.center = (1000, 500);
+        v.reference = Some(REFERENCE);
+        let d = v.layer_distance(1);
+        assert_eq!(d, 23);
+        for x in (700..1100).step_by(7) {
+            let r = v.project_rect(
+                Rect {
+                    x,
+                    y: x - 500,
+                    w: 128,
+                    h: 128,
+                },
+                d,
+            );
+            assert_eq!((r.w, r.h), (167, 167), "x {x}");
+            assert_eq!((r.x, r.y), v.project((x, x - 500), d));
+        }
     }
 
     fn walk(v: &mut ViewState, states: &[State], layers: &[i32], grid: i32) -> Vec<(i32, i32)> {

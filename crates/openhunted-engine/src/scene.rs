@@ -5,6 +5,7 @@ mod ai;
 mod arsenal;
 mod cell_door;
 mod draw;
+mod frame_sounds;
 mod garathe;
 pub mod light;
 pub(crate) mod players;
@@ -98,8 +99,6 @@ pub struct Marker {
     pub y: i32,
 }
 
-/// Passo máximo da câmera por tique (`0x004365ae`: 18 px ao longo do vetor).
-pub const CAMERA_STEP: i32 = 18;
 /// Salto do alvo da câmera (px por eixo num tique) acima do qual ela recentra.
 pub const CAMERA_JUMP: i32 = 64;
 
@@ -122,6 +121,11 @@ pub struct Scene {
     body_checked: Vec<usize>,
     /// Sprite do Jake (desenhado depois dos objetos).
     pub jake_sprite: Option<Sprite>,
+    /// `SOUND.TBL` (sons por quadro) e o último quadro sonorizado de cada sprite e de cada
+    /// jogador (`+0x1a4`, célula `+0x80`): `scene/frame_sounds.rs`.
+    pub sound_table: Option<Rc<openhunted_formats::SoundTable>>,
+    sprite_sounded: Vec<Option<usize>>,
+    player_sounded: Vec<Option<usize>>,
     /// Geometria sólida da camada do Jake.
     pub world: World,
     /// Caixas dos objetos sólidos para o Jake (em px da fase), para o overlay.
@@ -355,6 +359,9 @@ impl Scene {
             jake: None,
             body_checked: Vec::new(),
             jake_sprite: None,
+            sound_table: None,
+            sprite_sounded: Vec::new(),
+            player_sounded: Vec::new(),
             world: World::default(),
             object_solids: Vec::new(),
             entities: Vec::new(),
@@ -426,6 +433,12 @@ impl Scene {
             i32::from(level.grid_y).max(1),
         );
         let mut s = Scene::empty(gx * CELL, gy * CELL);
+        s.sound_table = assets
+            .archive()
+            .get("SOUND.TBL")
+            .and_then(openhunted_formats::SoundTable::parse)
+            .ok()
+            .map(Rc::new);
         s.mode = mode;
         let mut scenery = 0usize;
         s.lights = light::Lights::from_level(level);
@@ -571,15 +584,26 @@ impl Scene {
                             cell: key,
                             front: d.fields.get(4).is_some_and(|&f| f != 0),
                         }));
+                        // espelhado com a célula (`0x4305ac`: o retângulo vai a
+                        // `128 − x − largura` por `0x405775` e o desenho usa `+0x40` da
+                        // célula XOR `+0x30` do decalque, o 9º campo das versões ≥ 1004);
+                        // o desenho espelha em torno do quadro de referência
+                        let own = d.fields.get(8).is_some_and(|&f| f != 0);
+                        let x = if cell.mirrored {
+                            let rw = a.frames.first().map_or(0, |f| i32::from(f.width));
+                            cx.saturating_add(CELL - d.x - rw)
+                        } else {
+                            cx.saturating_add(d.x)
+                        };
                         s.sprites.push(Sprite {
                             layer: Layer::Decoration,
                             anim: a,
                             player,
-                            x: cx.saturating_add(d.x),
+                            x,
                             y: cy.saturating_add(d.y),
                             frozen: false,
                             scale: (1, 1),
-                            mirror: false,
+                            mirror: cell.mirrored != own,
                         });
                     }
                     Err(e) => s.warnings.push(format!("{}: {e}", d.animation)),
@@ -947,16 +971,14 @@ impl Scene {
             }
         }
         self.awake = awake;
+        self.frame_sounds();
         self.tick_camera();
         self.tick_count = self.tick_count.saturating_add(1);
     }
 
-    /// Alvo da câmera de uma vista (`0x00436386`): centro horizontal e topo do quadro do
-    /// jogador seguido, na posição de depois da física (o porte usa a caixa do corpo).
+    /// Alvo da câmera de uma vista (`camera::target`, `0x00436386`).
     fn camera_target(&self, i: usize) -> Option<(i32, i32)> {
-        let j = self.player_jake(i)?;
-        let b = j.body.bounds();
-        Some((b.x.saturating_add(b.w / 2), j.body.y))
+        crate::camera::target(self, i)
     }
 
     /// Câmera de cada vista (`0x00436386`, no fim do tique): anda até o alvo no máximo 18 px
@@ -979,14 +1001,7 @@ impl Scene {
                 self.view_centers[i] = t;
                 continue;
             }
-            let c = self.view_centers[i];
-            let (mut dx, mut dy) = (t.0 - c.0, t.1 - c.1);
-            let len = f64::from(dx).hypot(f64::from(dy)) as i32;
-            if len > CAMERA_STEP {
-                dx = dx * 2 * 9 / len;
-                dy = dy * 2 * 9 / len;
-            }
-            self.view_centers[i] = (c.0 + dx, c.1 + dy);
+            self.view_centers[i] = crate::camera::chase(self.view_centers[i], t);
         }
     }
 
