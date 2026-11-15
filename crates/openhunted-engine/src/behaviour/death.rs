@@ -115,6 +115,54 @@ fn hide(e: &mut Entity, st: &mut DeathState) {
     e.flags |= 0x2;
 }
 
+/// Prioridade da 3763 tocada sozinha (`0x415956`).
+pub const TAUNT_ALONE_PRIORITY: u16 = 5;
+
+/// Filas de falas ocultas (`0x415963…0x415b52`), por `rand % 100` duas vezes: a primeira
+/// escolhe o bloco (≤ 33, ≤ 66, resto), a segunda a fila (≤ 25, ≤ 50, ≤ 75, resto); 0 = sem
+/// a terceira fala.
+const TAUNT_CHAINS: [[[u16; 3]; 4]; 3] = [
+    [
+        [3760, 3761, 0],
+        [3760, 3762, 0],
+        [3760, 3761, 3762],
+        [3760, 3762, 3761],
+    ],
+    [
+        [3762, 3760, 0],
+        [3762, 3761, 0],
+        [3762, 3761, 3760],
+        [3762, 3760, 3761],
+    ],
+    [
+        [3761, 3760, 0],
+        [3761, 3762, 0],
+        [3761, 3760, 3762],
+        [3761, 3762, 3760],
+    ],
+];
+
+/// Uma fila de `TAUNT_CHAINS` para o locutor, prioridade 0.
+fn taunt_chain(ctx: &mut Ctx) -> crate::sound::Chain {
+    let block = match ctx.rng.below(100) {
+        0..=33 => 0,
+        34..=66 => 1,
+        _ => 2,
+    };
+    let pick = match ctx.rng.below(100) {
+        0..=25 => 0,
+        26..=50 => 1,
+        51..=75 => 2,
+        _ => 3,
+    };
+    let lines: Vec<(u16, u16)> = TAUNT_CHAINS[block][pick]
+        .iter()
+        .filter(|&&id| id != 0)
+        .map(|&id| (id, 0))
+        .collect();
+    crate::sound::Chain::new(&lines, false)
+}
+
 /// Sons da Morte: todos sem posição (`0x43c93d(id, 0, …)`), salvo a radiação.
 fn say(id: u16, out: &mut Out) {
     out.events.push(Event::Sound(Cue::ui(id, 0)));
@@ -321,12 +369,13 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     if st.state == HIDDEN {
         e.flags |= 0x2;
         if st.quiet == 0 && ctx.rng.below(300) < 2 && st.wait > 30 {
-            let id = if ctx.rng.below(100) < 40 {
-                TAUNTS[3]
+            // `0x41592a`: 40 % a 3763 sozinha (prioridade 5); senão uma fila do locutor
+            if ctx.rng.below(100) < 40 {
+                out.events
+                    .push(Event::Sound(Cue::ui(TAUNTS[3], TAUNT_ALONE_PRIORITY)));
             } else {
-                TAUNTS[ctx.rng.below(3) as usize]
-            };
-            say(id, out);
+                out.events.push(Event::Speech(taunt_chain(ctx)));
+            }
             st.quiet = TAUNT_GAP;
         }
         if st.wait > 0 {
@@ -578,6 +627,46 @@ mod tests {
         assert!(st(&d).hidden());
         assert_eq!((d.x, d.y), (500, 300), "na origem do alvo");
         assert!(st(&d).wait >= 75, "rearma (`0x416753`)");
+    }
+
+    /// Falas ocultas (`0x41592a`): 40 % a 3763 sozinha (prioridade 5); senão uma fila de 2–3
+    /// de 3760/3761/3762 pelo locutor (prioridade 0), começando por qualquer uma delas.
+    #[test]
+    fn hidden_taunts_are_3763_or_a_chain_of_the_others() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(1000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let (mut alone, mut chains) = (0, std::collections::HashSet::new());
+        for seed in 0..20000 {
+            *c.rng = crate::rng::Rng::new(seed);
+            let mut d = death(100, 100);
+            let Behaviour::Death(s) = &mut d.behaviour else {
+                panic!()
+            };
+            s.active = true;
+            s.wait = 100;
+            let mut out = Out::default();
+            tick(&mut d, &mut c, &mut out);
+            for ev in &out.events {
+                match ev {
+                    Event::Sound(cue) => {
+                        assert_eq!((cue.id, cue.priority, cue.at), (TAUNTS[3], 5, None));
+                        alone += 1;
+                    }
+                    Event::Speech(ch) => {
+                        let ids: Vec<u16> =
+                            ch.lines.iter().map(|l| l.0).filter(|&i| i != 0).collect();
+                        assert!((2..=3).contains(&ids.len()), "{ids:?}");
+                        assert!(ch.lines.iter().all(|l| l.1 == 0) && !ch.unique);
+                        assert!(ids.iter().all(|i| TAUNTS[..3].contains(i)));
+                        chains.insert(ids);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(alone > 0);
+        assert_eq!(chains.len(), 12, "6 pares e 6 trios: {chains:?}");
     }
 
     /// Ruling: o salto de `8·d` px não deixa a Morte dentro de uma parede.

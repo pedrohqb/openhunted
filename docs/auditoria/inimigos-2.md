@@ -5,7 +5,7 @@ Método em [`README.md`](README.md). Original: endereço do `Hunter.exe` e o or�
 `ohtool render --trace-json`, `--defasagem 1`). O `rand`, a ordem do tique e a ativação por
 distância são do núcleo: só distribuições e trechos determinísticos contam aqui.
 
-**Placar** (40 linhas): igual 11 · diferente 20 (14 corrigidos) · não implementado 4 (3
+**Placar** (40 linhas): igual 11 · diferente 20 (15 corrigidos) · não implementado 4 (3
 corrigidos) · decisão 1 · a confirmar 4.
 
 Fases medidas: `D_J_012` (Morte, 600 t.), `I_J_107` e `I_M_011` (Anticorpo), `D_M_024`
@@ -25,7 +25,7 @@ Fases medidas: `D_J_012` (Morte, 600 t.), `I_J_107` e `I_M_011` (Anticorpo), `D_
 | Morte: radiação | `0x416a48`: `|Δ+0x154|`, `|Δ+0x158|` < 45 (posições) | centros | — | diferente → corrigido | `radiation_measures_origins` |
 | Morte: radiação na IA | percorre a lista; linha `(3, 1)` = tipos 1 e 2 | só o humano | — | não implementado → corrigido | `radiation_reaches_ai_jakes` |
 | Morte: sons 3051/3764 | `0x43c93d(id, 0, …)`, sem posição | posicionais, prioridade 9 | — | diferente → corrigido | 4f2cd3b |
-| Morte: falas ocultas | `rand%300 < 2`, `+0x264 > 30`; 40 % a 3763, senão fila de 2–3 (`0x43c868`) | uma fala só | — | diferente | em aberto |
+| Morte: falas ocultas | `rand%300 < 2`, `+0x264 > 30`; 40 % a 3763 (prioridade 5), senão fila de 2–3 de 3760–3762 (`0x43c868`, prioridade 0; 12 filas) | uma fala só, prioridade 9 | — | diferente → corrigido | `hidden_taunts_are_3763_or_a_chain_of_the_others` |
 | Morte: falha "sem célula" | `0x4165d5`: fora da grade **ou célula vazia** | só os limites da fase | — | a confirmar | Ctx sem a grade |
 | Morte: dano | `0x416979`, com dificuldade, só com vida > 0 | idem | — | igual | `death_dies_*` |
 | Jake: veneno inicial | `values[4]` → `+0x270` | 0 | `D_J_012`: vida 99 no t0, 98 no t20 | diferente → corrigido | `d_j_012_jake_starts_poisoned`, ff61329 |
@@ -58,7 +58,7 @@ Fases medidas: `D_J_012` (Morte, 600 t.), `I_J_107` e `I_M_011` (Anticorpo), `D_
 ## Correções
 
 - 4f2cd3b (`behaviour/death.rs`): aparição, falha, ativação, rearme, radiação pelas
-  posições, sons.
+  posições, sons; filas de falas pelo locutor (`Event::Speech`).
 - ff61329 (`scene/ai.rs`, `jake.rs`): `values[4]` → veneno; fase do veneno.
 - e2be449: personagens da IA como alvos dos objetos: `behaviour::Npc` em `Ctx::npcs`,
   `Out::npc_hits`/`npc_quakes` aplicados por `Scene::apply_npc_out`; `AiPlayer::quake`;
@@ -71,7 +71,7 @@ Fases medidas: `D_J_012` (Morte, 600 t.), `I_J_107` e `I_M_011` (Anticorpo), `D_
 - Camaleão: a máquina de estados completa (`0x418704`, ~38 rótulos).
 - Anticorpo: percepção no fim da animação, contagem da perseguição com `rand & 1`, som
   3070, a descida do id 35.
-- Morte: fila de falas (`0x43c868`) e o teste de célula vazia.
+- Morte: o teste de célula vazia (`0x4165d5`); "fala já tocando" aproximado por 60 tiques.
 - Entidade: altura de repouso (16 px) e o vaguear; catapulta: rótulo inicial no rastro.
 - Minotauro da IA (`D_J_001`): corre 15 px/t. contra 14 (área `garathe-movimentos`).
 - O empurrão do especial nos personagens vem de `jake::SPECIAL_KNOCKDOWN`; a área de armas
