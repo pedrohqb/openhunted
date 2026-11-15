@@ -5,6 +5,7 @@ mod ai;
 mod arsenal;
 mod cell_door;
 mod draw;
+mod frame_sounds;
 mod garathe;
 pub mod light;
 pub(crate) mod players;
@@ -117,6 +118,11 @@ pub struct Scene {
     body_checked: Vec<usize>,
     /// Sprite do Jake (desenhado depois dos objetos).
     pub jake_sprite: Option<Sprite>,
+    /// `SOUND.TBL` (sons por quadro) e o último quadro sonorizado de cada sprite e de cada
+    /// jogador (`+0x1a4`, célula `+0x80`): `scene/frame_sounds.rs`.
+    pub sound_table: Option<Rc<openhunted_formats::SoundTable>>,
+    sprite_sounded: Vec<Option<usize>>,
+    player_sounded: Vec<Option<usize>>,
     /// Geometria sólida da camada do Jake.
     pub world: World,
     /// Caixas dos objetos sólidos para o Jake (em px da fase), para o overlay.
@@ -338,6 +344,9 @@ impl Scene {
             jake: None,
             body_checked: Vec::new(),
             jake_sprite: None,
+            sound_table: None,
+            sprite_sounded: Vec::new(),
+            player_sounded: Vec::new(),
             world: World::default(),
             object_solids: Vec::new(),
             entities: Vec::new(),
@@ -405,6 +414,12 @@ impl Scene {
             i32::from(level.grid_y).max(1),
         );
         let mut s = Scene::empty(gx * CELL, gy * CELL);
+        s.sound_table = assets
+            .archive()
+            .get("SOUND.TBL")
+            .and_then(openhunted_formats::SoundTable::parse)
+            .ok()
+            .map(Rc::new);
         s.mode = mode;
         let mut scenery = 0usize;
         s.lights = light::Lights::from_level(level);
@@ -550,15 +565,26 @@ impl Scene {
                             cell: key,
                             front: d.fields.get(4).is_some_and(|&f| f != 0),
                         }));
+                        // espelhado com a célula (`0x4305ac`: o retângulo vai a
+                        // `128 − x − largura` por `0x405775` e o desenho usa `+0x40` da
+                        // célula XOR `+0x30` do decalque, o 9º campo das versões ≥ 1004);
+                        // o desenho espelha em torno do quadro de referência
+                        let own = d.fields.get(8).is_some_and(|&f| f != 0);
+                        let x = if cell.mirrored {
+                            let rw = a.frames.first().map_or(0, |f| i32::from(f.width));
+                            cx.saturating_add(CELL - d.x - rw)
+                        } else {
+                            cx.saturating_add(d.x)
+                        };
                         s.sprites.push(Sprite {
                             layer: Layer::Decoration,
                             anim: a,
                             player,
-                            x: cx.saturating_add(d.x),
+                            x,
                             y: cy.saturating_add(d.y),
                             frozen: false,
                             scale: (1, 1),
-                            mirror: false,
+                            mirror: cell.mirrored != own,
                         });
                     }
                     Err(e) => s.warnings.push(format!("{}: {e}", d.animation)),
@@ -880,6 +906,7 @@ impl Scene {
                 }
             }
         }
+        self.frame_sounds();
         self.tick_count = self.tick_count.saturating_add(1);
     }
 

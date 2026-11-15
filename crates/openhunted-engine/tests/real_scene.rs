@@ -69,8 +69,10 @@ fn tutorial_render_matches_reference() {
 }
 
 /// Atualizado na M4a: a saída mostra o rótulo 8 (`osw08`, o portão "EXIT"); na M12, as três
-/// minas flutuantes saem pela tabela de cor 40 (verdes), conferidas visualmente.
-const REFERENCE: u64 = 0xfd21_fcb0_8501_b294;
+/// minas flutuantes saem pela tabela de cor 40 (verdes), conferidas visualmente; na M17, os
+/// decalques espelhados com a célula (o ventilador da célula 5 entra na borda direita),
+/// conferidos no oráculo.
+const REFERENCE: u64 = 0x3f3d_734b_7f90_22ff;
 
 /// Camadas (M16): a camada da vista sai opaca; o índice 0 dela só é preenchido pelas de trás
 /// dentro dos buracos das células (pixel a pixel em `real_layers.rs`). Aqui: nas fases de
@@ -249,7 +251,11 @@ fn random_input_never_enters_solids() {
         }
         let mut seed: u32 = 0x1234_5678;
         let mut input = 0;
-        let mut inside = overlapped(&s, &s.jake.as_ref().unwrap().body.bounds());
+        let rects = |s: &Scene, v: &[usize]| -> Vec<openhunted_engine::Rect> {
+            v.iter().map(|&i| s.cell_world().solids()[i]).collect()
+        };
+        let mut inside = rects(&s, &overlapped(&s, &s.jake.as_ref().unwrap().body.bounds()));
+        let mut before = s.cell_world().solids().to_vec();
         for t in 0..1000 {
             if t % 7 == 0 {
                 seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
@@ -257,12 +263,16 @@ fn random_input_never_enters_solids() {
                     [0, LEFT, RIGHT, LEFT | JUMP, RIGHT | JUMP, JUMP][(seed >> 16) as usize % 6];
             }
             s.tick(input);
-            let now = overlapped(&s, &s.jake.as_ref().unwrap().body.bounds());
+            let now = rects(&s, &overlapped(&s, &s.jake.as_ref().unwrap().body.bounds()));
+            // um sólido que surge sobre ele (porta de célula que fecha: empurrar na zona 0x20
+            // fecha a aberta, `0x40f040`) não é ele entrando
             assert!(
-                now.iter().all(|i| inside.contains(i)),
+                now.iter()
+                    .all(|r| inside.contains(r) || !before.contains(r)),
                 "{level}: entrou num sólido no tique {t}"
             );
             inside = now;
+            before = s.cell_world().solids().to_vec();
         }
     }
 }

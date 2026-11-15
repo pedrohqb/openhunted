@@ -60,6 +60,8 @@ pub enum Event {
     /// Som do `SOUND.RES`, com prioridade e, se posicional, o ponto de origem.
     Sound(crate::sound::Cue),
     Outcome(Outcome),
+    /// Falas em sequência pela fila do locutor (`0x0043c868`, `crate::sound::Announcer`).
+    Speech(crate::sound::Chain),
 }
 
 impl Event {

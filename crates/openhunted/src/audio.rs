@@ -283,6 +283,11 @@ impl Sfx {
             .clone()
     }
 
+    /// O som `id` ainda toca (`0x0044e130`; a fila do locutor espera a fala acabar).
+    pub fn is_playing(&mut self, id: u16) -> bool {
+        self.out.is_playing(id)
+    }
+
     /// Volume mestre dos efeitos (0–100; abaixo de 10 o chamador já passa 0).
     pub fn set_volume(&mut self, volume: u8) {
         self.out.set_master(volume);

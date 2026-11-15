@@ -8,7 +8,7 @@
 use super::Scene;
 use crate::behaviour::Event;
 use crate::physics::Rect;
-use crate::sound::{Cue, PRIORITY_PICKUP};
+use crate::sound::PRIORITY_PICKUP;
 
 pub const CLOSED: u8 = 1;
 pub const CLOSING: u8 = 2;
@@ -276,10 +276,12 @@ impl Scene {
             {
                 let ok = crate::triggers::satisfied(&d.door_triggers(), &on);
                 let before = d.state;
-                // as duas falas em ordem, no mesmo tique (sem a fila do locutor)
-                for id in d.push(mask, ok).into_iter().flatten() {
+                // as duas falas em sequência pela fila do locutor, se nenhuma delas já
+                // está nela (`0x43c814`)
+                if let Some(ids) = d.push(mask, ok) {
+                    let lines = ids.map(|id| (ch.speech(id), PRIORITY_PICKUP));
                     self.events
-                        .push(Event::Sound(Cue::ui(ch.speech(id), PRIORITY_PICKUP)));
+                        .push(Event::Speech(crate::sound::Chain::new(&lines, true)));
                 }
                 changed |= before != d.state && d.state == CLOSING;
             }

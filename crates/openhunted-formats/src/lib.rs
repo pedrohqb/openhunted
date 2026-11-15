@@ -20,6 +20,7 @@ mod riff;
 pub mod save;
 pub mod ske;
 pub mod sound;
+pub mod sound_table;
 pub mod source;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
@@ -43,6 +44,7 @@ pub use palette::Palette;
 pub use save::{Hero, HeroList, SaveGame};
 pub use ske::{Skeleton, SkeletonEntry};
 pub use sound::Sound;
+pub use sound_table::{SoundTable, TableSound};
 pub use source::{DataSource, DirSource, IsoSource, normalize_path};
 pub use text::parse_text_list;
 pub use vcr::Vcr;

@@ -122,7 +122,8 @@ fn h_j_001_shotgun_item_gives_ammo() {
 }
 
 /// Empurra a porta `i` dos dois lados da coluna (`strip`) por 40 tiques cada; devolve se o
-/// Jake ouviu a fala da porta trancada sem a chave (3715 e 3714, em ordem).
+/// Jake ouviu a fala da porta trancada sem a chave (3715 e 3714, em sequência na fila do
+/// locutor).
 fn push_door(s: &mut Scene, i: usize) -> bool {
     let (oy, layer) = (s.cell_doors[i].origin.1, s.cell_doors[i].layer);
     let col = s.cell_doors[i].strip();
@@ -131,7 +132,15 @@ fn push_door(s: &mut Scene, i: usize) -> bool {
         place(s, x, oy + 40, layer, 15);
         for _ in 0..40 {
             s.tick(side);
-            let ids: Vec<_> = s.events.drain(..).filter_map(|e| e.sound_id()).collect();
+            // as falas vão em sequência pela fila do locutor
+            let ids: Vec<_> = s
+                .events
+                .drain(..)
+                .flat_map(|e| match e {
+                    openhunted_engine::Event::Speech(c) => c.lines.map(|l| l.0).to_vec(),
+                    e => e.sound_id().into_iter().collect(),
+                })
+                .collect();
             heard |= ids.windows(2).any(|w| w == [3715, 3714]);
         }
         if s.cell_doors[i].state != 1 {

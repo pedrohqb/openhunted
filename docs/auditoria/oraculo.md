@@ -83,7 +83,7 @@ tools/oraculo/compare.py orig.jsonl porte.jsonl [--objetos] [--defasagem 1] \
 Rastro (JSON lines): uma linha `meta` (fase, entrada, md5, dificuldade, índices do `rand`
 no tique 0, deslocamentos) e uma por tique: `t`, `in` (bits aplicados), `in_jogo`
 (`0x487a2c` da última atualização), `tique` (`0x4879c4`), `rng`, `modal` (o tique abriu uma
-dica) e `obj`. Cada objeto: `id` (estável na execução), `lista`, `tipo` (`+0x18`), `x`/`y`
+dica), `vista` (centro x, y e distância `d` da câmera da 1ª vista, `[0x493b70]`) e `obj`. Cada objeto: `id` (estável na execução), `lista`, `tipo` (`+0x18`), `x`/`y`
 (`+0x14c/+0x150`), `vx`/`vy` (`+0x164/+0x168`, 1/8 px por tique), `fl` (`+0x178`), `cam`
 (`+0x17c`), `est` (`+0x180`), `q` (`+0x184`, quadro dentro do rótulo), `rot` (`+0x1ec`),
 `esp` (`+0x194`), `vida`/`arm` (`+0x258/+0x25c`). O jogador (`+0x19c ≠ 0`) traz ainda
