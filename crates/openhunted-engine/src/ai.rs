@@ -174,6 +174,8 @@ pub struct AiPlayer {
     pub body_checked: bool,
     /// Sorteios do cérebro (próprios: não mexem na sequência dos demais objetos).
     pub rng: Rng,
+    /// Terremoto do Bruiser (`+0x274`, `0x418369`): tiques restantes.
+    pub quake: u32,
 }
 
 /// O que o cérebro vê de um personagem.

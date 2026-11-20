@@ -1587,8 +1587,9 @@ impl Jake {
             return;
         }
         self.clock = self.clock.wrapping_add(1);
-        // veneno (`0x004231f9`, passo 3): a cada 20 tiques, `+0x270` de dano de veneno
-        if self.poison > 0 && self.clock % POISON_PERIOD == 0 && self.is_active() {
+        // veneno (`0x004231f9`, passo 3): a cada 20 tiques, `+0x270` de dano de veneno; o
+        // contador global ainda não avançou (`tique % 20 = 0` no tique 0, oráculo `D_J_012`)
+        if self.poison > 0 && self.clock.wrapping_sub(1) % POISON_PERIOD == 0 && self.is_active() {
             self.pending.add(&Pending {
                 amount: self.poison,
                 poison: true,

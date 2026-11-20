@@ -42,6 +42,8 @@ pub const TARGET_DY: i32 = 40;
 pub const TARGET_DX: i32 = 1000;
 /// Queda rápida (1/8 px por tique) que a faz sumir (estado −2).
 pub const FAST_FALL: i32 = 150;
+/// Velocidade que a sonda de chão da aparição deixa (`0x416646`: `+0x168 = 0x78`).
+pub const PROBE_VY: i32 = 0x78;
 /// Silêncio entre falas (o original espera a fala acabar; a cena não sabe).
 pub const TAUNT_GAP: i32 = 60;
 
@@ -105,22 +107,70 @@ impl DeathState {
     }
 }
 
-fn hide(e: &mut Entity, st: &mut DeathState, ctx: &mut Ctx) {
+/// Some (fim do −2 ou do −1): sem rearmar, a espera é a da última tentativa de aparição.
+fn hide(e: &mut Entity, st: &mut DeathState) {
     st.set(HIDDEN);
-    st.rearm(ctx);
     st.vx = 0;
     st.vy = 0;
     e.flags |= 0x2;
 }
 
-fn vanish(st: &mut DeathState, c: (i32, i32), layer: i32, out: &mut Out) {
+/// Prioridade da 3763 tocada sozinha (`0x415956`).
+pub const TAUNT_ALONE_PRIORITY: u16 = 5;
+
+/// Filas de falas ocultas (`0x415963…0x415b52`), por `rand % 100` duas vezes: a primeira
+/// escolhe o bloco (≤ 33, ≤ 66, resto), a segunda a fila (≤ 25, ≤ 50, ≤ 75, resto); 0 = sem
+/// a terceira fala.
+const TAUNT_CHAINS: [[[u16; 3]; 4]; 3] = [
+    [
+        [3760, 3761, 0],
+        [3760, 3762, 0],
+        [3760, 3761, 3762],
+        [3760, 3762, 3761],
+    ],
+    [
+        [3762, 3760, 0],
+        [3762, 3761, 0],
+        [3762, 3761, 3760],
+        [3762, 3760, 3761],
+    ],
+    [
+        [3761, 3760, 0],
+        [3761, 3762, 0],
+        [3761, 3760, 3762],
+        [3761, 3762, 3760],
+    ],
+];
+
+/// Uma fila de `TAUNT_CHAINS` para o locutor, prioridade 0.
+fn taunt_chain(ctx: &mut Ctx) -> crate::sound::Chain {
+    let block = match ctx.rng.below(100) {
+        0..=33 => 0,
+        34..=66 => 1,
+        _ => 2,
+    };
+    let pick = match ctx.rng.below(100) {
+        0..=25 => 0,
+        26..=50 => 1,
+        51..=75 => 2,
+        _ => 3,
+    };
+    let lines: Vec<(u16, u16)> = TAUNT_CHAINS[block][pick]
+        .iter()
+        .filter(|&&id| id != 0)
+        .map(|&id| (id, 0))
+        .collect();
+    crate::sound::Chain::new(&lines, false)
+}
+
+/// Sons da Morte: todos sem posição (`0x43c93d(id, 0, …)`), salvo a radiação.
+fn say(id: u16, out: &mut Out) {
+    out.events.push(Event::Sound(Cue::ui(id, 0)));
+}
+
+fn vanish(st: &mut DeathState, out: &mut Out) {
     st.set(VANISH);
-    out.events.push(Event::Sound(Cue::at(
-        SOUND_ASCEND,
-        PRIORITY_FRAME,
-        c,
-        layer,
-    )));
+    say(SOUND_ASCEND, out);
 }
 
 /// Alvo válido (`0x41678d`).
@@ -134,56 +184,105 @@ fn valid_target(e: &Entity, ctx: &Ctx) -> Option<Rect> {
     .then_some(j)
 }
 
-/// Aparição (`0x416251`): passa à camada do jogador e procura, ao lado da caixa dele, um
-/// lugar livre com chão até 15 px abaixo (recuando de 10 em 10 px, os dois lados).
-fn appear(e: &mut Entity, st: &mut DeathState, ctx: &mut Ctx, out: &mut Out) -> bool {
-    let (Some(j), Some(rel)) = (ctx.jake_bounds(), e.boxes.first().copied()) else {
+/// Deslocamento horizontal livre de `r` contra as células, até `d` px (varredura
+/// `0x432e5d` com `+0x15c = 8·d`): devolve o `+0x15c` resultante, em 1/8 px — inteiro se
+/// livre; no contato, o ponto de contato menos 1/8 px.
+fn sweep_x(cells: &crate::physics::World, r: &Rect, d: i32) -> i32 {
+    let unit = d.signum();
+    let mut m = 0;
+    while m != d {
+        if cells.blocked_from(r, &r.moved(m + unit, 0)) {
+            return 8 * m - unit;
+        }
+        m += unit;
+    }
+    8 * d
+}
+
+/// Chão até 15 px abaixo (`0x416646`: varredura com `vy = 0x78`). Ruling (M17): o lugar
+/// dentro das células conta como sem chão — o original não testa o lugar depois do salto de
+/// `8·d` px e a Morte poderia ficar presa na parede.
+fn ground(cells: &crate::physics::World, e: &Entity, rel: &Rect) -> bool {
+    let r = Rect {
+        x: e.x + rel.x,
+        y: e.y + rel.y,
+        ..*rel
+    };
+    !cells.blocked(&r) && cells.standing_on(&r, 15)
+}
+
+/// Aparição (`0x416251`): sorteia o alvo (os jogadores vivos; no solo, o Jake) e passa à
+/// camada dele; alinha a borda da caixa com a do alvo, do lado sorteado, e os pés − 5
+/// (`0x416517`); varre `d` = 10–19 px para o lado e **soma o deslocamento em 1/8 px à
+/// posição em px** (`0x4163ac`: na prática, 80–152 px); procura chão recuando 10 px por vez
+/// para o alvo enquanto estiver a ≥ 20 px da origem dele. Duas tentativas: a falha volta à
+/// origem do alvo (sem realinhar) e troca o lado; uma varredura de 0 < |v| < 20 (1/8 px)
+/// também. Fora da fase ou da grade → falha. Na falha a Morte fica onde parou (a origem do
+/// alvo; oráculo `D_J_012` t1).
+fn appear(e: &mut Entity, st: &mut DeathState, ctx: &mut Ctx) -> bool {
+    let (Some(j), Some(rel)) = (ctx.jake.filter(|j| j.is_active()), e.boxes.first().copied())
+    else {
         return false;
     };
-    let layer = ctx.jake_layer;
-    let first = if ctx.rng.below(2) == 0 { 1 } else { -1 };
-    let shift = 10 + ctx.rng.below(10) as i32;
-    let cells = ctx.cells_for(layer);
-    for side in [first, -first] {
-        for back in 0..4 {
-            let off = shift + back * 10;
-            let bx = if side > 0 {
-                j.x + j.w + off
+    // `rand % n` dos jogadores vivos (n = 1 no solo)
+    ctx.rng.below(1);
+    let t = (j.body.x, j.body.y);
+    let tb = j.body.boxr;
+    e.layer = ctx.jake_layer;
+    let mut d = ctx.rng.below(10) as i32 + 10;
+    if ctx.rng.below(2) == 1 {
+        d = -d;
+    }
+    // `0x416517`
+    e.x = t.0
+        + if d > 0 {
+            (tb.x + tb.w) - (rel.x + rel.w)
+        } else {
+            tb.x - rel.x
+        };
+    e.y = t.1 + (tb.y + tb.h) - (rel.y + rel.h) - 5;
+    let cells = ctx.cells_for(e.layer);
+    let mut found = false;
+    let mut tries = 0;
+    while !found && tries < 2 {
+        tries += 1;
+        let r = Rect {
+            x: e.x + rel.x,
+            y: e.y + rel.y,
+            ..rel
+        };
+        let v = sweep_x(cells, &r, d);
+        if v != 8 * d && v != 0 && v.abs() < 20 {
+            d = -d;
+            (e.x, e.y) = t;
+            continue;
+        }
+        e.x += v;
+        let near = if v > 0 { t.0 + 20 } else { t.0 - 20 };
+        while !found {
+            let far = if v > 0 { e.x >= near } else { e.x <= near };
+            if !far {
+                break;
+            }
+            if ground(cells, e, &rel) {
+                found = true;
+            } else if near > t.0 {
+                e.x -= 10;
             } else {
-                j.x - rel.w - off
-            };
-            let by = j.y + j.h - rel.h - 5;
-            let r = Rect {
-                x: bx,
-                y: by,
-                w: rel.w,
-                h: rel.h,
-            };
-            let c = enemy::center(&r);
-            if c.0 < 0 || c.1 < 0 || c.0 >= ctx.level.0 || c.1 >= ctx.level.1 {
-                continue;
+                e.x += 10;
             }
-            if cells.blocked(&r) || !cells.standing_on(&r, 15) {
-                continue;
-            }
-            e.x = bx - rel.x;
-            e.y = by - rel.y;
-            e.layer = layer;
-            e.flags &= !0x2;
-            st.right = side < 0;
-            st.set(RISE);
-            st.vx = 0;
-            st.vy = 0;
-            out.events.push(Event::Sound(Cue::at(
-                SOUND_ASCEND,
-                PRIORITY_FRAME,
-                c,
-                layer,
-            )));
-            return true;
+        }
+        if !found {
+            d = -d;
+            (e.x, e.y) = t;
         }
     }
-    false
+    // `0x4165d5`: posição fora da fase
+    if e.x < 0 || e.y < 0 || e.x >= ctx.level.0 || e.y >= ctx.level.1 || !found {
+        return false;
+    }
+    st.right = e.x < t.0;
+    ground(cells, e, &rel)
 }
 
 /// Tiro (`0x416696`): bala 99 da boca, `vy` sorteado no espalhamento da dificuldade.
@@ -203,15 +302,27 @@ fn shoot(e: &Entity, st: &DeathState, ctx: &mut Ctx, out: &mut Out) {
     });
 }
 
+/// Saída da aparição bem-sucedida: estado 1, `0x2` desligado, som 3051 sem posição; a
+/// velocidade é a que a sonda de chão deixou (`(0, 0x78)`).
+fn rise(e: &mut Entity, st: &mut DeathState, out: &mut Out) {
+    e.flags &= !0x2;
+    st.set(RISE);
+    st.vx = 0;
+    st.vy = PROBE_VY;
+    say(SOUND_ASCEND, out);
+}
+
 /// Fim de animação (`0x415d63`).
 fn end_of_clip(e: &mut Entity, st: &mut DeathState, ctx: &mut Ctx, out: &mut Out) {
-    let c = e.center();
     let has = valid_target(e, ctx).is_some();
     let third = ctx.rng.below(3);
     match st.state {
         VANISH => {
-            if ctx.rng.below(2) == 0 || !appear(e, st, ctx, out) {
-                hide(e, st, ctx);
+            // ½ some; ½ reaparece (sem rearmar) ou some
+            if ctx.rng.below(2) == 1 && appear(e, st, ctx) {
+                rise(e, st, out);
+            } else {
+                hide(e, st);
             }
         }
         5 => {
@@ -225,7 +336,7 @@ fn end_of_clip(e: &mut Entity, st: &mut DeathState, ctx: &mut Ctx, out: &mut Out
         8 => match (has, third) {
             (true, 1) => st.set(7),
             (true, 2) => st.set(5),
-            _ => vanish(st, c, e.layer, out),
+            _ => vanish(st, out),
         },
         DIE => {
             e.alive = false;
@@ -236,7 +347,7 @@ fn end_of_clip(e: &mut Entity, st: &mut DeathState, ctx: &mut Ctx, out: &mut Out
         _ => match (has, third) {
             (true, 1) => st.set(5),
             (true, 2) => st.set(7),
-            _ => vanish(st, c, e.layer, out),
+            _ => vanish(st, out),
         },
     }
 }
@@ -247,10 +358,10 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         _ => return,
     };
     if !st.active {
-        if !crate::triggers::satisfied(&e.triggers, ctx.on) {
-            return;
-        }
-        st.active = true;
+        // o tique que solta os gatilhos não faz mais nada (`0x41588b`)
+        st.active = crate::triggers::satisfied(&e.triggers, ctx.on);
+        e.behaviour = Behaviour::Death(Box::new(st));
+        return;
     }
     if st.quiet > 0 {
         st.quiet -= 1;
@@ -258,21 +369,29 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     if st.state == HIDDEN {
         e.flags |= 0x2;
         if st.quiet == 0 && ctx.rng.below(300) < 2 && st.wait > 30 {
-            let id = if ctx.rng.below(100) < 40 {
-                TAUNTS[3]
+            // `0x41592a`: 40 % a 3763 sozinha (prioridade 5); senão uma fila do locutor
+            if ctx.rng.below(100) < 40 {
+                out.events
+                    .push(Event::Sound(Cue::ui(TAUNTS[3], TAUNT_ALONE_PRIORITY)));
             } else {
-                TAUNTS[ctx.rng.below(3) as usize]
-            };
-            out.events.push(Event::Sound(Cue::ui(id, PRIORITY_FRAME)));
+                out.events.push(Event::Speech(taunt_chain(ctx)));
+            }
             st.quiet = TAUNT_GAP;
         }
         if st.wait > 0 {
             st.wait -= 1;
-        } else if !appear(e, &mut st, ctx, out) {
-            st.rearm(ctx);
+            e.behaviour = Behaviour::Death(Box::new(st));
+            return;
         }
-        e.behaviour = Behaviour::Death(Box::new(st));
-        return;
+        // zerada: tenta aparecer e rearma nos dois casos (`0x415bb2`/`0x415bbb`); se
+        // aparece, o tique segue no estado 1
+        let shown = appear(e, &mut st, ctx);
+        st.rearm(ctx);
+        if !shown {
+            e.behaviour = Behaviour::Death(Box::new(st));
+            return;
+        }
+        rise(e, &mut st, out);
     }
     let Some(me) = e.bounds() else {
         e.alive = false;
@@ -291,18 +410,21 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         if e.health <= 0 {
             st.set(DIE);
             e.on = true;
-            out.events
-                .push(Event::Sound(Cue::ui(SOUND_DIES, PRIORITY_FRAME)));
+            say(SOUND_DIES, out);
         }
+    } else if st.state != DIE && st.state != VANISH && st.vy >= FAST_FALL {
+        // queda rápida: some, com o som, e rearma (`0x415c10`)
+        vanish(&mut st, out);
+        st.rearm(ctx);
     }
-    if st.state != DIE && st.state != VANISH && st.vy >= FAST_FALL {
-        vanish(&mut st, c, e.layer, out);
-    }
-    // radiação (`0x416a48`), também no −2 e no 11
-    if let Some(j) = enemy::jake_target(ctx, e.layer) {
-        let jc = enemy::center(&j);
-        if (jc.0 - c.0).abs() < RADIATION_RANGE && (jc.1 - c.1).abs() < RADIATION_RANGE {
-            let side = if jc.0 >= c.0 { 1 } else { -1 };
+    // radiação (`0x416a48`), também no −2 e no 11: posições (`+0x154/+0x158`), não centros
+    if let Some(j) = ctx
+        .jake
+        .filter(|j| j.is_active() && ctx.jake_layer == e.layer)
+    {
+        let (jx, jy) = (j.body.x, j.body.y);
+        if (jx - e.x).abs() < RADIATION_RANGE && (jy - e.y).abs() < RADIATION_RANGE {
+            let side = if jx >= e.x { 1 } else { -1 };
             out.jake_damage.add(&Pending {
                 amount: RADIATION,
                 shove: true,
@@ -316,6 +438,30 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
                 e.layer,
             )));
         }
+    }
+    // ... e os personagens da IA (linha `(3, 1)`: vítima 1 = tipos 1 e 2)
+    for n in ctx.npcs.iter().filter(|n| n.layer == e.layer) {
+        let (nx, ny) = n.origin;
+        if (nx - e.x).abs() >= RADIATION_RANGE || (ny - e.y).abs() >= RADIATION_RANGE {
+            continue;
+        }
+        let Some(row) = crate::damage::row(crate::entity::DEATH, Some(n.kind), 0) else {
+            continue;
+        };
+        let c = enemy::center(&n.bounds);
+        out.npc_hits.push((
+            n.index,
+            row.pending(crate::damage::Geometry {
+                vel: (0, 0),
+                toward: (c.0 - e.center().0, c.1 - e.center().1),
+            }),
+        ));
+        out.events.push(Event::Sound(Cue::at(
+            SOUND_RADIATION,
+            PRIORITY_FRAME,
+            (e.x, e.y),
+            e.layer,
+        )));
     }
     let (_, _, len) = enemy::label(&LABELS, st.clip.label);
     if st.clip.advance(len) {
@@ -339,7 +485,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let nc = enemy::center(&body.bounds());
     if nc.0 < 0 || nc.1 < 0 || nc.0 >= ctx.level.0 || nc.1 >= ctx.level.1 {
         // não sai da fase: some e espera a próxima aparição
-        hide(e, &mut st, ctx);
+        hide(e, &mut st);
     } else {
         e.x = body.x;
         e.y = body.y;
@@ -385,7 +531,7 @@ mod tests {
     #[test]
     fn death_waits_triggers_and_appears_beside_the_target() {
         let on = |id: i32| Some(id == 5);
-        let (j, w) = ctx_with_jake(1000, 0);
+        let (j, w) = ctx_with_jake(1000, 200);
         let mut c = ctx(&j, &w, &on);
         let mut d = death(100, 100);
         d.triggers = vec![(4, Some(11))];
@@ -408,13 +554,209 @@ mod tests {
         assert_eq!(d.flags & 0x2, 0, "visível tem colisão");
         let b = d.bounds().unwrap();
         let jb = j.body.bounds();
-        assert!((b.x - jb.x).abs() < 60, "ao lado do Jake: {b:?} {jb:?}");
-        assert_eq!(b.y + b.h, jb.y + jb.h - 5, "pés alinhados, y − 5");
+        assert!((b.x - jb.x).abs() < 160, "perto do Jake: {b:?} {jb:?}");
+        assert_eq!(b.y + b.h, jb.y + jb.h, "pés alinhados − 5, e cai no chão");
         assert!(
             out.events
                 .iter()
                 .any(|e| e.sound_id() == Some(SOUND_ASCEND))
         );
+    }
+
+    /// Oráculo `D_J_012`: a Morte aparece com a borda da caixa alinhada à do alvo e depois
+    /// desloca-se `8·d` px (`d` = 10–19: o deslocamento em 1/8 px da varredura `0x432e5d`
+    /// somado à posição em px, `0x4163ac`): x 1083 (d −11), 1302 (16), 1254 (10) com o Jake
+    /// em 1202; y com os pés alinhados − 5.
+    #[test]
+    fn death_appears_eight_times_the_shift_away() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(1000, 200);
+        let (mut left, mut right) = (false, false);
+        for seed in 0..40 {
+            let mut c = ctx(&j, &w, &on);
+            *c.rng = crate::rng::Rng::new(seed);
+            let mut d = death(100, 100);
+            let mut out = Out::default();
+            for _ in 0..2 {
+                tick(&mut d, &mut c, &mut out);
+            }
+            assert!(!st(&d).hidden(), "chão plano: aparece no 2º tique");
+            let dx = d.x - j.body.x;
+            if st(&d).right {
+                // borda esquerda alinhada: 2 − 33 = −31
+                assert!(
+                    (dx + 31) % 8 == 0 && (-152..=-80).contains(&(dx + 31)),
+                    "{dx}"
+                );
+                left = true;
+            } else {
+                // borda direita alinhada: (2 + 18) − (33 + 15) = −28
+                assert!(
+                    (dx + 28) % 8 == 0 && (80..=152).contains(&(dx + 28)),
+                    "{dx}"
+                );
+                right = true;
+            }
+            assert_eq!(d.y, 200 + 47 - 43, "pés − 5, e cai 5 px no mesmo tique");
+            assert_eq!(
+                st(&d).clip.step,
+                1,
+                "o tique continua: quadro 1 (oráculo t161 q1)"
+            );
+            assert!(out.events.iter().any(|e| matches!(
+                e,
+                Event::Sound(c) if c.id == SOUND_ASCEND && c.at.is_none()
+            )));
+        }
+        assert!(left && right, "os dois lados");
+    }
+
+    /// Oráculo `D_J_012` t1: com o Jake no ar a aparição falha e a Morte fica na origem
+    /// dele (1202, 309), oculta; o tique da ativação pelos gatilhos não faz mais nada.
+    #[test]
+    fn failed_appearance_leaves_death_on_the_target() {
+        let on = |_: i32| None;
+        let (mut j, w) = ctx_with_jake(1000, 0);
+        j.body = crate::physics::Body::new(500, 300, j.body.boxr);
+        let mut c = ctx(&j, &w, &on);
+        let mut d = death(100, 100);
+        tick(&mut d, &mut c, &mut Out::default());
+        assert!(st(&d).active);
+        assert_eq!((d.x, d.y), (100, 100), "tique da ativação");
+        tick(&mut d, &mut c, &mut Out::default());
+        assert!(st(&d).hidden());
+        assert_eq!((d.x, d.y), (500, 300), "na origem do alvo");
+        assert!(st(&d).wait >= 75, "rearma (`0x416753`)");
+    }
+
+    /// Falas ocultas (`0x41592a`): 40 % a 3763 sozinha (prioridade 5); senão uma fila de 2–3
+    /// de 3760/3761/3762 pelo locutor (prioridade 0), começando por qualquer uma delas.
+    #[test]
+    fn hidden_taunts_are_3763_or_a_chain_of_the_others() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(1000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let (mut alone, mut chains) = (0, std::collections::HashSet::new());
+        for seed in 0..20000 {
+            *c.rng = crate::rng::Rng::new(seed);
+            let mut d = death(100, 100);
+            let Behaviour::Death(s) = &mut d.behaviour else {
+                panic!()
+            };
+            s.active = true;
+            s.wait = 100;
+            let mut out = Out::default();
+            tick(&mut d, &mut c, &mut out);
+            for ev in &out.events {
+                match ev {
+                    Event::Sound(cue) => {
+                        assert_eq!((cue.id, cue.priority, cue.at), (TAUNTS[3], 5, None));
+                        alone += 1;
+                    }
+                    Event::Speech(ch) => {
+                        let ids: Vec<u16> =
+                            ch.lines.iter().map(|l| l.0).filter(|&i| i != 0).collect();
+                        assert!((2..=3).contains(&ids.len()), "{ids:?}");
+                        assert!(ch.lines.iter().all(|l| l.1 == 0) && !ch.unique);
+                        assert!(ids.iter().all(|i| TAUNTS[..3].contains(i)));
+                        chains.insert(ids);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(alone > 0);
+        assert_eq!(chains.len(), 12, "6 pares e 6 trios: {chains:?}");
+    }
+
+    /// Ruling: o salto de `8·d` px não deixa a Morte dentro de uma parede.
+    #[test]
+    fn appearance_never_lands_inside_a_wall() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(1000, 200);
+        // paredes dos dois lados, a 60–200 px do Jake: só sobra o recuo para perto dele
+        let walls: Vec<Rect> = w
+            .solids()
+            .iter()
+            .copied()
+            .chain([1080, 840].map(|x| Rect {
+                x,
+                y: 0,
+                w: 100,
+                h: 247,
+            }))
+            .collect();
+        let w = crate::World::new(walls);
+        for seed in 0..40 {
+            let mut c = ctx(&j, &w, &on);
+            *c.rng = crate::rng::Rng::new(seed);
+            let mut d = death(100, 100);
+            for _ in 0..2 {
+                tick(&mut d, &mut c, &mut Out::default());
+            }
+            if !st(&d).hidden() {
+                assert!(
+                    !w.blocked(&d.bounds().unwrap()),
+                    "semente {seed}: {:?}",
+                    d.bounds()
+                );
+            }
+        }
+    }
+
+    /// Radiação (`0x416a48`): `|Δ|` das posições (`+0x154/+0x158`), não dos centros.
+    #[test]
+    fn radiation_measures_origins() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(1000, 0);
+        for (x, hit) in [(1044, true), (950, false)] {
+            let mut c = ctx(&j, &w, &on);
+            let mut d = death(x, 0);
+            let Behaviour::Death(s) = &mut d.behaviour else {
+                panic!()
+            };
+            s.active = true;
+            s.set(RISE);
+            d.flags &= !0x2;
+            let mut out = Out::default();
+            tick(&mut d, &mut c, &mut out);
+            assert_eq!(out.jake_damage.amount == RADIATION, hit, "x {x}");
+        }
+    }
+
+    /// A radiação percorre a lista de objetos (`0x416a48`): os personagens da IA também a
+    /// levam (linha `(3, 1)`: vítima 1 = personagem, tipos 1 e 2).
+    #[test]
+    fn radiation_reaches_ai_jakes() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(3000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let npc = |index, kind| crate::behaviour::Npc {
+            index,
+            kind,
+            origin: (1020, 0),
+            bounds: Rect {
+                x: 1022,
+                y: 3,
+                w: 18,
+                h: 44,
+            },
+            layer: 0,
+        };
+        let npcs = [npc(4, 1), npc(5, 2)];
+        c.npcs = &npcs;
+        let mut d = death(1000, 0);
+        let Behaviour::Death(s) = &mut d.behaviour else {
+            panic!()
+        };
+        s.active = true;
+        s.set(RISE);
+        d.flags &= !0x2;
+        let mut out = Out::default();
+        tick(&mut d, &mut c, &mut out);
+        let hits: Vec<(usize, i32)> = out.npc_hits.iter().map(|(i, p)| (*i, p.amount)).collect();
+        assert_eq!(hits, vec![(4, RADIATION), (5, RADIATION)]);
+        assert!(out.jake_damage.is_empty());
     }
 
     #[test]

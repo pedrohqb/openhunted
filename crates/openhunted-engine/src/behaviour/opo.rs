@@ -421,6 +421,8 @@ fn drop_tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
 enum Hit {
     /// Um jogador de `Ctx::players`.
     Player(Option<usize>),
+    /// Um personagem da IA (`Ctx::npcs`): índice na cena e tipo.
+    Npc(usize, u32),
     /// Um sólido das células (sem vítima).
     Scenery,
     /// Um objeto sólido (barril, porta…): a cena fere quem cruza a caixa.
@@ -453,6 +455,14 @@ fn fall(e: &mut Entity, d: &mut DropState, ctx: &Ctx) -> Option<Hit> {
                 return Some(Hit::Player(k));
             }
         }
+        // o personagem da IA é sólido para a gota (`+0x224`, `0x40f6f0`)
+        if let Some(n) = ctx
+            .npcs
+            .iter()
+            .find(|n| n.layer == e.layer && n.bounds.overlaps(&sw))
+        {
+            return Some(Hit::Npc(n.index, n.kind));
+        }
     }
     if e.x < 0 || e.y < 0 || e.x >= ctx.level.0 || e.y >= ctx.level.1 {
         return Some(Hit::Outside);
@@ -479,6 +489,13 @@ fn splash(e: &Entity, hit: Hit, ctx: &Ctx, out: &mut Out) {
                     .push(Event::Sound(Cue::ui(ch.speech(SPEECH), SPEECH_PRIORITY)));
             }
             out.hurt_player(k, &damage(DROP, ch.kind()));
+        }
+        Hit::Npc(i, kind) => {
+            // `+0x270 = 1` (a fala só se ainda não estava: a cena não sabe; fala sempre)
+            let ch = crate::character::Character::from_kind(kind).unwrap_or_default();
+            out.events
+                .push(Event::Sound(Cue::ui(ch.speech(SPEECH), SPEECH_PRIORITY)));
+            out.npc_hits.push((i, damage(DROP, kind)));
         }
         Hit::Object => {
             if let Some(b) = e.bounds() {
@@ -937,6 +954,47 @@ mod tests {
             vec![SPEECH]
         );
         assert_eq!(drop_state(&d).state, DROP_SPLASH);
+    }
+
+    /// `0x40f6f0`: a gota que toca um tipo 1/2 o envenena (`+0x270 = 1`, com a fala) e
+    /// chama `0x43d629(gota, ele, 0)`, jogador ou não: o personagem da IA não é atravessado.
+    #[test]
+    fn the_drop_poisons_an_ai_character_it_lands_on() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 300);
+        let mut c = ctx(&j, &w, &on);
+        let b = Rect {
+            x: 102,
+            y: 303,
+            w: 18,
+            h: 44,
+        };
+        let npcs = [crate::behaviour::Npc {
+            index: 7,
+            kind: 2,
+            origin: (100, 300),
+            bounds: b,
+            layer: 0,
+        }];
+        c.npcs = &npcs;
+        let mut d = spawn_drop(&mut c, b.x, b.y - 120);
+        d.x = b.x + 4;
+        let mut hit = None;
+        for _ in 0..60 {
+            let mut out = Out::default();
+            tick(&mut d, &mut c, &mut out);
+            if !out.npc_hits.is_empty() {
+                hit = Some((out.npc_hits.clone(), out.events.clone()));
+                break;
+            }
+        }
+        let (hits, ev) = hit.expect("a gota acerta o personagem da IA");
+        assert_eq!(hits.len(), 1);
+        let (i, p) = hits[0];
+        assert_eq!((i, p.amount, p.poison, p.poisons), (7, 1, true, true));
+        assert!(ev.iter().any(|e| e.sound_id().is_some()), "fala");
+        assert_eq!(drop_state(&d).state, DROP_SPLASH);
+        assert!(b.y + b.h > d.y, "parou na cabeça dele, não no chão");
     }
 
     #[test]

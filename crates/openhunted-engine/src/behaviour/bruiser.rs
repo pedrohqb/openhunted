@@ -294,6 +294,13 @@ fn quake(e: &Entity, j: Option<Rect>, ctx: &mut Ctx, out: &mut Out) {
         let t = 20 + ctx.rng.below(20);
         out.quake = Some(out.quake.unwrap_or(0).max(t));
     }
+    // os personagens da IA (tipos 1/2 vivos e em jogo da lista) também
+    for n in ctx.npcs {
+        if super::mine::distance(e.center(), enemy::center(&n.bounds)) < QUAKE_RANGE {
+            let t = 20 + ctx.rng.below(20);
+            out.npc_quakes.push((n.index, t));
+        }
+    }
 }
 
 /// Fim de cada animação (`0x00417061`).
@@ -603,6 +610,35 @@ mod tests {
         }
         assert!(st(&b).dead && b.alive && !b.solid_shapes);
         assert_eq!(out.blasts.len(), DEATH_BLASTS);
+    }
+
+    /// `0x418229` percorre os tipos 1/2 vivos e em jogo (personagens da IA incluídos) a
+    /// < 300 px do centro: `+0x274 = 20 + rand % 20`.
+    #[test]
+    fn quake_reaches_ai_characters() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(330, 0);
+        let mut c = ctx(&j, &w, &on);
+        let npc = |index, x| crate::behaviour::Npc {
+            index,
+            kind: 2,
+            origin: (x, 0),
+            bounds: Rect {
+                x: x + 2,
+                y: 3,
+                w: 18,
+                h: 44,
+            },
+            layer: 0,
+        };
+        let npcs = [npc(3, 200), npc(4, 900)];
+        c.npcs = &npcs;
+        let b = bruiser(100, 47, vec![]);
+        let mut out = Out::default();
+        quake(&b, c.jake_bounds(), &mut c, &mut out);
+        assert_eq!(out.npc_quakes.len(), 1);
+        assert_eq!(out.npc_quakes[0].0, 3);
+        assert!((20..40).contains(&out.npc_quakes[0].1));
     }
 
     #[test]
