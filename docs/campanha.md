@@ -28,7 +28,11 @@ auditadas com `ohtool audit --god --reach` (`openhunted_engine::audit`; desenho 
   resultado dela não mudou com a correção.
 
 Resultado: **65 vencem, 0 falham**. Até a correção da `I_M_109` a D_M_010 falhava (causa 3,
-abaixo); igual depois da revisão da IA da M11.
+abaixo); igual depois da revisão da IA da M11. **Refeita no fim da M17** (auditoria de
+fidelidade inteira, com o núcleo: ordem do tique do original, `rand`, ativação por
+distância e varredura de colisão), com `--god --reach --strict`: **65 vencem, 0 falham**,
+nenhuma regressão; o alcance estrito lista as mesmas 20 missões. Das vitórias por
+entrada, só o roteiro da I_M_109 precisou ser refeito (abaixo).
 
 ## Causas achadas e corrigidas
 
@@ -52,7 +56,7 @@ abaixo); igual depois da revisão da IA da M11.
 ## A rota da I_M_109
 
 **I_M_109** ("Garathe Tutorial 5"): **vencida por entrada** (`real_garathe.rs`,
-`i_m_109_can_be_won`, 875 tiques, sem repor vida nem relógio). A porta (5, 3, 0) diante da
+`i_m_109_can_be_won`, 1055 tiques, sem repor vida nem relógio). A porta (5, 3, 0) diante da
 saída pede a chave 62 (976, 66, camada 0) e não há cordas: o pulo para cima do Garathe (20,
 216 px) agarra o teto de vãos de uma célula ou, no poço de x 278–362 (camada 1), rente à
 parede e com ESQUERDA no voo livre (controle no ar, `0x408205`), sai de baixo do gerador de
@@ -63,7 +67,16 @@ chave (e volta igual). Na volta, a catapulta (41) do corredor de cima joga para 
 quem a pisa (pulo médio sobre ela); a descida pelo poço cruza a poça `OPO` (68) e envenena
 (sem antídoto na fase: 1 de vida a cada 20 tiques até a saída). Na camada 0 de baixo, a
 porta de célula abre com a chave ao empurrar e a pilha de três barris antes da saída se
-vence com o pulo parado e DIREITA no ar. O gerador de minas não precisa morrer; o ataque
+vence com o pulo parado e DIREITA no ar.
+
+Com a física do núcleo (M17), três ajustes de entrada no roteiro: cair da ponta do teto do
+poço (x 362) pousa 4 px dentro da poça, então o Garathe solta a barra à direita dela, no
+chão de x 397–405, e a cruza com um pulo médio até a parede; o pulo para cima sai logo ao
+chegar, antes que as minas do gerador (que ele solta com o Garathe ao alcance) encham a
+coluna, e o controle no ar mira x 274, pondo-o na beira do corredor, onde a catapulta o
+joga para perto da porta de camada; no fim, o barril do meio da pilha, empurrado, rola até
+os de x 933–974 e estoura (derruba e tira ~40 de vida), e o Garathe empurra e recua antes
+do estouro. Chega com 91 de vida e 1 de veneno. O gerador de minas não precisa morrer; o ataque
 na barra que o alcança (ATIRAR/SOCO solta e ataca, `0x42a29b` → `0x43b43e`) agora existe
 no porte para o Jake e o Garathe (`claws_hit_the_mine_generator_from_the_ceiling`).
 
