@@ -11,6 +11,12 @@ regras das missões), rodando nativamente, com a tela original ampliada e som fu
 
 ## Status
 
+**M17: auditoria de fidelidade.** Área por área (núcleo, movimentos do Jake e do Garathe,
+armas, itens e objetos, inimigos, IA, HUD, som e colisão), o porte medido contra o
+`Hunter.exe` e o oráculo (o original no Wine): o tique segue a ordem, o `rand`, a ativação
+por distância e a varredura de colisão do original, com 133 diferenças corrigidas por teste.
+A campanha refeita: as 65 missões vencem. Placar em [`docs/auditoria/`](docs/auditoria/README.md).
+
 **M15: dois jogadores numa máquina.** "Multi Player" leva à disputa ou ao cooperativo: a
 lista de fases do modo, a escolha de personagem e cor de cada jogador e os limites de tempo e
 de pontos (disputa) ou o briefing (coop), a partida em tela dividida (jogador 1 em cima, cada

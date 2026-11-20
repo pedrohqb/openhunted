@@ -38,3 +38,17 @@ depois "Correções", "Em aberto". O README desta pasta lista as áreas e o plac
 | Inimigos principais | `inimigos.md` | feito: 27 iguais, 19 corrigidos, 3 núcleo, 3 em aberto |
 | Inimigos secundários e IA dos personagens | `inimigos-2.md` | feita: 11 igual, 18 corrigidas, 1 decisão, 6 em aberto, 4 a confirmar |
 | HUD, câmera, som e geometria de colisão do cenário | `hud-som-colisao.md` | feita: 13 iguais, 10 corrigidos, 8 em aberto, 5 a confirmar, 1 decisão |
+
+## Placar (fim da M17)
+
+- **Corrigidos nas áreas:** 133 (Jake 29, Garathe 18, armas 32, itens e objetos 7,
+  inimigos 19, inimigos secundários e IA 18, HUD/som/colisão 10), mais o núcleo.
+- **Campanha** (`ohtool audit --god --reach --strict`, refeita depois do núcleo): 65 de 65
+  missões vencem; o alcance estrito lista as mesmas 20 que dependem do pulo para cima
+  (`docs/campanha.md`).
+- **Vitórias só pela entrada:** `real_missions.rs` (T_J_003/005/007, I_J_002) e
+  `real_garathe.rs` (T_M_002, I_M_102, I_M_109) passam e nenhuma está ignorada; a I_M_109
+  teve o roteiro refeito para a física do núcleo.
+- **`check.sh --full`:** 804 testes passam, 0 falham. Os 8 `#[ignore]` são fuzz longos, a
+  extração de todos os bitmaps e a sonda `medir` de `real_jake_moves.rs`; o `--full` roda e
+  passa todos.
