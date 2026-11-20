@@ -236,13 +236,15 @@ impl Pilot {
         self.climbed += u32::from(matches!(j.state(), State::Climb(_)));
         if std::env::var_os("OH_TRACE").is_some() {
             eprintln!(
-                "{:5} {input:#06x} ({}, {}) {:?} q{} vida {}",
+                "{:5} {input:#06x} ({}, {}) {:?} q{} vida {} veneno {} caixa {:?}",
                 self.t,
                 j.body.x,
                 j.body.y,
                 j.state(),
                 j.frame(),
-                j.health.hp
+                j.health.hp,
+                j.poison,
+                j.body.bounds()
             );
         }
         assert!(
@@ -344,17 +346,6 @@ impl Pilot {
                 RIGHT
             };
             self.tick(UP | steer);
-        }
-        self.settle();
-    }
-    /// Mão ante mão para `side` até o teto acabar e cair (27), segurando `side` no ar até o
-    /// chão.
-    fn bar_off(&mut self, side: u32) {
-        for _ in 0..600 {
-            if self.on_ground() && self.state() != State::BarHang {
-                break;
-            }
-            self.tick(side);
         }
         self.settle();
     }
@@ -603,7 +594,6 @@ fn i_m_109_climbs_with_the_ceiling_grab() {
 /// de minas do canto do teto do poço fica para trás (não é objetivo) e a poça `OPO` do pé
 /// dele envenena na descida (1 de vida a cada 20 tiques até a saída).
 #[test]
-#[ignore = "roteiro a refazer com a ordem do tique do original (auditoria do núcleo): o Garathe pousa 4 px dentro da poça de veneno"]
 fn i_m_109_can_be_won() {
     let Some(s) = load("I_M_109.LEV") else {
         return;
@@ -623,18 +613,28 @@ fn i_m_109_can_be_won() {
     assert_eq!(p.feet(), 372, "pulou o fosso: {:?}", p.center());
     p.go_x(448);
     p.grab_ceiling();
-    // mão ante mão para a esquerda até o teto acabar (x 362) e cai segurando ESQUERDA,
-    // longe da poça de veneno (x 331–397)
-    p.bar_off(LEFT);
+    // mão ante mão para a esquerda e solta à direita da poça de veneno (x 331–397): cai no
+    // vão de chão de x 397–405 entre ela e o vão do teto; o teto acaba em x 362 e cair da
+    // ponta dele pousa 4 px dentro da poça
+    p.bar_to(414);
     assert_eq!(p.feet(), 244, "no chão do poço: {:?}", p.center());
-    p.go_x(288);
-    p.run(3, LEFT);
+    assert_eq!(
+        p.s.jake.as_ref().unwrap().body.bounds().x,
+        398,
+        "à direita da poça"
+    );
+    // pulo médio para a esquerda por cima da poça, até a parede
+    p.tick(JUMP | LEFT);
+    p.run(12, LEFT);
     p.settle();
+    assert_eq!(p.feet(), 244, "no chão do poço: {:?}", p.center());
     assert_eq!(p.center().0, 288, "encostado na parede");
     assert_eq!(p.s.jake.as_ref().unwrap().poison, 0, "não pisou na poça");
-    // pulo para cima rente à parede da esquerda; no voo, ESQUERDA tira o Garathe de baixo
-    // do gerador de minas (x 290–320, no canto do teto) e o leva ao corredor de cima
-    p.jump_up_to(280);
+    // pulo para cima rente à parede da esquerda logo que chega, antes que as minas do
+    // gerador do canto do teto (x 290–320), que ele solta com o Garathe ao alcance, encham a
+    // coluna; no voo, ESQUERDA o tira de baixo do gerador e o põe na beira do corredor de
+    // cima, onde a catapulta (x 236–261) o joga para a esquerda, para perto da porta
+    p.jump_up_to(274);
     // o pulo pode acabar agarrado ao teto do corredor (as minas do gerador, que caem 2 px
     // na primeira física, mudam a trajetória): BAIXO solta
     for _ in 0..3 {
@@ -710,6 +710,14 @@ fn i_m_109_can_be_won() {
     p.tick(JUMP);
     p.run(3, 0);
     p.run(40, RIGHT);
+    // o barril de cima rola para a direita: espera ele ir embora
+    p.settle();
+    p.run(30, 0);
+    // o barril do meio, empurrado, rola até os de x 933–974 e estoura (o golpe derruba e
+    // tira ~40 de vida): empurra e recua para longe antes do estouro
+    p.run(8, RIGHT);
+    p.run(15, LEFT);
+    p.run(40, 0);
     p.win();
     let j = p.s.jake.as_ref().unwrap();
     // a poça envenena (sem antídoto na fase) se o tiro dos olhos-laser não o desviar dela
