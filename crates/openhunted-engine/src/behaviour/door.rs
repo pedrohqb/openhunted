@@ -71,11 +71,12 @@ pub fn border_name(kind: u32, label: i32) -> String {
 
 pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     let trig = satisfied(&e.triggers, ctx.on);
-    // qualquer jogador em jogo encostado ou dentro (com dois, os dois)
+    // qualquer jogador em jogo encostado (a até 2 px: vindo da esquerda, o vértice do chanfro
+    // do `JK_DEFLT` em x + 20 para 1 px antes da caixa envolvente) ou dentro
     let (touching, inside) = e.bounds().map_or((false, false), |d| {
         ctx.active_in(e.layer)
             .fold((false, false), |(t, i), (_, j)| {
-                (t || grow(d, 1).overlaps(&j), i || d.overlaps(&j))
+                (t || grow(d, 2).overlaps(&j), i || d.overlaps(&j))
             })
     });
     let secret = e.objective & 1 != 0;

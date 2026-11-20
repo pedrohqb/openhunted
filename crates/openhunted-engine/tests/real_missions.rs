@@ -3,7 +3,7 @@
 //! dados reais (OPENHUNTED_DATA), por rotas roteirizadas (`docs/re/missoes-tutorial.md`):
 //! sem tirar perigos, só com a entrada do jogador.
 
-use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SELECT_SHIFT, SHOOT, UP};
+use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SELECT_SHIFT, SHOOT, STEALTH, UP};
 use openhunted_engine::jake::zone;
 use openhunted_engine::{Assets, Entity, Outcome, Scene, State};
 use openhunted_formats::{Level, open_data};
@@ -234,7 +234,7 @@ impl Pilot {
                 return;
             };
             let side = if dx > 0 { RIGHT } else { LEFT };
-            let input = if dy < -60 && dx.abs() > 6 && self.on_ground() {
+            let input = if dy < -60 && dx.abs() > 4 && self.on_ground() {
                 // bem acima: vai para baixo dele (a pistola não atira em ângulo fechado);
                 // atirando, termina a rajada antes (soltar com direção trava o tiro)
                 // sem chão logo adiante (o vão da escada), não vai
@@ -252,8 +252,11 @@ impl Pilot {
                 if !self.s.world.blocked(&ahead) {
                     return;
                 }
+                // perto (a coluna do tiro para cima não pega o olho a 6 px), passos furtivos
+                // de 3 px em vez da corrida de 12
                 let firing = self.s.jake.as_ref().unwrap().is_firing();
-                self.tick(if firing { 0 } else { side });
+                let step = if dx.abs() <= 12 { side | STEALTH } else { side };
+                self.tick(if firing { 0 } else { step });
                 continue;
             } else if dy < -2 * dx.abs() - 20 {
                 UP
@@ -418,7 +421,6 @@ impl Pilot {
 /// (x 561–593, 688–720, 815–847), saltando de cada uma para a plataforma da direita; anda
 /// até a saída e aperta CIMA.
 #[test]
-#[ignore = "roteiro a refazer com a ordem do tique do original (auditoria do núcleo): para empurrando a parede de x ≈ 470 em vez de cair ao fundo"]
 fn t_j_003_can_be_won() {
     let Some(s) = load("T_J_003.LEV") else {
         return;
@@ -583,7 +585,6 @@ fn robot(e: &Entity) -> bool {
 /// passa à camada 0 pela porta de x ≈ 581, cruza a porta que abre sozinha (x ≈ 809),
 /// empurra a porta de célula (8, 2, 0) com a chave, abate o último robô e sai.
 #[test]
-#[ignore = "roteiro a refazer com a ordem do tique e o rand do original (auditoria do núcleo): a luta com os robôs de x ≈ 362 mata o Jake"]
 fn i_j_002_can_be_won() {
     // Rota a refazer depois da auditoria M17 do Jake (`docs/auditoria/jake-movimentos-2.md`):
     // sem o empurrão na corrida e com o empurrar 100/101/102 o piloto fica sob os raios dos

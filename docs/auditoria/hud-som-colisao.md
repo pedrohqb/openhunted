@@ -79,9 +79,9 @@ mudo: os disparos saem do binário e do `ohtool --sons`.
 | Só caixas (tipo 2) nas células: sem rampas, degraus ou plataformas de mão única | 225 BRD | idem | igual |
 | Pouso no chão (encosta) | y 69 (`T_J_001`), 197 (`T_J_003/005`), 325 (`I_J_104`) | idêntico | igual |
 | Parede à **esquerda** (encosta) | x 20 (`T_J_003`, `T_J_005`), 404 (`I_J_104`) | idêntico | igual |
-| Parede à **direita**: para 1 px antes | x 1749 (`T_J_001`), 853 (`I_J_104`) | 1750, 854 | diferente, em aberto (abaixo) |
-| Forma do Jake: octógono `JK_DEFLT` (arestas tipo 3) + caixas; caixas com borda inclusiva (`x + w − 1`, `0x438d55`) | `0x43339c` | caixa envolvente única | diferente, em aberto |
-| Teto: a caixa de topo do Jake (8, 3) entra 1 px na caixa do teto | pulo para cima 16 na `T_J_001`: y 8 (topo 11, teto até 12) | y 9 (encosta) | diferente, em aberto (abaixo) |
+| Parede à **direita**: para 1 px antes | x 1749 (`T_J_001`), 853 (`I_J_104`) | 1750, 854 | corrigido no núcleo (`physics::varredura`) |
+| Forma do Jake: octógono `JK_DEFLT` (arestas tipo 3) + caixas; caixas com borda inclusiva (`x + w − 1`, `0x438d55`) | `0x43339c` | caixa envolvente única | corrigido no núcleo (Jake e Garathe) |
+| Teto: a caixa de topo do Jake (8, 3) entra 1 px na caixa do teto | pulo para cima 16 na `T_J_001`: y 8 (topo 11, teto até 12) | y 9 (encosta) | corrigido no núcleo |
 
 **A matemática da varredura** (para o núcleo): `0x438d55` (caixa × caixa) e `0x439177`/`0x439709`
 (com arestas) dão o deslocamento até o contato **em px inteiros**, com as caixas em borda

@@ -8,7 +8,6 @@
 use openhunted_engine::character::Character;
 use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
 use openhunted_engine::jake::{JumpKind, garathe, zone};
-use openhunted_engine::physics::CONTACT_SCENERY;
 use openhunted_engine::scene::player_character;
 use openhunted_engine::{Assets, Outcome, Scene, State};
 use openhunted_formats::{GameData, Level, open_data};
@@ -734,9 +733,11 @@ fn claws_hit_the_mine_generator_from_the_ceiling() {
     s.tick(JUMP | UP);
     assert!(until(&mut s, UP, 40, |s| j(s).state() == State::BarHang));
     assert!(until(&mut s, LEFT, 80, |s| j(s).body.bounds().x <= 320));
+    // indo para a esquerda contra a face, o encurtamento de 1/8 px arredonda para ela: a
+    // caixa divide a última coluna do gerador (`physics::varredura`)
     assert_eq!(
         j(&s).body.bounds().x,
-        320,
+        319,
         "encostado no gerador (x 290–320)"
     );
     assert_eq!(gen_hp(&s), 15);
@@ -844,7 +845,7 @@ fn fuzz_random_input_on_all_garathe_levels() {
             // só o cenário: um objeto sólido que se move (porta, bloco) pode encostar nele
             if j.is_active() {
                 assert!(
-                    s.world.contact(&j.body.bounds()) & CONTACT_SCENERY == 0,
+                    j.embedded(s.world.scenery()).is_empty(),
                     "{name}: dentro de sólido no tique {t}: {hist:#?}"
                 );
             }

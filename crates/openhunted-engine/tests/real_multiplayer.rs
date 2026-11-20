@@ -5,7 +5,6 @@
 
 use openhunted_engine::character::Character;
 use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
-use openhunted_engine::physics::CONTACT_SCENERY;
 use openhunted_engine::scene::{Duel, Mode};
 use openhunted_engine::{Assets, Jake, Outcome, Scene};
 use openhunted_formats::{GameData, Level, open_data};
@@ -65,7 +64,7 @@ fn check_player(s: &Scene, name: &str, i: usize, t: u32) {
     );
     if j.is_active() && j.box_matches_state() {
         assert!(
-            s.layer_cells(j.layer()).contact(&b) & CONTACT_SCENERY == 0,
+            j.embedded(s.layer_cells(j.layer()).scenery()).is_empty(),
             "{name}: jogador {} dentro do cenário no tique {t}: {:?} {b:?}",
             i + 1,
             j.state()

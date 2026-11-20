@@ -320,8 +320,9 @@ fn fuzz_random_input_on_all_solo_levels() {
                         &inv.slots[1..=6]
                     );
                     // só as células: nascer sobreposto a um objeto sólido é dado real
-                    // (I_J_107) e a física deixa sair (`blocked_from`)
-                    if j.is_active() && s.cell_world().blocked(&j.body.bounds()) {
+                    // (I_J_107) e a física deixa sair; dividir a linha da borda (a caixa de
+                    // topo no teto) não é estar dentro (`Jake::embedded`)
+                    if j.is_active() && !j.embedded(s.cell_world().solids()).is_empty() {
                         stuck += 1;
                         assert!(stuck <= 60, "Jake dentro de um sólido: {ctx}");
                     } else {

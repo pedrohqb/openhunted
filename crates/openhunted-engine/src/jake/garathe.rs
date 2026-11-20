@@ -458,16 +458,12 @@ mod tests {
         j.tick(LEFT | STEALTH, &w);
         // à esquerda, "para a frente" é x negativo: Δ −5 da raiz (espelhado) × 3
         assert_eq!(j.body.vx.abs(), 15 * SUB);
-        // anda no tique seguinte, pela metade no chão: −120 → −8 px (o furtivo do Jake no
-        // oráculo, `physics::step`)
-        let x0 = j.body.x;
+        // anda no tique seguinte, só até o contato com o chão na metade do vetor (vy guardada
+        // 0): 7,5 px arredondados para baixo e encurtados de 1/8 px, 6 para a direita e 8 para
+        // a esquerda (`physics::varredura`; o furtivo do Jake no oráculo: 120 → 6 e −120 → −8)
+        let (x0, vx) = (j.body.x, j.body.vx);
         j.tick(LEFT | STEALTH, &w);
-        // (o arredondamento da fração depende do sentido: 7 ou 8)
-        assert!(
-            (7..=8).contains(&(j.body.x - x0).abs()),
-            "{}",
-            j.body.x - x0
-        );
+        assert_eq!(j.body.x - x0, if vx > 0 { 6 } else { -8 });
     }
 
     #[test]
@@ -533,11 +529,13 @@ mod tests {
                 w: 3000,
                 h: 20,
             },
+            // parede até o chão: o corpo encosta de lado no ar (com a quina de baixo no meio
+            // do caminho, quem a pega é o chanfro de cima, de normal oblíqua)
             Rect {
                 x: 60,
                 y: -200,
                 w: 20,
-                h: 240,
+                h: 300,
             },
         ]);
         let mut j = garathe(&w, 0);

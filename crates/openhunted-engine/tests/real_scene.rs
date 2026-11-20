@@ -230,11 +230,10 @@ fn mission_files() -> Vec<String> {
 
 /// Índices dos sólidos das células que `r` intersecta (os objetos móveis, como as minas,
 /// podem encostar no Jake de propósito).
-fn overlapped(s: &Scene, r: &openhunted_engine::Rect) -> Vec<usize> {
-    let solids = s.cell_world().solids();
-    (0..solids.len())
-        .filter(|&i| solids[i].overlaps(r))
-        .collect()
+/// Sólidos do cenário em que o Jake entrou (pelas formas e a regra do original: dividir a
+/// linha da borda, como a caixa de topo no teto, não conta).
+fn overlapped(s: &Scene) -> Vec<usize> {
+    s.jake.as_ref().unwrap().embedded(s.cell_world().solids())
 }
 
 /// Em toda fase com Jake, entradas aleatórias (LCG fixa) nunca o fazem entrar num sólido que
@@ -252,7 +251,7 @@ fn random_input_never_enters_solids() {
         }
         let mut seed: u32 = 0x1234_5678;
         let mut input = 0;
-        let mut inside = overlapped(&s, &s.jake.as_ref().unwrap().body.bounds());
+        let mut inside = overlapped(&s);
         for t in 0..1000 {
             if t % 7 == 0 {
                 seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
@@ -260,7 +259,7 @@ fn random_input_never_enters_solids() {
                     [0, LEFT, RIGHT, LEFT | JUMP, RIGHT | JUMP, JUMP][(seed >> 16) as usize % 6];
             }
             s.tick(input);
-            let now = overlapped(&s, &s.jake.as_ref().unwrap().body.bounds());
+            let now = overlapped(&s);
             // a chegada do teletransporte (destino sorteado pelo `rand`) pode sobrepor: conta
             // como renascer
             if s.jake.as_ref().unwrap().is_teleporting() {
@@ -289,9 +288,14 @@ fn jake_can_move_in_every_level() {
             continue;
         }
         // só a geometria: os personagens da IA (M11) atiram e empurram o jogador de perto
-        // (o Jake da IA da H_M_027 começa a 135 px do Garathe)
+        // (o Jake da IA da H_M_027 começa a 135 px do Garathe); a Morte da C_J_027 nasce
+        // colada no Jake e o empurra a cada golpe (a 3, 2 e 1 px/tique, que no chão, com a
+        // varredura do original, não o tiram do lugar para a direita)
         for e in s0.entities.iter_mut() {
-            if matches!(e.behaviour, openhunted_engine::Behaviour::AiPlayer(_)) {
+            if matches!(
+                e.behaviour,
+                openhunted_engine::Behaviour::AiPlayer(_) | openhunted_engine::Behaviour::Death(_)
+            ) {
                 e.alive = false;
             }
         }
@@ -970,7 +974,7 @@ fn random_moves_never_enter_solids() {
         let mut seed: u32 = 0x9e37_79b9;
         let mut input = 0;
         let mut layer = s.jake_layer;
-        let mut inside = overlapped(&s, &s.jake.as_ref().unwrap().body.bounds());
+        let mut inside = overlapped(&s);
         for t in 0..1500 {
             if t % 9 == 0 {
                 seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
@@ -985,13 +989,16 @@ fn random_moves_never_enter_solids() {
                 j.state(),
                 j.body
             );
-            let now = overlapped(&s, &j.body.bounds());
+            let now = overlapped(&s);
             if s.jake_layer == layer {
                 assert!(
                     now.iter().all(|i| inside.contains(i)),
-                    "{level}: entrou num sólido no tique {t} ({:?}, {:?})",
+                    "{level}: entrou num sólido no tique {t} ({:?}, {:?}): {:?}",
                     j.state(),
-                    j.body
+                    j.body,
+                    now.iter()
+                        .map(|&i| s.cell_world().solids()[i])
+                        .collect::<Vec<_>>()
                 );
             }
             layer = s.jake_layer;

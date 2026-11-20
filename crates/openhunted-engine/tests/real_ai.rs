@@ -3,7 +3,6 @@
 //! vão atrás do Jake; fuzz em todas as fases com personagens da IA.
 
 use openhunted_engine::input::{DOWN, JUMP, LEFT, RIGHT, SHOOT, UP};
-use openhunted_engine::physics::CONTACT_SCENERY;
 use openhunted_engine::scene::has_controllable_player;
 use openhunted_engine::{Assets, Behaviour, Jake, Scene};
 use openhunted_formats::{GameData, Level, open_data};
@@ -53,7 +52,7 @@ fn check_ais(s: &Scene, name: &str, t: u32) {
         );
         if j.is_active() && j.box_matches_state() {
             assert!(
-                s.layer_cells(j.layer()).contact(&b) & CONTACT_SCENERY == 0,
+                j.embedded(s.layer_cells(j.layer()).scenery()).is_empty(),
                 "{name}: IA {i} dentro do cenário no tique {t}: {:?} {b:?}",
                 j.state()
             );

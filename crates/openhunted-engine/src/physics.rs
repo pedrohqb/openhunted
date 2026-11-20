@@ -2,6 +2,9 @@
 //! Física dos personagens (`docs/re/personagem.md`): velocidades em 1/8 px por tique,
 //! gravidade, colisão com as caixas das células e sondagem de chão.
 
+pub mod varredura;
+pub use varredura::{JK_DEFLT, MN_DEFLT, Shape};
+
 /// Subunidades por pixel nas velocidades.
 pub const SUB: i32 = 8;
 /// Gravidade: 2 px/tique² (`0x0047197c`).
@@ -92,6 +95,16 @@ impl World {
         &self.solids
     }
 
+    /// Só as caixas do cenário (células).
+    pub fn scenery(&self) -> &[Rect] {
+        self.split().0
+    }
+
+    /// Caixas do cenário e dos objetos sólidos, à parte.
+    pub(crate) fn split(&self) -> (&[Rect], &[Rect]) {
+        self.solids.split_at(self.scenery.min(self.solids.len()))
+    }
+
     /// Algum sólido intersecta `r`?
     pub fn blocked(&self, r: &Rect) -> bool {
         self.solids.iter().any(|s| s.overlaps(r))
@@ -138,6 +151,8 @@ pub struct Body {
     pub on_ground: bool,
     pub hit_wall: bool,
     pub hit_ceiling: bool,
+    /// Massa no impulso da resposta (`+0x174`; Jake 10).
+    pub mass: i32,
 }
 
 impl Body {
@@ -151,6 +166,7 @@ impl Body {
             on_ground: false,
             hit_wall: false,
             hit_ceiling: false,
+            mass: 10,
         }
     }
 

@@ -92,11 +92,12 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
     }
     let Some(bounds) = e.bounds() else { return };
     let same_layer = ctx.jake_layer == e.layer;
-    // o Jake encostado (o barril é sólido para ele: contato = caixas a 1 px)
+    // o Jake encostado (o barril é sólido para ele: contato = caixas a até 2 px; vindo
+    // da esquerda, o vértice do chanfro em x + 20 para 1 px antes da caixa envolvente)
     let jake = ctx
         .jake
         .filter(|j| j.is_active() && same_layer)
-        .filter(|j| grow(bounds, 1).overlaps(&j.body.bounds()));
+        .filter(|j| grow(bounds, 2).overlaps(&j.body.bounds()));
     let triggered = armed(&e.triggers) && satisfied(&e.triggers, ctx.on);
     let Behaviour::Barrel(st) = &mut e.behaviour else {
         return;

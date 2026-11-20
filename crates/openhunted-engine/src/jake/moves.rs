@@ -11,7 +11,7 @@ use openhunted_formats::Skeleton;
 use super::{AnimMode, Climb, Jake, JumpKind, Landing, SkeReq, State};
 use crate::damage::Pending;
 use crate::input::{DOWN, JUMP, LEFT, PUNCH, RIGHT, SHOOT, STEALTH, UP};
-use crate::physics::{CONTACT_SCENERY, Rect, SUB, World};
+use crate::physics::{CONTACT_SCENERY, Rect, SUB, Shape, World, varredura};
 
 /// Bits do tipo das zonas PR (`docs/re/jake-escalada.md`).
 pub mod zone {
@@ -445,9 +445,10 @@ impl Jake {
     /// sem lado, a horizontal fica como está. **Ruling (OpenHunted)**: o original sonda a
     /// parede à esquerda (−8 px) também para a direita (`personagem.md`); aqui, do lado pedido.
     ///
-    /// Jake: o lado só conta se o deslocamento real do tique anterior (`+0x15c`) ainda não
-    /// chega a 8 px para ele (`0x00408224`: ESQ com > −64; `0x408280`: DIR com < 64): depois
-    /// de um tique a 8 px a seta não age e fica a velocidade do esqueleto.
+    /// Jake: como o original. O lado só conta se o deslocamento do tique (`+0x15c`) ainda não
+    /// chega a 8 px para ele (`0x00408224`: ESQ com > −64; `0x408280`: DIR com < 64); com o
+    /// contato da física numa parede reta desse lado, nada muda (a velocidade da resposta
+    /// fica); senão a sonda de 8 px **à esquerda** (para os dois lados) decide entre ±64 e 0.
     pub(super) fn air_control(&mut self, world: &World, side: Option<bool>) {
         if self.body.on_ground {
             return;
@@ -459,18 +460,43 @@ impl Jake {
             s => s,
         };
         if let Some(right) = side {
-            let b = self.body.bounds();
-            let x = if right {
-                b.x.saturating_add(b.w)
-            } else {
-                b.x.saturating_sub(AIR_CONTROL)
-            };
-            let free = !world.blocked(&Rect {
-                x,
-                w: AIR_CONTROL,
-                ..b
-            });
             let dir = if right { 1 } else { -1 };
+            // encostado numa parede reta desse lado (normal horizontal do contato da física),
+            // a horizontal fica como a resposta deixou (`0x0040822d`, `0x00408285`)
+            if !self.is_garathe()
+                && self
+                    .contact
+                    .is_some_and(|c| c.normal.1 == 0 && c.normal.0.signum() == dir)
+            {
+                return;
+            }
+            let free = if self.is_garathe() {
+                let b = self.body.bounds();
+                let x = if right {
+                    b.x.saturating_add(b.w)
+                } else {
+                    b.x.saturating_sub(AIR_CONTROL)
+                };
+                !world.blocked(&Rect {
+                    x,
+                    w: AIR_CONTROL,
+                    ..b
+                })
+            } else {
+                // a sonda `0x0040718d` com as formas do corpo, 8 px para a **esquerda** nos
+                // dois lados, como o original (`0x0040824a` e `0x004082a5` empurram −8): o
+                // Jake caindo rente a uma parede à direita volta a empurrá-la e quica nela
+                let one = [Shape::Box(self.body.boxr)];
+                let shapes = self.shapes(&one);
+                varredura::sweep(
+                    world,
+                    (self.body.x, self.body.y),
+                    shapes,
+                    (-AIR_CONTROL * SUB, 0),
+                )
+                .1
+                .is_none()
+            };
             self.body.vx = if free { AIR_CONTROL * SUB * dir } else { 0 };
         }
     }
@@ -488,30 +514,17 @@ impl Jake {
 
     /// Contato de uma sonda de `PROBE` px na direção (dx, dy) (`0x0040718d`).
     fn probe(&self, world: &World, dx: i32, dy: i32) -> u32 {
-        let b = self.body.bounds();
-        let r = match (dx.signum(), dy.signum()) {
-            (0, -1) => Rect {
-                y: b.y.saturating_sub(PROBE),
-                h: PROBE,
-                ..b
-            },
-            (0, 1) => Rect {
-                y: b.y.saturating_add(b.h),
-                h: PROBE,
-                ..b
-            },
-            (-1, _) => Rect {
-                x: b.x.saturating_sub(PROBE),
-                w: PROBE,
-                ..b
-            },
-            _ => Rect {
-                x: b.x.saturating_add(b.w),
-                w: PROBE,
-                ..b
-            },
-        };
-        world.contact(&r)
+        // a varredura com as formas do corpo, como a física (`0x0040718d` simula o
+        // deslocamento): a linha de borda que o corpo divide com um sólido (o teto em que a
+        // caixa de topo entrou) não conta
+        let one = [Shape::Box(self.body.boxr)];
+        let shapes = self.shapes(&one);
+        let d = (dx.signum() * PROBE * SUB, dy.signum() * PROBE * SUB);
+        match varredura::sweep(world, (self.body.x, self.body.y), shapes, d).1 {
+            Some(c) if c.object => crate::physics::CONTACT_OBJECT,
+            Some(_) => CONTACT_SCENERY,
+            None => 0,
+        }
     }
 
     /// Bateu num teto de cenário puro (`+0x220 = 2`): é uma barra (`0x0040712f`).
@@ -570,16 +583,24 @@ impl Jake {
             && new.y >= old.y
             && new.x + new.w <= old.x + old.w
             && new.y + new.h <= old.y + old.h;
-        // Jake: os sólidos que a caixa já cruza (nasceu ou ficou sobreposto) não impedem.
+        // Jake: os sólidos que o corpo já cruza (nasceu ou ficou sobreposto) não impedem.
         let g = self.is_garathe();
-        let blocked = |r: &Rect| {
-            if g {
-                world.blocked(r)
+        // dentro da caixa envolvente só garante caber se o corpo era essa caixa: com as formas
+        // do `JK_DEFLT` os cantos da envolvente ficam livres (uma quina ao lado da cabeça);
+        // então a caixa nova não pode entrar (pela regra do original) em sólido novo
+        // (dividir a linha da borda com um sólido, como a física deixa no teto, não impede)
+        let one = [Shape::Box(self.body.boxr)];
+        let shaped = self.shapes(&one).len() > 1;
+        let pos = (self.body.x, self.body.y);
+        let before = varredura::embedded(world.solids(), pos, self.shapes(&one));
+        let after = varredura::embedded(world.solids(), pos, &[Shape::Box(want)]);
+        let fits = (inside && !shaped)
+            || if g {
+                after.is_empty()
             } else {
-                world.blocked_from(&old, r)
-            }
-        };
-        if inside || !blocked(&new) {
+                after.iter().all(|i| before.contains(i))
+            };
+        if fits {
             self.body.boxr = want;
         } else if (self.body.boxr == self.box_crawl
             || (self.is_garathe()
@@ -1854,11 +1875,13 @@ mod tests {
             }
         }
         assert_eq!(j.state(), State::BarHang);
-        assert_eq!(j.body.bounds().y, 30, "encostado no teto");
+        // a caixa de topo entra na última linha do teto (borda inclusiva e o encurtamento
+        // de 1/8 px arredondando para cima; no oráculo, y 8 com o teto até 12 na `T_J_001`)
+        assert_eq!(j.body.bounds().y, 29, "encostado no teto");
         // sem gravidade: fica pendurado
         j.tick(0, &w);
         j.tick(0, &w);
-        assert_eq!((j.state(), j.body.bounds().y), (State::BarHang, 30));
+        assert_eq!((j.state(), j.body.bounds().y), (State::BarHang, 29));
         // mão ante mão: 107 com k = 4 (8 px por quadro do esqueleto sintético)
         let x0 = j.body.x;
         for _ in 0..5 {
@@ -2065,9 +2088,10 @@ mod tests {
             j.tick(RIGHT | STEALTH, &w);
         }
         // o esqueleto pede 3·(1, 3, 5, 3, 3, 3, 3, 4) px/tique, que andam no tique seguinte
-        // e, no chão, pela metade menos 1/8 px (`physics::step`): 1+4+7+4+4+4+4 = 28 px para
-        // a direita (o oráculo mede 2+5+8+5+5+5+5+6 para a esquerda, `T_J_001`)
-        assert_eq!(j.body.x - x0, 28);
+        // e, no chão (vy guardada 0), só até o contato na metade do vetor, arredondado para
+        // baixo em px e encurtado de 1/8 px (`physics::varredura`): 0+3+6+3+3+3+3 = 21 px
+        // para a direita, como o oráculo (`T_J_001`, `10*,12*RX`; 2+5+8+5… para a esquerda)
+        assert_eq!(j.body.x - x0, 21);
         j.tick(RIGHT, &w);
         assert_eq!(j.state(), State::Run);
     }

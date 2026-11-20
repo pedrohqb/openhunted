@@ -18,7 +18,7 @@ pub use crate::character::Character;
 use crate::character::Profile;
 use crate::damage::{Health, Pending, Strike, apply};
 use crate::input::{DOWN, JUMP, LEFT, NEXT_WEAPON, PREV_WEAPON, PUNCH, RIGHT, SHOOT, STEALTH, UP};
-use crate::physics::{Body, Rect, SUB, World, step};
+use crate::physics::{Body, JK_DEFLT, MN_DEFLT, Rect, SUB, Shape, World, varredura};
 pub use weapons::{FISTS, GRENADES, PISTOL, ROCKETS, SHOTGUN, STARS, ShotKind, weapon};
 
 // Corrida, pulos e sondas: no perfil do personagem (`crate::character`).
@@ -526,8 +526,11 @@ pub struct Jake {
     /// Jake: controle no ar (`0x00408205`) pedido neste tique, com o lado das setas; vale
     /// depois da velocidade do esqueleto (que ele sobrepõe), como no original.
     air_side: Option<Option<bool>>,
-    /// Deslocamento horizontal real do último tique, em 1/8 px (`+0x15c`).
+    /// Deslocamento horizontal do último tique, em 1/8 px (`+0x15c`, encurtado pela
+    /// varredura).
     moved: i32,
+    /// Contato da última física (`+0x220`: a normal do último encontrado na varredura).
+    contact: Option<varredura::Contact>,
     /// Esqueleto (`JAKE.SKE`) com a escala do Jake; sem ele, nada se move pelo esqueleto.
     skel: Option<Skel>,
     /// Camada (`+0x17c`).
@@ -615,6 +618,7 @@ impl Jake {
             ske_req: None,
             air_side: None,
             moved: 0,
+            contact: None,
             skel: None,
             layer: 0,
             box_default: boxr,
@@ -1732,6 +1736,11 @@ impl Jake {
                     self.decide_or_idle(input, env, jump_edge, side);
                 }
             }
+            // 25 → 26 (`0x00424220`): a rotina do 26 (`0x00424385`) roda no mesmo tique, primeiro
+            // a decisão em pé (com a seta, já sai correndo do pouso)
+            _ if landed && self.state == State::Land(Landing::Fall) && !self.is_garathe() => {
+                self.decide(input, env, jump_edge, side);
+            }
             _ if landed || fired => {}
             State::Fire { aim, t, w, alt } => {
                 self.tick_fire(input, world, (aim, t, w, alt));
@@ -1853,11 +1862,33 @@ impl Jake {
         self.prev_input = input;
     }
 
+    /// Formas de colisão da caixa corrente: na padrão, as do BRD (`JK_DEFLT`/`MN_DEFLT`, se a
+    /// caixa é a envolvente delas); nas outras, `one` (a caixa do estado).
+    pub(crate) fn shapes<'a>(&self, one: &'a [Shape]) -> &'a [Shape] {
+        let full: &'static [Shape] = if self.is_garathe() {
+            &MN_DEFLT
+        } else {
+            &JK_DEFLT
+        };
+        if self.body.boxr == self.box_default && Some(self.body.boxr) == varredura::bounds(full) {
+            full
+        } else {
+            one
+        }
+    }
+
+    /// Índices das caixas de `solids` em que o corpo entrou, pelas formas de colisão e a regra
+    /// do original (`physics::varredura::embedded`): dividir a linha da borda não conta.
+    pub fn embedded(&self, solids: &[Rect]) -> Vec<usize> {
+        let one = [Shape::Box(self.body.boxr)];
+        varredura::embedded(solids, (self.body.x, self.body.y), self.shapes(&one))
+    }
+
     /// Física do tique (`0x004045a5`): gravidade (salvo nos estados sem ela), deslocamento e
-    /// colisão com a velocidade e a caixa que a atualização anterior deixou. Correndo ou
-    /// empurrando contra um degrau de 1 px, sobe 1 px antes (o porte não tem os chanfros do
-    /// `JK_DEFLT.BRD` que fazem o corpo escorregar pela quina); o original só soma −1 px/tique
-    /// à `vy` (`0x0047892c`, `moves.rs`), que a gravidade anula no chão.
+    /// colisão com a velocidade e a caixa que a atualização anterior deixou. Na caixa padrão,
+    /// as formas do `JK_DEFLT`/`MN_DEFLT` (`physics::varredura`): os chanfros fazem o corpo
+    /// subir degraus e escorregar pelas quinas. Nas outras (engatinhar, barra, caído), a
+    /// caixa única do estado na mesma varredura.
     fn physics(&mut self, world: &World) -> Phys {
         let phys = Phys {
             was_rising: self.body.vy < 0,
@@ -1870,23 +1901,13 @@ impl Jake {
             return phys;
         }
         let climb = matches!(self.state, State::Run | State::Push);
-        if climb {
-            let b = self.body.bounds();
-            let dx = (self.body.vx >> 3).signum();
-            let up = b.moved(0, -1);
-            if dx != 0
-                && world.blocked_from(&b, &b.moved(dx, 0))
-                && !world.blocked(&up)
-                && !world.blocked(&up.moved(dx, 0))
-            {
-                self.body.y = self.body.y.saturating_sub(1);
-            }
-        }
         let gravity = self.gravity_on();
-        let x0 = self.body.x;
-        step(&mut self.body, world, gravity);
-        // deslocamento da física (`+0x15c` em 1/8 px), que o controle no ar consulta
-        self.moved = (self.body.x - x0) * SUB;
+        let one = [Shape::Box(self.body.boxr)];
+        let shapes = self.shapes(&one);
+        let out = varredura::step(&mut self.body, world, gravity, shapes);
+        // deslocamento da física (`+0x15c` em 1/8 px) e contato, que o controle no ar consulta
+        self.moved = out.disp.0;
+        self.contact = out.contact;
         if climb && self.body.on_ground && self.body.vy > 0 {
             // no chão a resposta de colisão tira a componente normal (`0x00404842`)
             self.body.vy = 0;
@@ -2415,7 +2436,9 @@ mod tests {
         let mut j = jake_on(&w, 0);
         let mut fell = false;
         for _ in 0..40 {
-            j.tick(RIGHT, &w);
+            // solta a seta na queda: pousando com ela, a decisão em pé do 26 (`0x00424385`)
+            // roda no mesmo tique e ele já sai correndo
+            j.tick(if fell { 0 } else { RIGHT }, &w);
             if j.state() == State::Fall {
                 fell = true;
                 assert_eq!(j.label(), 25);
@@ -2425,6 +2448,7 @@ mod tests {
             }
         }
         assert!(fell);
+        assert_eq!(j.label(), 26);
         j.tick(0, &w);
         assert_eq!(j.label(), 26);
     }
