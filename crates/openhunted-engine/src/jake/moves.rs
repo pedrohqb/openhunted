@@ -379,6 +379,29 @@ pub fn can_fall(s: State) -> bool {
     )
 }
 
+/// Estados em que o terremoto não pega o Jake (`0x426f6a`, tabela `0x426fae` e faixas): 11,
+/// 12, 16, 17, 25, 27–30, 32, 34, 35, 76–78, 80–87, 103–107, 162–166, 177 e 179 (pelo
+/// rótulo, que no Jake é o número do estado).
+pub fn jake_quake_exempt(label: u16) -> bool {
+    matches!(
+        label,
+        11 | 12
+            | 16
+            | 17
+            | 25
+            | 27..=30
+            | 32
+            | 34
+            | 35
+            | 76..=78
+            | 80..=87
+            | 103..=107
+            | 162..=166
+            | 177
+            | 179
+    )
+}
+
 /// Estados em que o terremoto não pega o Garathe (`0x42bcf8`): 11, 12, 19–27, 29, 32, 33,
 /// 36, 49–53, 56, 67 e 69 (os sem gravidade também escapam: `+0x178 & 8`).
 pub fn quake_exempt(s: State) -> bool {

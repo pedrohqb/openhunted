@@ -1714,12 +1714,7 @@ impl Scene {
                     j.hurt(p);
                     hit.push(s.player);
                 }
-                Some(crate::jake::PlayerHit::Quake(t))
-                    if j.character() == crate::character::Character::Garathe =>
-                {
-                    j.start_quake(t)
-                }
-                Some(crate::jake::PlayerHit::Quake(t)) => s.quake = s.quake.max(t),
+                Some(crate::jake::PlayerHit::Quake(t)) => j.start_quake(t),
                 None => {}
             }
         }
@@ -1764,6 +1759,15 @@ impl Scene {
             .map(|e| (e.id, e.on))
             .collect();
         let on = |id: i32| snapshot.iter().find(|(i, _)| *i == id).map(|(_, o)| *o);
+        let places: Vec<(i32, (i32, i32))> = self
+            .entities
+            .iter()
+            .filter(|e| e.alive && e.id != 0)
+            .map(|e| (e.id, (e.x, e.y)))
+            .collect();
+        let at = |id: i32| places.iter().find(|(i, _)| *i == id).map(|(_, p)| *p);
+        // a grade só vale numa cena com células (as montadas à mão nos testes não têm)
+        let has_cells = self.ai_grid.any_present();
         let seats = self.seats();
         let multi = self.players.len() >= 2;
         // cada entidade age contra um jogador (Ruling M15a: o mais perto, `entity_targets`)
@@ -1810,6 +1814,7 @@ impl Scene {
                 .map(|t| bodies.iter().copied().filter(|b| b.0 != t).collect())
                 .collect();
             let any_taker = self.mode.duel().is_some();
+            let npcs = self.npcs();
             for (k, e) in self.entities.iter_mut().enumerate() {
                 if !e.alive || !self.awake.get(k).copied().unwrap_or(true) {
                     continue;
@@ -1830,6 +1835,10 @@ impl Scene {
                     difficulty: self.difficulty,
                     any_taker,
                     others: &others[t],
+                    grid: has_cells.then_some(&self.ai_grid),
+                    at: &at,
+                    zones: &self.prop_zones,
+                    npcs: &npcs,
                 };
                 let out = &mut outs[t];
                 let (blasts, spawns, hazards) =
@@ -1931,6 +1940,8 @@ impl Scene {
             out.enemy_spawns.append(&mut o.enemy_spawns);
             out.launches.append(&mut o.launches);
             out.floor_fires.append(&mut o.floor_fires);
+            out.npc_hits.append(&mut o.npc_hits);
+            out.npc_quakes.append(&mut o.npc_quakes);
             extra.push(o);
         }
         // a explosão do foguete ou da granada à queima-roupa (`weapon_impact` na passada
@@ -1961,6 +1972,7 @@ impl Scene {
             }
         }
         self.schedule_regen(&alive_before);
+        self.apply_npc_out(&mut out);
         self.ai_shots_hit_human(&mut out);
         self.bullet_hits(&mut out);
         let hits = behaviour::enemy_shot::object_hits(&mut self.entities, &mut self.rng, &mut out);
@@ -2101,23 +2113,14 @@ impl Scene {
             }
             return;
         }
+        // o Jake também: `+0x274` e o estado 15 (`0x426f6a`), não um choque
         if let Some(q) = quake {
             self.quake = self.quake.max(q);
+            if let Some(j) = self.jake.as_mut().filter(|j| j.is_active()) {
+                j.start_quake(q);
+            }
         }
-        if self.quake == 0 {
-            return;
-        }
-        self.quake -= 1;
-        if let Some(j) = self
-            .jake
-            .as_mut()
-            .filter(|j| j.is_active() && j.body.on_ground)
-        {
-            j.hurt(crate::damage::Pending {
-                electric: true,
-                ..Default::default()
-            });
-        }
+        self.quake = self.quake.saturating_sub(1);
     }
 
     /// Sons com intervalo mínimo global entre todos os objetos do tipo (o zumbido da

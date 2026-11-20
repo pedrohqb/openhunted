@@ -54,7 +54,9 @@ olhos das fases tutoriais são **Alpha** (`values[0] = 0`).
    `0x43735d` dão 0, como nas minas); e o ângulo olho→alvo (`0x46718e(dx, dy)`) a no máximo
    **1500** unidades (≈ 8,2°) da mira atual. Ou seja, o olho só "vê" o Jake dentro do cone
    do feixe.
-4. Sem atirar (`+0x278 = 0`): a cada `+0x290` tiques dá um passo na varredura (`0x41fdf0`):
+4. Sem atirar (`+0x278 = 0`): `+0x290` > 0 desconta; em 0 recarrega com o `+0x30` da
+   variante e dá um passo na varredura (`0x41fdf0`) — um passo a cada `+0x30 + 1` tiques
+   (oráculo `H_J_001`, Beta: tiques 4, 9, 14):
    `+0x26c` ± 1 conforme `+0x279`; em 12 inverte e volta a 10; abaixo de 0 inverte e vai a 1
    (vaivém 0…11).
 5. Com alvo: `+0x278 = 1`, `+0x27a = 1`, `+0x28c` = x do alvo. Sem alvo, se acabou de perdê-lo

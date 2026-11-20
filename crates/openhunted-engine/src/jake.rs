@@ -428,8 +428,8 @@ fn jake_anim(s: State) -> (u16, u32) {
         // tranco: estado 169, rótulo 173 (`0x00426c5e`)
         State::Jolted => (173, 0),
         State::Taunt => (18, 0),
-        // o Jake não entra aqui (o terremoto dele é o da cena)
-        State::Quake => (15, 0),
+        // cambalear do terremoto (`0x42705f`): estado 15 com atraso 1
+        State::Quake => (15, 1),
     }
 }
 
@@ -1641,7 +1641,8 @@ impl Jake {
         // velocidade que os estados gravam abaixo só move o corpo no próximo tique.
         let phys = self.physics(world);
         // 2. Atualização (`0x0042293c`).
-        // veneno (`0x004231f9`, passo 3): a cada 20 tiques, `+0x270` de dano de veneno
+        // veneno (`0x004231f9`, passo 3): a cada 20 tiques, `+0x270` de dano de veneno; o
+        // contador global é o deste tique (`tique % 20 = 0` no tique 0, oráculo `D_J_012`)
         if self.poison > 0 && self.clock % POISON_PERIOD == 0 && self.is_active() {
             self.pending.add(&Pending {
                 amount: self.poison,
@@ -1686,8 +1687,8 @@ impl Jake {
             pressed(JUMP)
         };
         let side = self.wanted_side(input);
-        // Garathe: terremoto (`0x42bcf8`), antes da rotina do estado
-        let quaking = self.is_garathe() && self.tick_quake();
+        // terremoto (Jake `0x426f6a`, Garathe `0x42bcf8`), antes da rotina do estado
+        let quaking = self.tick_quake();
         // o lado segue as setas em todo estado (Jake `0x00422a62`, Garathe `0x427c9c`); nos
         // pulos lançados do Jake quem o muda é a inversão no ar
         let airborne = !self.is_garathe() && matches!(self.state, State::Jump(_));
@@ -2228,8 +2229,8 @@ impl Jake {
         fall
     }
 
-    /// Terremoto no Garathe (`+0x274`): o abalo do brutamontes (`0x418369`, 20–39 tiques) e
-    /// o especial de outro Garathe a 70–139 px (30).
+    /// Terremoto (`+0x274`) no Jake e no Garathe: o abalo do brutamontes (`0x418369`, 20–39
+    /// tiques) e o especial de outro Garathe a 70–139 px (30).
     pub fn start_quake(&mut self, ticks: u32) {
         self.quake = ticks;
     }
@@ -2247,7 +2248,12 @@ impl Jake {
             return false;
         }
         self.quake -= 1;
-        if !self.gravity_on() || moves::quake_exempt(self.state) {
+        let exempt = if self.is_garathe() {
+            moves::quake_exempt(self.state)
+        } else {
+            moves::jake_quake_exempt(self.label())
+        };
+        if !self.gravity_on() || exempt {
             return false;
         }
         if self.quake == 0 {
@@ -2921,6 +2927,29 @@ mod tests {
                 "tique {t}"
             );
         }
+    }
+
+    /// Terremoto do Bruiser no Jake (`0x426f6a`): `+0x274` tiques de estado 15 com atraso 1
+    /// (cambalear), não um choque elétrico; zerado, a rotina do parado. No pulo parado (27,
+    /// isento) só desconta.
+    #[test]
+    fn quake_staggers_the_jake_in_state_15() {
+        let w = long_floor();
+        let mut j = jake_on(&w, 0);
+        j.start_quake(6);
+        j.tick(0, &w);
+        assert_eq!((j.state(), j.label()), (State::Quake, 15));
+        for _ in 0..5 {
+            j.tick(0, &w);
+        }
+        assert_eq!(j.quake_ticks(), 0);
+        j.tick(0, &w);
+        assert_eq!(j.state(), State::Idle);
+        let mut k = jake_on(&w, 0);
+        k.tick(JUMP, &w);
+        k.start_quake(3);
+        k.tick(0, &w);
+        assert_eq!(k.state(), State::StandJump, "27 é isento");
     }
 
     #[test]

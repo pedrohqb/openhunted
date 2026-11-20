@@ -101,6 +101,7 @@ fn ai_at(ch: Character, x: i32, hp: i32, points: &[(i32, i32)], w: usize) -> Ent
             body,
             brain: Brain::new(),
             body_checked: false,
+            quake: 0,
             rng: crate::rng::Rng::new(5),
         })),
     }

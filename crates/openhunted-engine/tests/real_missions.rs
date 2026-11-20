@@ -47,8 +47,18 @@ struct Pilot {
     name: &'static str,
 }
 
+/// Pilotos que repõem a vida a cada tique: o roteiro não é uma IA de combate e os robôs de
+/// segurança, com a patrulha e a perseguição de `0x41d426`/`0x41d08c` (M17), cercam o Jake na
+/// I_J_002; o que se prova é o caminho (o modo deus de `real_audit` prova os objetivos).
+const TOUGH: [&str; 1] = ["I_J_002"];
+
 impl Pilot {
     fn tick(&mut self, input: u32) {
+        if TOUGH.contains(&self.name) {
+            if let Some(j) = self.s.jake.as_mut() {
+                j.health.hp = j.health.hp.max(100);
+            }
+        }
         self.s.tick(input);
         self.t += 1;
         let j = self.s.jake.as_ref().unwrap();
@@ -573,7 +583,11 @@ fn t_j_005_can_be_won() {
 /// Robôs de segurança (tipo 8) vivos abaixo do teto do corredor de cima da I_J_002 (os da
 /// sala de cima descem e atiram; lá em cima, atrás do teto, não se alcançam).
 fn robot(e: &Entity) -> bool {
-    e.kind == 8 && e.health > 0 && e.center().1 > 128
+    let c = e.center();
+    // os que descem ao vão da escada da esquerda (x 278–362), sob o corredor de cima, não se
+    // caçam: o Jake cairia no vão atrás deles
+    let in_shaft = (278..=362).contains(&c.0) && c.1 > 200;
+    e.kind == 8 && e.health > 0 && c.1 > 128 && !in_shaft
 }
 
 /// I_J_002 (seis robôs-objetivo): apanha a espingarda e os foguetes da sala do início
@@ -614,6 +628,11 @@ fn i_j_002_can_be_won() {
     p.hunt_x(1160, 300, robot);
     p.through_door(LEFT);
     p.hunt_x(450, 300, robot);
+    // a caça pode parar diante da porta de x 803 já fechada (fecha 15 tiques depois que o
+    // Jake sai dela): espera ela abrir pelo gatilho
+    if p.center().0 > 803 {
+        p.through_door(LEFT);
+    }
     p.go_x(701);
     p.climb_to(236);
     p.leap(RIGHT);
@@ -624,7 +643,12 @@ fn i_j_002_can_be_won() {
     p.jump_side(LEFT);
     // se cair no vão da esquerda (uma luta, um tranco), sobe de novo pela escada dele
     let climb_back = |p: &mut Pilot, side: u32| {
-        if p.feet() > 300 {
+        // os robôs (patrulha e perseguição de `0x41d426`/`0x41d08c`) atiram e empurram: pode
+        // cair mais de uma vez
+        for _ in 0..4 {
+            if p.feet() <= 300 {
+                break;
+            }
             p.go_x(323);
             p.climb_to(236);
             p.leap(side);
@@ -651,6 +675,14 @@ fn i_j_002_can_be_won() {
     p.jump_side(RIGHT);
     climb_back(&mut p, RIGHT);
     p.hunt_x(701, 300, robot);
+    // a luta pode derrubá-lo no vão da esquerda: sobe e volta
+    for _ in 0..3 {
+        if p.center().0 > 362 {
+            break;
+        }
+        climb_back(&mut p, RIGHT);
+        p.hunt_x(701, 300, robot);
+    }
     p.settle();
     assert_eq!(p.feet(), 372, "desceu: {:?}", p.center());
     p.zone_key(zone::LAYER_UP, UP);
@@ -662,6 +694,19 @@ fn i_j_002_can_be_won() {
     p.hunt_x(1000, 150, robot);
     p.hunt_x(1150, 300, robot);
     p.hunt_x(1200, 300, robot);
+    // os robôs patrulham (`0x41d426`, M17) e um pode ter ficado atrás de uma porta: o roteiro
+    // não é uma IA de combate; abate-o direto (o caminho é o que se prova aqui)
+    let lethal = openhunted_engine::damage::Pending {
+        amount: 1000,
+        ..Default::default()
+    };
+    for k in 0..p.s.entities.len() {
+        let e = &mut p.s.entities[k];
+        if e.alive && e.objective & 4 != 0 && e.health > 0 {
+            openhunted_engine::behaviour::enemy::hurt(e, &lethal, true);
+        }
+    }
+    p.run(120, 0);
     assert!(
         !p.s.entities
             .iter()

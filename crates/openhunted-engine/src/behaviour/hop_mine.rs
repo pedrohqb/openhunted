@@ -147,7 +147,13 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         return;
     };
     let c = enemy::center(&me);
-    if c.0 < 0 || c.1 < 0 || c.0 >= ctx.level.0 || c.1 >= ctx.level.1 {
+    // fora da fase pela posição `+0x14c/+0x150`, ou sem célula nela: destruída sem explodir
+    // (`0x41beee`, `0x41bf5d`)
+    let outside = e.x < 0 || e.y < 0 || e.x >= ctx.level.0 || e.y >= ctx.level.1;
+    let no_cell = ctx
+        .grid
+        .is_some_and(|g| g.cell((e.x / 128, e.y / 128, e.layer)).is_none());
+    if outside || no_cell {
         e.alive = false;
         return;
     }
@@ -165,7 +171,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     }
     if e.health <= 0 {
         if touched {
-            out.jake_damage.add(&Pending {
+            out.jake_damage.assign(&Pending {
                 amount: DIRECT,
                 ..Default::default()
             });
@@ -231,6 +237,31 @@ mod tests {
         }];
         e.behaviour = Behaviour::HopMine(HopMineState::default());
         e
+    }
+
+    /// `0x41bed9`: fora da fase pela posição (não pelo centro) ou sem célula → destruída.
+    #[test]
+    fn leaves_by_position_or_missing_cell() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let mut c = ctx(&j, &w, &on);
+        c.level = (1280, 1280);
+        let mut m = hopper(-1, 500);
+        tick(&mut m, &mut c, &mut Out::default());
+        assert!(!m.alive, "x −1 com o centro dentro: sai");
+        let mut grid = crate::ai::CellGrid::empty((10, 10, 1));
+        grid.get_mut((2, 3, 0)).unwrap().present = true;
+        c.grid = Some(&grid);
+        let mut inside = hopper(300, 400);
+        let mut out = Out::default();
+        tick(&mut inside, &mut c, &mut out);
+        assert!(inside.alive, "célula (2, 3) existe");
+        let mut gone = hopper(700, 400);
+        tick(&mut gone, &mut c, &mut out);
+        assert!(
+            !gone.alive && out.blasts.is_empty(),
+            "sem célula: some sem explodir"
+        );
     }
 
     fn st(e: &Entity) -> &HopMineState {

@@ -5,6 +5,7 @@ Endereços e deslocamentos documentados em docs/re/ (personagem.md, logica-fase.
 armas.md, dano-vida.md, minas.md).
 """
 
+import os
 import struct
 
 LISTA = 0x488E7C       # cabeça da lista de objetos (encadeada por +0x1c, ordenada por +0x1b4)
@@ -22,6 +23,15 @@ CAMPOS = {
     "q": (0x184, "i"), "rot": (0x1EC, "i"), "esp": (0x194, "i"),
     "vida": (0x258, "i"), "arm": (0x25C, "i"),
 }
+# campos extras pedidos pelo ambiente, para auditar estado interno de um tipo:
+# ORACULO_CAMPOS="qa=0x190:i,ori=0x278:i" (formato struct; padrão "i"); só para os tipos de
+# ORACULO_TIPOS="8,10" (vazio: todos)
+EXTRAS = {}
+for _c in filter(None, os.environ.get("ORACULO_CAMPOS", "").split(",")):
+    _n, _, _r = _c.partition("=")
+    _o, _, _f = _r.partition(":")
+    EXTRAS[_n] = (int(_o, 0), _f or "i")
+EXTRAS_TIPOS = {int(t) for t in filter(None, os.environ.get("ORACULO_TIPOS", "").split(","))}
 # só para jogadores (+0x19c ≠ 0)
 CAMPOS_JOGADOR = {
     "arma": (0x254, "i"), "veneno": (0x270, "i"), "lado": (0x288, "i"),
@@ -76,6 +86,8 @@ def achar_jogador(mem):
 def ler(mem, o):
     b = mem.read(o, TAM_OBJ)
     d = {k: _campo(b, ofs, f) for k, (ofs, f) in CAMPOS.items()}
+    if EXTRAS and (not EXTRAS_TIPOS or d["tipo"] in EXTRAS_TIPOS):
+        d.update({k: _campo(b, ofs, f) for k, (ofs, f) in EXTRAS.items()})
     if _campo(b, 0x19C, "i") and d["tipo"] in (1, 2):
         d["jogador"] = _campo(b, 0x19C, "i")
         d.update({k: _campo(b, ofs, f) for k, (ofs, f) in CAMPOS_JOGADOR.items()})

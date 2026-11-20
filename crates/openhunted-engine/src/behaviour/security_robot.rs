@@ -179,8 +179,18 @@ pub struct SecurityRobotState {
     pub burst: i32,
     /// Posições dos canhões A e B (`+0x27c/+0x27e`).
     pub cannons: (usize, usize),
-    /// Rumo da patrulha.
+    /// Rumo da patrulha (`+0x26c/+0x26d`).
     pub heading: (i32, i32),
+    /// Célula da última virada da patrulha (`+0x268`) e contador de viradas (`+0x26e`).
+    pub last_cell: i32,
+    pub turns: i8,
+    /// Contato com o cenário no último passo (`+0x224`).
+    pub contact: bool,
+    /// Camada nova pedida pela perseguição (zonas PR, `0x41d2e6`).
+    pub new_layer: Option<i32>,
+    /// Já passou pela primeira física: nela a gravidade (2 px) age antes de a atualização
+    /// pedir a compensação (`0x404bc7`) — oráculo: o robô da fase em y 317 aparece em 319.
+    pub settled: bool,
     /// Velocidade da queda (1/8 px).
     pub fall: (i32, i32),
     /// Destroço no chão.
@@ -206,6 +216,11 @@ impl SecurityRobotState {
             burst: 0,
             cannons: (2, 2),
             heading: (0, 0),
+            last_cell: 0,
+            turns: 0,
+            contact: false,
+            new_layer: None,
+            settled: false,
             fall: (0, 0),
             dead: false,
             wound: Wound::default(),
@@ -223,43 +238,28 @@ impl SecurityRobotState {
         self.last_seen = None;
     }
 
-    /// Gira para `want` (`0x41d9c8`): devolve `true` já alinhado (fica de lado).
+    /// Gira para `want` (`0x41d9c8`): devolve `true` se já está alinhado (sem mexer na
+    /// orientação: de lado continua de lado, girado continua girado). De lado (−1) conta como
+    /// 8 ou 24 conforme o espelho; o giro vai pelo lado mais curto (empate: `rand & 1`).
     fn turn_to(&mut self, want: i32, ctx: &mut Ctx) -> bool {
-        if self.orient < 0 {
-            self.orient = if self.mirrored { 24 } else { 8 };
+        if self.orient == DYING {
+            return false;
         }
-        if self.orient == want {
-            self.orient = SIDEWAYS;
+        let cur = match self.orient {
+            SIDEWAYS if self.mirrored => 24,
+            SIDEWAYS => 8,
+            r => r,
+        };
+        if cur == want {
             return true;
         }
-        let diff = (want - self.orient).rem_euclid(32);
-        let step = self.variant().turn;
-        let up = match diff.cmp(&16) {
-            std::cmp::Ordering::Less => true,
-            std::cmp::Ordering::Greater => false,
-            std::cmp::Ordering::Equal => ctx.rng.below(2) == 0,
-        };
-        self.orient = if up {
-            self.orient + step.min(diff)
-        } else {
-            self.orient - step.min(32 - diff)
-        }
-        .rem_euclid(32);
+        let diff = (want - cur).rem_euclid(32);
+        let up = diff < 16 || (diff == 16 && ctx.rng.next_u16() & 1 != 0);
+        let step = self.variant().turn * if up { 1 } else { -1 };
+        self.orient = (cur + step).rem_euclid(32);
         self.mirrored = self.orient > 16;
         false
     }
-}
-
-/// O passo `(dx, dy)` em 1/8 px é possível contra as células.
-fn can_move(e: &Entity, ctx: &Ctx, dx: i32, dy: i32) -> bool {
-    let Some(boxr) = e.boxes.first().copied() else {
-        return false;
-    };
-    let mut probe = Body::new(e.x, e.y, boxr);
-    probe.vx = dx;
-    probe.vy = dy;
-    step(&mut probe, ctx.cells_for(e.layer), false);
-    (probe.x - e.x, probe.y - e.y) == (dx >> 3, dy >> 3)
 }
 
 fn hidden(ctx: &Ctx) -> bool {
@@ -279,103 +279,227 @@ fn acquire(e: &Entity, me: Rect, ctx: &Ctx) -> bool {
         && enemy::line_of_sight(ctx, c, jc, &[me, j])
 }
 
+/// `célula+0x04` da célula em (`x`, `y`) px na camada (0 sem célula ou sem grade).
+fn cell_bits(ctx: &Ctx, x: i32, y: i32, layer: i32) -> i32 {
+    ctx.grid
+        .and_then(|g| g.cell((x / 128, y / 128, layer)))
+        .map_or(0, |c| c.bits)
+}
+
+/// OU dos tipos das zonas PR da camada sob a caixa `b` (`0x4075af`).
+fn zones_under(ctx: &Ctx, b: &Rect, layer: i32) -> u16 {
+    ctx.zones
+        .iter()
+        .filter(|z| z.layer == layer && z.rect.overlaps(b))
+        .fold(0, |acc, z| acc | z.kind)
+}
+
 /// Perseguição (`0x41d08c`): velocidade pedida em 1/8 px.
 fn chase(e: &Entity, me: Rect, st: &mut SecurityRobotState, ctx: &mut Ctx) -> (i32, i32) {
     let c = enemy::center(&me);
-    let jake = enemy::jake_target(ctx, e.layer);
-    let Some(p) = st.last_seen.or(jake.map(|j| enemy::center(&j))) else {
+    let Some(j) = ctx.jake.filter(|j| j.is_active()) else {
         return (0, 0);
     };
-    let skip: Vec<Rect> = std::iter::once(me).chain(jake).collect();
+    let jb = j.body.bounds();
+    let p = st.last_seen.unwrap_or(enemy::center(&jb));
+    let skip: Vec<Rect> = std::iter::once(me)
+        .chain(enemy::jake_target(ctx, e.layer))
+        .collect();
     if !enemy::line_of_sight_on(ctx, e.layer, c, p, &skip) {
         st.forget();
         return (0, 0);
     }
-    let want = if p.0 > c.0 { 24 } else { 8 };
+    let want = if c.0 < p.0 { 24 } else { 8 };
     if !st.turn_to(want, ctx) {
+        return (0, 0);
+    }
+    st.orient = SIDEWAYS;
+    if st.contact {
         return (0, 0);
     }
     let v = *st.variant();
     let s = 8 * v.chase + 4;
-    let (dx, dy) = (p.0 - c.0, p.1 - c.1);
-    let mut adx = dx.abs();
+    let toward = if c.0 > p.0 { -s } else { s };
+    let mut adx = (c.0 - p.0).abs();
     let mut vel = (0, 0);
-    if p.1.div_euclid(128) != c.1.div_euclid(128) {
-        if dy > 0 && can_move(e, ctx, 0, s) {
-            vel.1 = s;
-        } else if dy < 0 && can_move(e, ctx, 0, -s) {
-            vel.1 = -s;
+    // outra linha de células (pelo `+0x150` dos dois): sobe ou desce se a célula deixa
+    if e.y / 128 != j.body.y / 128 {
+        let bits = cell_bits(ctx, c.0, e.y, e.layer);
+        let present = ctx
+            .grid
+            .is_none_or(|g| g.cell((c.0 / 128, e.y / 128, e.layer)).is_some());
+        if present && bits & crate::ai::path::bits::CLOSED_BELOW == 0 && c.1 < p.1 {
+            vel.1 += s;
+        }
+        if present && bits & crate::ai::path::bits::CLOSED_ABOVE == 0 && c.1 > p.1 {
+            vel.1 -= s;
         }
         adx += 64;
     }
     if st.last_seen.is_some() {
-        if dx.abs() > s >> 3 {
-            vel.0 = dx.signum() * s;
-        } else if vel.1 == 0 {
-            // chegou à última posição vista: não troca de camada (spec M7a)
+        if adx >= s / 2 {
+            vel.0 += toward;
+            return vel;
+        }
+        // chegou à última posição vista: troca de camada pelas zonas PR
+        let z = zones_under(ctx, &me, e.layer);
+        let layers = ctx.grid.map_or(i32::MAX, |g| g.size.2);
+        let jl = j.layer();
+        if z & crate::jake::zone::LAYER_UP != 0 && e.layer != 0 && jl < e.layer {
+            st.new_layer = Some(e.layer - 1);
+        } else if z & crate::jake::zone::LAYER_DOWN != 0 && e.layer < layers - 1 && jl > e.layer {
+            st.new_layer = Some(e.layer + 1);
+            return (0, 0);
+        } else {
             st.forget();
         }
-    } else if adx > v.max_dx {
-        vel.0 = dx.signum() * s;
+        return vel;
+    }
+    if adx > v.max_dx {
+        vel.0 += toward;
     } else if adx < v.min_dx {
-        vel.0 = -dx.signum() * s;
+        vel.0 -= toward;
     }
     vel
 }
 
-/// Rumo → orientação: direita 24, esquerda 8, baixo 16, cima 0.
-fn orient_of(h: (i32, i32)) -> i32 {
-    match h {
-        (1, _) => 24,
-        (-1, _) => 8,
-        (_, 1) => 16,
-        _ => 0,
-    }
-}
-
-/// Patrulha sem alvo (`0x41d426`), simplificada (spec M7a).
+/// Patrulha sem alvo (`0x41d426`): anda num eixo por vez; ao passar o centro de uma célula
+/// nova, vira se o lado à frente está fechado ou se a célula se abre para o outro eixo
+/// (bits de `célula+0x04`), na beira da fase, por sorteio/contato ou pela coleira dos
+/// gatilhos; só anda alinhado (girado, sem flutuar).
 fn patrol(e: &Entity, st: &mut SecurityRobotState, ctx: &mut Ctx) -> (i32, i32) {
-    // gatilho de código 0 com alvo existente: parado neste tique
-    let parked = e
-        .triggers
-        .iter()
-        .any(|&(id, code)| id != 0 && code == Some(0) && (ctx.on)(id).is_some());
-    if parked {
-        st.orient = SIDEWAYS;
-        return (0, 0);
-    }
+    use crate::ai::path::bits::{CLOSED_ABOVE, CLOSED_BELOW, WALL_LEFT, WALL_RIGHT};
     let v = *st.variant();
-    let s = v.patrol * SUB;
-    let change = ctx.rng.below(65536) < (v.change as u32) * 65536 / 100_000;
-    let blocked =
-        st.heading == (0, 0) || !can_move(e, ctx, st.heading.0 * s, st.heading.1 * s) || {
-            let c = e.center();
-            let n = (c.0 + st.heading.0 * 64, c.1 + st.heading.1 * 64);
-            n.0 < 0 || n.1 < 0 || n.0 >= ctx.level.0 || n.1 >= ctx.level.1
-        };
-    if change || blocked {
-        let mut dirs: Vec<(i32, i32)> = Vec::new();
-        if st.mode & 1 != 0 {
-            dirs.extend([(1, 0), (-1, 0)]);
+    let boxr = e.boxes.first().copied().unwrap_or(Rect {
+        x: 0,
+        y: 0,
+        w: 0,
+        h: 0,
+    });
+    let (mut hx, mut hy) = st.heading;
+    let (old_hx, old_hy) = (hx, hy);
+    let mut last = st.last_cell;
+    let w = (128 - boxr.w) / 2;
+    const H: i32 = 32;
+    let (mut px, mut py) = (0, 0);
+    if st.contact || ctx.rng.next_u16() < (v.change as u32 * 65536 / 100_000) {
+        (px, py) = (hx, hy);
+    }
+    // gatilhos: código 0 com o objeto presente → parado; senão coleira de `código` px
+    for &(id, code) in e.triggers.iter().take(4) {
+        let Some(o) = (ctx.at)(id) else { continue };
+        let code = code.unwrap_or(0);
+        if code == 0 {
+            st.orient = SIDEWAYS;
+            return (0, 0);
         }
-        if st.mode & 2 != 0 {
-            dirs.extend([(0, 1), (0, -1)]);
+        let (dx, dy) = (o.0 - e.x - boxr.w / 2, o.1 - e.y - boxr.h / 2);
+        if super::mine::distance((0, 0), (dx, dy)) > code {
+            if px == 0 {
+                px = -dx;
+            }
+            if py == 0 {
+                py = -dy;
+            }
         }
-        let n = dirs.len();
-        let first = ctx.rng.below(n.max(1) as u32) as usize;
-        st.heading = (0..n)
-            .map(|i| dirs[(first + i) % n])
-            .find(|&d| d != st.heading && can_move(e, ctx, d.0 * s, d.1 * s))
-            .unwrap_or((0, 0));
     }
-    if st.heading == (0, 0) || !st.turn_to(orient_of(st.heading), ctx) {
-        return (0, 0);
+    let (gx, gy) = (ctx.level.0 / 128, ctx.level.1 / 128);
+    if !(e.x >= 0 && e.x < gx * 128 && e.y >= 0 && e.y < gy * 128) {
+        (hx, hy) = (-hx, -hy);
     }
-    // alinhado de lado só na horizontal; na vertical fica de frente/costas
-    if st.heading.1 != 0 {
-        st.orient = orient_of(st.heading);
+    let bits = cell_bits(ctx, e.x, e.y, e.layer);
+    let cell = e.layer * gy * gx + (e.y / 128) * gx + e.x / 128;
+    if hx == 0 && hy == 0 {
+        hx = 1;
     }
-    (st.heading.0 * s, st.heading.1 * s)
+    let (mx, my) = (e.x % 128, e.y % 128);
+    let no_pref = px == 0 && py == 0;
+    let mut n = 4;
+    loop {
+        let mut keep = false;
+        if hx > 0 {
+            let turn = px > 0
+                || (st.mode & 1 == 0 && no_pref)
+                || (gx - 1) * 128 + w <= e.x
+                || (mx >= w && bits & WALL_RIGHT != 0)
+                || !(mx < w || bits == 0 || bits & CLOSED_BELOW != 0 || cell == last);
+            if turn {
+                (last, hy, hx) = (cell, hx, 0);
+                st.turns = st.turns.wrapping_add(1);
+                if bits & CLOSED_BELOW != 0 && bits & CLOSED_ABOVE == 0 && st.turns < 4 {
+                    hy = -hy;
+                }
+            } else {
+                keep = true;
+            }
+        } else if hx < 0 {
+            let turn = px < 0
+                || (st.mode & 1 == 0 && no_pref)
+                || e.x <= w
+                || (mx <= w && bits & WALL_LEFT != 0)
+                || !(mx > w || bits == 0 || bits & CLOSED_ABOVE != 0 || cell == last);
+            if turn {
+                (last, hy, hx) = (cell, hx, 0);
+                st.turns = st.turns.wrapping_add(1);
+                if bits & CLOSED_ABOVE != 0 && bits & CLOSED_BELOW == 0 && st.turns < 4 {
+                    hy = -hy;
+                }
+            } else {
+                keep = true;
+            }
+        }
+        if hy > 0 {
+            let turn = py > 0
+                || (st.mode & 2 == 0 && no_pref)
+                || (gy - 1) * 128 + H <= e.y
+                || (my >= H && bits & CLOSED_BELOW != 0)
+                || !(my < H || bits == 0 || bits & WALL_LEFT != 0 || cell == last);
+            if turn {
+                (last, hx, hy) = (cell, -hy, 0);
+                st.turns = st.turns.wrapping_add(1);
+                if bits & WALL_LEFT != 0 && bits & WALL_RIGHT == 0 && st.turns < 4 {
+                    hx = -hx;
+                }
+            } else {
+                keep = true;
+            }
+        } else if hy < 0 {
+            let turn = py < 0
+                || (st.mode & 2 == 0 && no_pref)
+                || e.y <= H
+                || (my <= H && bits & CLOSED_ABOVE != 0)
+                || !(my > H || bits == 0 || bits & WALL_RIGHT != 0 || cell == last);
+            if turn {
+                (last, hx, hy) = (cell, -hy, 0);
+                st.turns = st.turns.wrapping_add(1);
+                if bits & WALL_RIGHT != 0 && bits & WALL_LEFT == 0 && st.turns < 4 {
+                    hx = -hx;
+                }
+            } else {
+                keep = true;
+            }
+        }
+        n -= 1;
+        if keep || n <= 0 {
+            break;
+        }
+    }
+    if st.turns != 0 && (hx, hy) == (old_hx, old_hy) {
+        st.turns -= 1;
+    }
+    let want = match (hx, hy) {
+        (x, _) if x < 0 => 8,
+        (x, _) if x > 0 => 24,
+        (_, y) if y < 0 => 0,
+        _ => 16,
+    };
+    let mut vel = (0, 0);
+    if st.turn_to(want, ctx) {
+        vel = (v.patrol * hx * SUB, v.patrol * hy * SUB);
+    }
+    st.heading = (hx, hy);
+    st.last_cell = last;
+    vel
 }
 
 /// Posição do canhão (0–4) para a altura visada `h` (`0x41ce0d`).
@@ -472,7 +596,7 @@ fn cannons(e: &Entity, st: &mut SecurityRobotState, ctx: &mut Ctx, out: &mut Out
 /// Seno em escala 2^14 da fração `n/period` de volta.
 fn sin_frac(n: i32, period: i32) -> i32 {
     let p = period.max(1);
-    cos_sin14(n.rem_euclid(p) * 65536 / p).1
+    cos_sin14(n.rem_euclid(p) * (65536 / p)).1
 }
 
 pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
@@ -498,15 +622,19 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
             }
             _ => {}
         }
+        // compara o valor de antes do decremento (`0x41c90d`)
+        let before = st.attention;
         st.attention -= 1;
-        if st.attention <= 0 {
+        if before <= 0 {
             st.forget();
         }
     }
     if !st.target && st.orient != DYING && acquire(e, me, ctx) {
         st.target = true;
         st.last_seen = None;
-        st.attention = (20 + ctx.rng.below(20) as i32) * v.attention;
+        // um sorteio escolhe entre os candidatos (`rand % n`), outro a atenção
+        let _ = ctx.rng.next_u16();
+        st.attention = (20 + (ctx.rng.next_u16() % 20) as i32) * v.attention;
     }
     // 5: rajada
     if st.burst < 0 {
@@ -518,7 +646,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     // 6: dano
     let mut vel = (0, 0);
     let w = st.wound.take();
-    if !w.is_empty() && st.orient != DYING {
+    if w.pending.amount != 0 {
         if w.pending.knockdown {
             let (px, py) = w.pending.push;
             let len = super::mine::distance((0, 0), (px, py)).max(1);
@@ -527,7 +655,7 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         // dificuldade (`0x41c712`); dano negativo → 1 (`robo-seguranca.md`, passo 6)
         let amount = ctx.difficulty.hit(w.pending.amount).unwrap_or(0);
         e.health = e.health.min(HEALTH_CAP) - amount;
-        if e.health < 0 {
+        if e.health < 0 && st.orient != DYING {
             st.orient = DYING;
             st.fall = (0, 0);
             st.forget();
@@ -544,14 +672,14 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
         patrol(e, &mut st, ctx)
     };
     vel = (vel.0 + req.0, vel.1 + req.1);
-    if st.orient == SIDEWAYS && st.target && st.last_seen.is_none() {
+    if st.orient == SIDEWAYS && st.target {
         cannons(e, &mut st, ctx, out);
     }
-    // 9: flutuação
-    if st.orient == SIDEWAYS && vel.1 == 0 {
+    // 9: flutuação, só de lado, sem contato e sem velocidade pedida (`0x41cb94`)
+    if st.orient == SIDEWAYS && !st.contact && vel == (0, 0) {
         let n = ctx.tick as i32 + st.phase;
-        let target_y = v.hover_base + v.hover_amp * sin_frac(n, v.hover_period) / 16384;
-        let local = e.y.rem_euclid(128);
+        let target_y = v.hover_base + ((v.hover_amp * sin_frac(n, v.hover_period)) >> 14);
+        let local = e.y % 128;
         let mut vy = (target_y - local).clamp(-64, 64);
         // `local` em px, `vy` em 1/8 px
         if local * SUB + vy < 0 {
@@ -562,9 +690,21 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     let mut body = Body::new(e.x, e.y, e.boxes.first().copied().unwrap_or(me));
     body.vx = vel.0;
     body.vy = vel.1;
+    if !st.settled {
+        body.vy += crate::physics::GRAVITY;
+        st.settled = true;
+    }
     step(&mut body, ctx.cells_for(e.layer), false);
     e.x = body.x;
     e.y = body.y;
+    st.contact = body.hit_wall || body.hit_ceiling || (vel.1 > 0 && body.on_ground);
+    if let Some(l) = st.new_layer.take() {
+        // descendo: centrado na célula (y = 64) e parado (`0x41d346`)
+        if l > e.layer {
+            e.y += 64 - e.y % 128;
+        }
+        e.layer = l;
+    }
     // pulso (`0x41da5a`): com p > 30, o zumbido
     if 32 * sin_frac(ctx.tick as i32 + st.phase, v.pulse) / 16384 > 30 {
         out.events.push(Event::Sound(Cue::at(
@@ -648,9 +788,29 @@ mod tests {
             w: 36,
             h: 28,
         }];
-        e.behaviour =
-            Behaviour::SecurityRobot(Box::new(SecurityRobotState::new(&e.values, variant, 0)));
+        let mut st = SecurityRobotState::new(&e.values, variant, 0);
+        st.settled = true;
+        e.behaviour = Behaviour::SecurityRobot(Box::new(st));
         e
+    }
+
+    /// Oráculo `H_J_001`: na primeira física a gravidade age antes da compensação; o robô da
+    /// fase em y 317 fica em 319 (e não flutua girando).
+    #[test]
+    fn first_physics_drops_two_px() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let empty = crate::World::new(vec![]);
+        let mut c = ctx(&j, &w, &on);
+        c.cells = &empty;
+        c.world = &empty;
+        let mut r = robot(533, 317, 2);
+        if let Behaviour::SecurityRobot(s) = &mut r.behaviour {
+            s.settled = false;
+        }
+        tick(&mut r, &mut c, &mut Out::default());
+        tick(&mut r, &mut c, &mut Out::default());
+        assert_eq!(r.y, 319);
     }
 
     fn st(e: &Entity) -> &SecurityRobotState {
@@ -756,6 +916,117 @@ mod tests {
         assert_eq!(out.blasts.len(), CRASH_BLASTS);
         assert!(out.events.iter().any(|e| e.sound_id() == Some(SOUND_CRASH)));
         assert!(out.events.iter().any(|e| e.sound_id() == Some(3100)));
+    }
+
+    /// Oráculo `H_J_001` (robô 42, variante 2, sem alvo): parte de −1 (8), gira 2 por tique até
+    /// 24 e anda 2 px/tique **girado** (rótulo 2, quadro 8 espelhado) e sem flutuar: y fixo.
+    #[test]
+    fn patrol_moves_turned_and_level() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let empty = crate::World::new(vec![]);
+        let mut c = ctx(&j, &w, &on);
+        c.cells = &empty;
+        c.world = &empty;
+        let mut r = robot(100, 300, 2);
+        let mut ys = vec![];
+        for t in 0..30 {
+            c.tick = t;
+            tick(&mut r, &mut c, &mut Out::default());
+            ys.push(r.y);
+        }
+        assert!(
+            st(&r).orient == 24 || st(&r).orient == 8,
+            "{}",
+            st(&r).orient
+        );
+        assert!(ys.iter().all(|&y| y == 300), "sem flutuar: {ys:?}");
+        assert_ne!(r.x, 100, "anda");
+    }
+
+    /// Na beira da fase (`(gx − 1)·128 + (128 − largura)/2`) vira para o outro eixo: com o modo
+    /// 3, desce (`0x41d651`); com o modo 1 (só em x), volta.
+    #[test]
+    fn patrol_turns_at_the_level_edge() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let empty = crate::World::new(vec![]);
+        let mut c = ctx(&j, &w, &on);
+        c.cells = &empty;
+        c.world = &empty;
+        c.level = (512, 1024);
+        let mut r = robot(400, 300, 3);
+        let start = |r: &mut Entity, mode: i32| {
+            if let Behaviour::SecurityRobot(s) = &mut r.behaviour {
+                s.heading = (1, 0);
+                s.orient = 24;
+                s.mirrored = true;
+                s.mode = mode;
+            }
+        };
+        start(&mut r, 3);
+        for t in 0..40 {
+            c.tick = t;
+            tick(&mut r, &mut c, &mut Out::default());
+        }
+        assert_eq!(st(&r).heading, (0, 1), "desce");
+        assert!((430..434).contains(&r.x), "parou em x {}", r.x);
+        assert!(r.y > 300);
+        let mut r = robot(400, 300, 3);
+        start(&mut r, 1);
+        for t in 0..40 {
+            c.tick = t;
+            tick(&mut r, &mut c, &mut Out::default());
+        }
+        assert_eq!(st(&r).heading, (-1, 0), "só em x: volta");
+        assert!(r.x < 430);
+    }
+
+    /// A atenção compara o valor de antes do decremento: com 1, o alvo ainda vale um tique.
+    #[test]
+    fn attention_runs_out_one_tick_late() {
+        let on = |_: i32| None;
+        let (mut j, w) = ctx_with_jake(250, 0);
+        for _ in 0..10 {
+            j.tick(crate::input::UP, &w);
+        }
+        let mut c = ctx(&j, &w, &on);
+        let mut r = robot(100, 0, 0);
+        if let Behaviour::SecurityRobot(s) = &mut r.behaviour {
+            s.target = true;
+            s.attention = 1;
+        }
+        tick(&mut r, &mut c, &mut Out::default());
+        assert!(st(&r).target, "atenção 1 → 0: ainda com alvo");
+        tick(&mut r, &mut c, &mut Out::default());
+        assert!(!st(&r).target, "0: esquece");
+    }
+
+    /// Perseguição em outra linha de células: desce só se a célula do robô deixa passar
+    /// embaixo (`célula+0x04 & 2`), não pelo teste de passo.
+    #[test]
+    fn chase_climbs_by_the_cell_bits() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(260, 300);
+        let grid = crate::ai::CellGrid::new((10, 10, 1));
+        let mut closed = grid.clone();
+        closed.get_mut((0, 1, 0)).unwrap().bits = crate::ai::path::bits::CLOSED_BELOW;
+        let mut c = ctx(&j, &w, &on);
+        let run = |c: &mut Ctx| {
+            let mut r = robot(100, 150, 3);
+            if let Behaviour::SecurityRobot(s) = &mut r.behaviour {
+                s.target = true;
+                s.attention = 1000;
+                s.orient = 24;
+            }
+            let y0 = r.y;
+            tick(&mut r, c, &mut Out::default());
+            r.y - y0
+        };
+        c.grid = Some(&grid);
+        assert_eq!(run(&mut c), 68 >> 3, "aberta embaixo: desce s = 68");
+        c.grid = Some(&closed);
+        assert_eq!(run(&mut c), 0, "fechada embaixo: fica");
     }
 
     #[test]

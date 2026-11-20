@@ -40,7 +40,18 @@ impl Pending {
         *self == Pending::default()
     }
 
-    /// Soma outro dano pendente (como os campos do original, que acumulam no tique).
+    /// Golpe direto da tabela (`0x43d6c5…0x43d8d2`): `+0x24c = dano` **atribui** (dois tiros
+    /// no mesmo tique valem um; oráculo: três balas de sentinela tiram 2×15, dois raios 7),
+    /// a natureza e as reações somam bits, o empurrão é o do último golpe.
+    pub fn assign(&mut self, o: &Pending) {
+        let amount = o.amount;
+        let push = if o.push == (0, 0) { self.push } else { o.push };
+        self.add(o);
+        self.amount = amount;
+        self.push = push;
+    }
+
+    /// Soma outro dano pendente (o dano de área, `0x40d499`, acumula no tique).
     pub fn add(&mut self, o: &Pending) {
         self.amount = self.amount.saturating_add(o.amount);
         self.poison |= o.poison;
@@ -57,6 +68,33 @@ impl Pending {
 }
 
 pub mod table;
+
+#[cfg(test)]
+mod assign_tests {
+    use super::Pending;
+
+    #[test]
+    fn direct_hits_assign_and_area_adds() {
+        let shot = Pending {
+            amount: 15,
+            shove: true,
+            push: (3, 0),
+            ..Default::default()
+        };
+        let mut p = Pending::default();
+        p.assign(&shot);
+        p.assign(&shot);
+        assert_eq!(p.amount, 15, "dois golpes diretos no tique: um");
+        p.add(&Pending {
+            amount: 4,
+            explosion: true,
+            ..Default::default()
+        });
+        assert_eq!(p.amount, 19, "a área soma");
+        assert!(p.shove && p.explosion);
+        assert_eq!(p.push, (3, 0));
+    }
+}
 
 /// Uma linha do `DAMAGE.TBL` (campos em `docs/re/dano-vida.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

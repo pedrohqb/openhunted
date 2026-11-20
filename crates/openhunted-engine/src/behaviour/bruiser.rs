@@ -294,6 +294,13 @@ fn quake(e: &Entity, j: Option<Rect>, ctx: &mut Ctx, out: &mut Out) {
         let t = 20 + ctx.rng.below(20);
         out.quake = Some(out.quake.unwrap_or(0).max(t));
     }
+    // os personagens da IA (tipos 1/2 vivos e em jogo da lista) também
+    for n in ctx.npcs {
+        if super::mine::distance(e.center(), enemy::center(&n.bounds)) < QUAKE_RANGE {
+            let t = 20 + ctx.rng.below(20);
+            out.npc_quakes.push((n.index, t));
+        }
+    }
 }
 
 /// Fim de cada animação (`0x00417061`).
@@ -351,7 +358,7 @@ fn end_of_animation(
                 let tx = enemy::center(&t).0;
                 if tx >= me.x && tx < me.x + me.w {
                     let side = if tx >= e.center().0 { 1 } else { -1 };
-                    out.jake_damage.add(&Pending {
+                    out.jake_damage.assign(&Pending {
                         amount: SMASH,
                         knockdown: true,
                         push: (SMASH_PUSH.0 * side, SMASH_PUSH.1),
@@ -455,7 +462,9 @@ pub fn tick(e: &mut Entity, ctx: &mut Ctx, out: &mut Out) {
     if st.state == TURN && st.clip.step + 1 == len {
         quake(e, j, ctx, out);
     }
-    if st.clip.advance(len) {
+    // 13 e −2 (olhar em volta) só tocam nos tiques ímpares (`0x41764b`/`0x417677`: `tique & 1`)
+    let plays = !matches!(st.state, LOOK | LOOK_BACK) || ctx.tick % 2 == 1;
+    if plays && st.clip.advance(len) {
         end_of_animation(e, &mut st, j, ctx, out);
     }
     // passos (`0x417a68`): vx pela tabela, vy = −16
@@ -525,6 +534,31 @@ mod tests {
         }
     }
 
+    /// Oráculo `H_J_024` (Bruisers 42–44): acordar (−3) seis tiques, olhar em volta (13) um
+    /// quadro a cada dois tiques, só nos ímpares (q0 no t6, q1 no t7 e t8, … q4 no t13–14), e
+    /// o 12 já no t15.
+    #[test]
+    fn looking_around_plays_on_odd_ticks() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(5000, 0);
+        let mut c = ctx(&j, &w, &on);
+        let mut b = bruiser(100, 47, vec![]);
+        let mut seq = vec![];
+        for t in 0..16 {
+            c.tick = t;
+            tick(&mut b, &mut c, &mut Out::default());
+            let (_, _, len) = enemy::label(&LABELS, st(&b).clip.label);
+            seq.push((st(&b).state, st(&b).clip.offset(len)));
+        }
+        assert_eq!(seq[6], (LOOK, 0), "{seq:?}");
+        assert_eq!(
+            &seq[7..=14].iter().map(|s| s.1).collect::<Vec<_>>(),
+            &[1, 1, 2, 2, 3, 3, 4, 4],
+            "{seq:?}"
+        );
+        assert_eq!(seq[15].0, LOOK2, "{seq:?}");
+    }
+
     #[test]
     fn bruiser_sleeps_until_triggers() {
         let off = |id: i32| (id == 3).then_some(false);
@@ -578,6 +612,35 @@ mod tests {
         assert_eq!(out.blasts.len(), DEATH_BLASTS);
     }
 
+    /// `0x418229` percorre os tipos 1/2 vivos e em jogo (personagens da IA incluídos) a
+    /// < 300 px do centro: `+0x274 = 20 + rand % 20`.
+    #[test]
+    fn quake_reaches_ai_characters() {
+        let on = |_: i32| None;
+        let (j, w) = ctx_with_jake(330, 0);
+        let mut c = ctx(&j, &w, &on);
+        let npc = |index, x| crate::behaviour::Npc {
+            index,
+            kind: 2,
+            origin: (x, 0),
+            bounds: Rect {
+                x: x + 2,
+                y: 3,
+                w: 18,
+                h: 44,
+            },
+            layer: 0,
+        };
+        let npcs = [npc(3, 200), npc(4, 900)];
+        c.npcs = &npcs;
+        let b = bruiser(100, 47, vec![]);
+        let mut out = Out::default();
+        quake(&b, c.jake_bounds(), &mut c, &mut out);
+        assert_eq!(out.npc_quakes.len(), 1);
+        assert_eq!(out.npc_quakes[0].0, 3);
+        assert!((20..40).contains(&out.npc_quakes[0].1));
+    }
+
     #[test]
     fn bruiser_attacks_and_quakes() {
         let on = |_: i32| None;
@@ -608,10 +671,19 @@ mod tests {
         let mut b = bruiser(100, 47, vec![]);
         let mut out = Out::default();
         let mut quaked = false;
+        let jx = 330 + 2 + 9;
         for t in 0..1500 {
             c.tick = t;
+            let n = out.enemy_spawns.len();
             tick(&mut b, &mut c, &mut out);
             quaked |= out.quake.is_some();
+            // cada tiro vai para o lado do Jake (o Bruiser pode tê-lo passado andando)
+            for s in &out.enemy_spawns[n..] {
+                if let Spawn::Shot { vel, .. } = s {
+                    let side = if jx > b.center().0 { 1 } else { -1 };
+                    assert_eq!(vel.0.signum(), side, "t {t}: tiro para o lado do Jake");
+                }
+            }
         }
         let shots = out
             .enemy_spawns
@@ -621,14 +693,6 @@ mod tests {
         assert!(shots > 0, "atira");
         assert!(quaked, "faz tremer");
         assert!(out.events.iter().any(|e| e.sound_id() == Some(SOUND_SHOT)));
-        let Some(Spawn::Shot { vel, .. }) = out
-            .enemy_spawns
-            .iter()
-            .find(|s| matches!(s, Spawn::Shot { .. }))
-        else {
-            panic!()
-        };
-        assert_eq!(vel.0, SHOT_SPEED, "para a direita, onde está o Jake");
     }
 
     #[test]

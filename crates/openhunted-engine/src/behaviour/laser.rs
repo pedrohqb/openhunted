@@ -187,7 +187,7 @@ pub fn tick(e: &mut Entity, ctx: &Ctx, out: &mut Out) {
         p.shove = true;
         p.push = (st.vx.signum() * SHOVE, 0);
         for &k in &hit {
-            out.hurt_player(k, &p);
+            out.hit_player(k, &p);
         }
         out.effects.push((
             Blast {

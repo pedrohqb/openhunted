@@ -102,6 +102,9 @@ pub(super) fn character(
         .with_inventory(crate::jake::Inventory::for_character(&o.points, ch))
         .with_layer(layer)
         .with_boxes(crawl, bar);
+    // `values[i]` vão para `+0x260 + 4·i` (`logica-fase.md`): `values[4]` é o veneno
+    // `+0x270` (o Jake da `D_J_012` começa envenenado; oráculo: vida 99 no tique 0)
+    j.poison = o.values.get(4).copied().unwrap_or(0).max(0);
     if let Some(n) = prof.collapse_brd {
         j = j.with_collapse_box(brd(assets, n, boxr));
     }
@@ -140,6 +143,7 @@ pub(super) fn ai_entity(
         body,
         brain: Brain::new(),
         body_checked: false,
+        quake: 0,
         rng: crate::rng::Rng::new((o.x as u32).wrapping_mul(31).wrapping_add(o.y as u32) ^ 0x4149),
     }));
     Some(e)
@@ -212,6 +216,100 @@ pub(super) fn hit_on_character(shot: &Entity, victim: u32, at: (i32, i32)) -> Op
 }
 
 impl Scene {
+    /// Os personagens da IA vivos e em jogo, como os objetos os veem (`behaviour::Npc`).
+    pub(super) fn npcs(&self) -> Vec<behaviour::Npc> {
+        self.entities
+            .iter()
+            .enumerate()
+            .filter_map(|(index, e)| match &e.behaviour {
+                Behaviour::AiPlayer(a) if e.alive && a.body.is_active() => Some(behaviour::Npc {
+                    index,
+                    kind: e.kind,
+                    origin: (a.body.body.x, a.body.body.y),
+                    bounds: a.body.body.bounds(),
+                    layer: a.body.layer(),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Dano e terremoto que os objetos puseram nos personagens da IA (`Out::npc_hits`,
+    /// `Out::npc_quakes`): o dano vai ao corpo; o terremoto, ao Garathe pelo contador dele
+    /// (o 121) e ao Jake pelo da IA (choque no chão a cada tique, como o do jogador).
+    pub(super) fn apply_npc_out(&mut self, out: &mut behaviour::Out) {
+        for (i, p) in std::mem::take(&mut out.npc_hits) {
+            if let Some(e) = self.entities.get_mut(i).filter(|e| e.alive) {
+                behaviour::enemy::hurt(e, &p, false);
+            }
+        }
+        for (i, t) in std::mem::take(&mut out.npc_quakes) {
+            if let Some(Behaviour::AiPlayer(a)) = self.entities.get_mut(i).map(|e| &mut e.behaviour)
+            {
+                if a.body.character() == Character::Garathe {
+                    a.body.start_quake(t);
+                } else {
+                    a.quake = a.quake.max(t);
+                }
+            }
+        }
+    }
+
+    /// Especial de um personagem da IA (`0x427643`/`0x42c348`, a mesma rotina do jogador):
+    /// os jogadores humanos e os objetos da camada (fora ele) ao alcance. Sem crédito.
+    fn ai_special(&mut self, me: usize, b: crate::jake::SpecialBlast) {
+        use crate::jake::{PlayerHit, SpecialBlast, SpecialEffect};
+        for (k, h) in self.human_targets(b.layer) {
+            let hit = b.player_hit((h.x + h.w / 2, h.y + h.h / 2));
+            let active = k == self.active;
+            let Some(j) = self.player_jake_mut(k) else {
+                continue;
+            };
+            match hit {
+                Some(PlayerHit::Knock(p)) => j.hurt(p),
+                Some(PlayerHit::Quake(t)) if j.character() == Character::Garathe => {
+                    j.start_quake(t)
+                }
+                Some(PlayerHit::Quake(t)) if active => self.quake = self.quake.max(t),
+                _ => {}
+            }
+        }
+        for (k, e) in self.entities.iter_mut().enumerate() {
+            if k == me
+                || !e.alive
+                || e.layer != b.layer
+                || e.flags & 0x80003 != 0x80001
+                || !e.present()
+            {
+                continue;
+            }
+            if let Behaviour::AiPlayer(a) = &mut e.behaviour {
+                let r = a.body.body.bounds();
+                match b.player_hit((r.x + r.w / 2, r.y + r.h / 2)) {
+                    Some(PlayerHit::Knock(p)) => a.body.hurt(p),
+                    Some(PlayerHit::Quake(t)) if a.body.character() == Character::Garathe => {
+                        a.body.start_quake(t)
+                    }
+                    Some(PlayerHit::Quake(t)) => a.quake = a.quake.max(t),
+                    None => {}
+                }
+                continue;
+            }
+            if !b.reaches(e.center()) {
+                continue;
+            }
+            match SpecialBlast::effect(e.kind) {
+                SpecialEffect::Destroy => e.alive = false,
+                SpecialEffect::Knockdown => {}
+                SpecialEffect::Damage => {
+                    let dmg = b.damage(e.center());
+                    let _ = behaviour::enemy::hurt(e, &dmg, false)
+                        || behaviour::interact::hurt(e, &dmg);
+                }
+            }
+        }
+    }
+
     /// Grade de células da IA (bits de passagem, zonas PR, portas).
     pub fn ai_grid(&self) -> &CellGrid {
         &self.ai_grid
@@ -403,6 +501,16 @@ impl Scene {
             };
             ai.brain.think(&me, target, &mut s)
         };
+        // terremoto do Bruiser no Jake da IA: choque sem dano no chão (`apply_quake`)
+        if ai.quake > 0 {
+            ai.quake -= 1;
+            if ai.body.is_active() && ai.body.body.on_ground {
+                ai.body.hurt(crate::damage::Pending {
+                    electric: true,
+                    ..Default::default()
+                });
+            }
+        }
         let env = Env {
             world: &world,
             zones: &self.prop_zones,
@@ -440,6 +548,9 @@ impl Scene {
             });
             let vel = (ai.body.body.vx / SUB, ai.body.body.vy / SUB);
             self.ai_punch(i, r, layer, strike, center, vel);
+        }
+        if let Some(b) = ai.body.special.take() {
+            self.ai_special(i, b);
         }
         // investida do pulo longo: só no jogador humano, uma vez por pulo
         if ai.body.character() == Character::Garathe
@@ -597,5 +708,7 @@ impl Scene {
     }
 }
 
+#[cfg(test)]
+mod npc_tests;
 #[cfg(test)]
 mod tests;

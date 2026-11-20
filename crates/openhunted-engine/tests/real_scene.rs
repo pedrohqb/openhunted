@@ -228,8 +228,6 @@ fn mission_files() -> Vec<String> {
         .collect()
 }
 
-/// Índices dos sólidos das células que `r` intersecta (os objetos móveis, como as minas,
-/// podem encostar no Jake de propósito).
 /// Sólidos do cenário em que o Jake entrou (pelas formas e a regra do original: dividir a
 /// linha da borda, como a caixa de topo no teto, não conta).
 fn overlapped(s: &Scene) -> Vec<usize> {
@@ -251,7 +249,11 @@ fn random_input_never_enters_solids() {
         }
         let mut seed: u32 = 0x1234_5678;
         let mut input = 0;
-        let mut inside = overlapped(&s);
+        let rects = |s: &Scene, v: &[usize]| -> Vec<openhunted_engine::Rect> {
+            v.iter().map(|&i| s.cell_world().solids()[i]).collect()
+        };
+        let mut inside = rects(&s, &overlapped(&s));
+        let mut before = s.cell_world().solids().to_vec();
         for t in 0..1000 {
             if t % 7 == 0 {
                 seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
@@ -259,18 +261,23 @@ fn random_input_never_enters_solids() {
                     [0, LEFT, RIGHT, LEFT | JUMP, RIGHT | JUMP, JUMP][(seed >> 16) as usize % 6];
             }
             s.tick(input);
-            let now = overlapped(&s);
+            let now = rects(&s, &overlapped(&s));
             // a chegada do teletransporte (destino sorteado pelo `rand`) pode sobrepor: conta
             // como renascer
             if s.jake.as_ref().unwrap().is_teleporting() {
                 inside = now;
+                before = s.cell_world().solids().to_vec();
                 continue;
             }
+            // um sólido que surge sobre ele (porta de célula que fecha: empurrar na zona 0x20
+            // fecha a aberta, `0x40f040`) não é ele entrando
             assert!(
-                now.iter().all(|i| inside.contains(i)),
+                now.iter()
+                    .all(|r| inside.contains(r) || !before.contains(r)),
                 "{level}: entrou num sólido no tique {t}"
             );
             inside = now;
+            before = s.cell_world().solids().to_vec();
         }
     }
 }
